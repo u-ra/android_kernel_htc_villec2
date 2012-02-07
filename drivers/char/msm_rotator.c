@@ -1188,6 +1188,9 @@ static int msm_rotator_start(unsigned long arg, rot_key_t key)
 	case MDP_XRGB_8888:
 	case MDP_RGBX_8888:
 	case MDP_BGRA_8888:
+		is_rgb = 1;
+		info.dst.format = info.src.format;
+		break;
 	case MDP_Y_CBCR_H2V2:
 	case MDP_Y_CRCB_H2V2:
 	case MDP_Y_CBCR_H2V1:
