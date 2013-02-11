@@ -22,6 +22,7 @@ endif
 endif
 
 ifeq ($(CONFIG_FB_MSM_OVERLAY),y)
+CFLAGS_mdp4_overlay.o := -Wno-enum-compare
 obj-y += mdp4_overlay.o
 obj-y += mdp4_overlay_lcdc.o
 ifeq ($(CONFIG_FB_MSM_MIPI_DSI),y)
