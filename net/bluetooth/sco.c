@@ -195,7 +195,7 @@ static int sco_connect(struct sock *sk)
 	else
 		type = SCO_LINK;
 
-	hcon = hci_connect(hdev, type, dst, BT_SECURITY_LOW, HCI_AT_NO_BONDING);
+	hcon = hci_connect(hdev, type, 0, dst, BT_SECURITY_LOW, HCI_AT_NO_BONDING);
 	if (IS_ERR(hcon)) {
 		err = PTR_ERR(hcon);
 		goto done;
@@ -937,7 +937,7 @@ static int sco_connect_cfm(struct hci_conn *hcon, __u8 status)
 	return 0;
 }
 
-static int sco_disconn_cfm(struct hci_conn *hcon, __u8 reason)
+static int sco_disconn_cfm(struct hci_conn *hcon, __u8 reason, __u8 is_process)
 {
 	BT_DBG("hcon %p reason %d", hcon, reason);
 
