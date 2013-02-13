@@ -2386,10 +2386,6 @@ if ARCH_MSM8X60
 	source "drivers/video/msm_8x60/Kconfig"
 endif
 
-if ARCH_MSM7X30
-	source "drivers/video/msm_7x30/Kconfig"
-endif
-
 if (ARCH_MSM8960 || ARCH_MSM7X27A || ARCH_MSM8X60)
 	source "drivers/video/msm/Kconfig"
 endif
