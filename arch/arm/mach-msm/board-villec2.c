@@ -1280,7 +1280,7 @@ static struct android_usb_platform_data android_usb_pdata = {
 	.functions = usb_functions_all,
 	.update_pid_and_serial_num = usb_diag_update_pid_and_serial_num,
 	.fserial_init_string = "tty:modem,tty:autobot,tty:serial,tty:autobot",
-	.nluns = 1,
+	.nluns = 2,
 	.usb_id_pin_gpio = VILLEC2_GPIO_USB_ID,
 };
 
