@@ -884,8 +884,7 @@ static int msm_rotator_do_rotate(unsigned long arg)
 			break;
 
 	if (s == MAX_SESSIONS) {
-		pr_err(msm_rotator_dev->device,
-			"%s() : Attempt to use invalid session_id %d\n",
+		pr_err("%s() : Attempt to use invalid session_id %d\n",
 			__func__, s);
 		rc = -EINVAL;
 		goto do_rotate_unlock_mutex;
@@ -1193,7 +1192,6 @@ static int msm_rotator_start(unsigned long arg, rot_key_t key)
 	case MDP_XRGB_8888:
 	case MDP_RGBX_8888:
 	case MDP_BGRA_8888:
-		is_rgb = 1;
 		info.dst.format = info.src.format;
 		break;
 	case MDP_Y_CBCR_H2V2:
