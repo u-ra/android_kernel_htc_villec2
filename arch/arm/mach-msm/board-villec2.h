@@ -117,7 +117,7 @@
 
 #ifdef CONFIG_TZCOM
 #define MSM_ION_QSECOM_SIZE   MSM_PMEM_KERNEL_EBI1_SIZE
-#define MSM_ION_HEAP_NUM      10
+#define MSM_ION_HEAP_NUM      9
 #else
 #define MSM_ION_HEAP_NUM      8
 #endif
