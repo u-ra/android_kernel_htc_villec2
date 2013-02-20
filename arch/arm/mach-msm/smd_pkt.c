@@ -643,9 +643,6 @@ int smd_pkt_open(struct inode *inode, struct file *file)
 			*/
 			goto release_pil;
 		} else
-			/* HTC: return 0 -> success */
-			pr_info("[SMD] %s: %s open success return %d\n", __func__,
-					smd_ch_name[smd_pkt_devp->i], r);
 
 		r = wait_event_interruptible_timeout(
 				smd_pkt_devp->ch_opened_wait_queue,
