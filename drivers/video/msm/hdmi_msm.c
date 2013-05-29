@@ -4041,6 +4041,7 @@ static void hdmi_msm_hpd_off(void)
 	hdmi_msm_set_mode(FALSE);
 	HDMI_OUTP_ND(0x030C, 0x00);
 	hdmi_msm_state->hpd_initialized = FALSE;
+	hdmi_msm_powerdown_phy();
 	/*hdmi_msm_state->pd->cec_power(0);*/
 	hdmi_msm_powerdown_phy();
 #ifdef CONFIG_INTERNAL_CHARGING_SUPPORT
