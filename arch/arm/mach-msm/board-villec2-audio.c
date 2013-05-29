@@ -23,12 +23,12 @@
 #include <mach/gpio.h>
 #include <mach/dal.h>
 #include <mach/tpa2051d3.h>
-#include <mach/qdsp6v3/snddev_icodec.h>
-#include <mach/qdsp6v3/snddev_ecodec.h>
-#include <mach/qdsp6v3/snddev_hdmi.h>
-#include <mach/qdsp6v3/audio_dev_ctl.h>
-#include <mach/qdsp6v3/apr_audio.h>
-#include <mach/qdsp6v3/q6asm.h>
+#include <mach/qdsp6v2_1x/snddev_icodec.h>
+#include <mach/qdsp6v2_1x/snddev_ecodec.h>
+#include <mach/qdsp6v2_1x/snddev_hdmi.h>
+#include <mach/qdsp6v2_1x/audio_dev_ctl.h>
+#include <mach/qdsp6v2_1x/apr_audio.h>
+#include <mach/qdsp6v2_1x/q6asm.h>
 #include <mach/htc_acoustic_8x60.h>
 #include <mach/board_htc.h>
 
@@ -383,6 +383,10 @@ static struct dev_ctrl_ops dops = {
 	.support_opendsp = villec2_support_opendsp,
 };
 
+static struct q6asm_ops qops = {
+	.get_q6_effect = villec2_get_q6_effect_mode,
+};
+
 void __init villec2_audio_init(void)
 {
 	int i = 0;
@@ -393,6 +397,7 @@ void __init villec2_audio_init(void)
 	htc_8x60_register_analog_ops(&ops);
 	htc_8x60_register_ecodec_ops(&eops);
 	htc_8x60_register_icodec_ops(&iops);
+	htc_8x60_register_q6asm_ops(&qops);
 	htc_8x60_register_dev_ctrl_ops(&dops);
 	acoustic_register_ops(&acoustic);
 
