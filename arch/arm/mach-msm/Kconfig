@@ -1612,7 +1612,15 @@ config MSM_DALRPC_TEST
 
 config CPU_VOLTAGE_TABLE
 	bool "Enable CPU Voltage Table via sysfs for adjustements"
-	default y 
+	default n
+
+config MSM_MPDEC
+	bool "Enable kernel based mpdecision"
+	depends on MSM_SMP
+	default n
+	help
+	  This enables kernel based multi core control.
+	  (up/down hotplug based on load)
 
 if CPU_FREQ_MSM
 
