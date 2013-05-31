@@ -47,6 +47,7 @@ enum refcnt {
 	INC = 1,
 	IGNORE = 2,
 };
+#define TIMPANI_ARRAY_SIZE  (TIMPANI_A_CDC_COMP_HALT + 1)
 #define MAX_SHADOW_RIGISTERS  TIMPANI_A_CDC_COMP_HALT
 
 static u8 timpani_shadow[TIMPANI_ARRAY_SIZE];
