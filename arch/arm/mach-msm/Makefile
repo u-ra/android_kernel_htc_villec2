@@ -420,6 +420,7 @@ else
 obj-$(CONFIG_MACH_RIDER) += board-rider-mmc.o board-rider-wifi.o
 endif
 
+obj-$(CONFIG_FORCE_FAST_CHARGE) += fastchg.o
 obj-$(CONFIG_MACH_VILLEC2) += board-villec2.o
 obj-$(CONFIG_MACH_VILLEC2) += board-villec2-keypad.o
 obj-$(CONFIG_MACH_VILLEC2) += board-villec2-audio.o
