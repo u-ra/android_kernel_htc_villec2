@@ -1247,7 +1247,7 @@ CONFIG_DUMMY=y
 # CONFIG_BONDING is not set
 # CONFIG_MACVLAN is not set
 # CONFIG_EQUALIZER is not set
-CONFIG_TUN=y
+CONFIG_TUN=m
 # CONFIG_VETH is not set
 # CONFIG_MII is not set
 # CONFIG_PHYLIB is not set
@@ -2291,6 +2291,7 @@ CONFIG_SND_SOC_I2C_AND_SPI=y
 CONFIG_HID_SUPPORT=y
 CONFIG_HID=y
 # CONFIG_HIDRAW is not set
+CONFIG_UHID=y
 
 #
 # USB Input Devices
