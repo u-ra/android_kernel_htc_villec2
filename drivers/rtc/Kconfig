@@ -1169,4 +1169,9 @@ config RTC_DRV_PM8XXX
 	  To compile this driver as a module, choose M here: the
 	  module will be called rtc-pm8xxx.
 
+config SHENDU_FEATURE_POWERUP_ALARM
+	bool "ShenDu OS auto power-up"
+	default y
+	help
+	  ShenDu OS function:auto power-up and power-off alarm.
 endif # RTC_CLASS
