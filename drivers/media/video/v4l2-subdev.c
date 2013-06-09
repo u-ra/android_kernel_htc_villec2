@@ -20,6 +20,7 @@
  * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  */
 
+#include <linux/module.h>
 #include <linux/ioctl.h>
 #include <linux/slab.h>
 #include <linux/types.h>
@@ -34,7 +35,7 @@
 static int subdev_fh_init(struct v4l2_subdev_fh *fh, struct v4l2_subdev *sd)
 {
 #if defined(CONFIG_VIDEO_V4L2_SUBDEV_API)
-	/* Allocate try format and crop in the same memory block */
+	
 	fh->try_fmt = kzalloc((sizeof(*fh->try_fmt) + sizeof(*fh->try_crop))
 			      * sd->entity.num_pads, GFP_KERNEL);
 	if (fh->try_fmt == NULL)

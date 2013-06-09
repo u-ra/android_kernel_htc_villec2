@@ -11,11 +11,6 @@
  *
  */
 
-/*
-**  perftypes.h
-**  DESCRIPTION
-**  ksapi.ko function hooks header file
-*/
 
 #ifndef __PERFTYPES_H__
 #define __PERFTYPES_H__

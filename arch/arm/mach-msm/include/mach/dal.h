@@ -54,8 +54,6 @@ struct dal_chunk_header {
 int daldevice_attach(uint32_t device_id, char *port, int cpu,
 		     void **handle_ptr);
 
-/* The caller must ensure there are no outstanding dalrpc calls on
- * the client before (and while) calling daldevice_detach. */
 int daldevice_detach(void *handle);
 
 uint32_t dalrpc_fcn_0(uint32_t ddi_idx, void *handle, uint32_t s1);
@@ -147,4 +145,4 @@ void dalrpc_dealloc_cb(void *handle,
 
 int dalrpc_event_wait_multiple(int num, void **ev_h, int timeout);
 
-#endif /* __DAL_H__ */
+#endif 

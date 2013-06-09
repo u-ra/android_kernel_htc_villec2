@@ -18,9 +18,6 @@
 
 #include <linux/input.h>
 
-/* The dimensions for the virtual key are for the other axis, i.e. if
- * virtual keys are in the Y dimension then min/max is the range in the X
- * dimension where that key would be activated */
 struct ts_virt_key {
 	int key;
 	int min;
@@ -48,4 +45,4 @@ struct msm_ts_platform_data {
 	bool				can_wakeup;
 };
 
-#endif /* __ASM_ARCH_MSM_TS_H */
+#endif 

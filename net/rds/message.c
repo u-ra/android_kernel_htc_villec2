@@ -32,6 +32,7 @@
  */
 #include <linux/kernel.h>
 #include <linux/slab.h>
+#include <linux/export.h>
 
 #include "rds.h"
 
@@ -195,9 +196,6 @@ EXPORT_SYMBOL_GPL(rds_message_add_rdma_dest_extension);
 struct rds_message *rds_message_alloc(unsigned int extra_len, gfp_t gfp)
 {
 	struct rds_message *rm;
-
-	if (extra_len > KMALLOC_MAX_SIZE - sizeof(struct rds_message))
-		return NULL;
 
 	rm = kzalloc(sizeof(struct rds_message) + extra_len, gfp);
 	if (!rm)

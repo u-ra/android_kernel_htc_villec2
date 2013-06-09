@@ -11,6 +11,7 @@
  */
 
 #include <media/rc-map.h>
+#include <linux/module.h>
 
 static struct rc_map_table videomate_tv_pvr[] = {
 	{ 0x14, KEY_MUTE },
@@ -65,7 +66,7 @@ static struct rc_map_list videomate_tv_pvr_map = {
 	.map = {
 		.scan    = videomate_tv_pvr,
 		.size    = ARRAY_SIZE(videomate_tv_pvr),
-		.rc_type = RC_TYPE_UNKNOWN,	/* Legacy IR type */
+		.rc_type = RC_TYPE_UNKNOWN,	
 		.name    = RC_MAP_VIDEOMATE_TV_PVR,
 	}
 };

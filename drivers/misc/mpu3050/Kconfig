@@ -88,7 +88,7 @@ endchoice
 choice
     prompt "Compass Type"
     depends on MPU_SENSORS_MPU6000 || MPU_SENSORS_MPU3050
-    default MPU_SENSORS_AK8975
+    default MPU_SENSORS_AK8963
 
 config MPU_SENSORS_COMPASS_NONE
     bool "NONE"
@@ -101,6 +101,12 @@ config MPU_SENSORS_AK8975
     depends on MPU_SENSORS_MPU6000 || MPU_SENSORS_MPU3050
     help
       This enables support for the AKM ak8975 compass
+
+config MPU_SENSORS_AK8963
+    bool "AKM ak8963"
+    depends on MPU_SENSORS_MPU6000 || MPU_SENSORS_MPU3050
+    help
+      This enables support for the AKM ak8963 compass
 
 config MPU_SENSORS_MMC314X
     bool "MEMSIC mmc314x"

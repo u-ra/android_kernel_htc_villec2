@@ -23,6 +23,8 @@
  * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
  */
 
+#define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
+
 #include <linux/module.h>
 #include <linux/device.h>
 #include <linux/err.h>
@@ -39,7 +41,37 @@ MODULE_AUTHOR("Zhang Rui");
 MODULE_DESCRIPTION("Generic thermal management sysfs support");
 MODULE_LICENSE("GPL");
 
-#define PREFIX "Thermal: "
+#ifdef pr_emerg
+#undef pr_emerg
+#endif
+#define pr_emerg(fmt, args...) \
+	printk(KERN_EMERG "[THERMAL] " pr_fmt(fmt), ## args)
+
+#ifdef pr_err
+#undef pr_err
+#endif
+#define pr_err(fmt, args...) \
+	printk(KERN_ERR "[THERMAL] " pr_fmt(fmt), ## args)
+
+#ifdef pr_warning
+#undef pr_warning
+#endif
+#define pr_warning(fmt, args...) \
+	printk(KERN_WARNING "[THERMAL] " pr_fmt(fmt), ## args)
+
+#ifdef pr_info
+#undef pr_info
+#endif
+#define pr_info(fmt, args...) \
+	printk(KERN_INFO "[THERMAL] " pr_fmt(fmt), ## args)
+
+#if defined(DEBUG)
+#ifdef pr_debug
+#undef pr_debug
+#endif
+#define pr_debug(fmt, args...) \
+	printk(KERN_DEBUG "[THERMAL] " pr_fmt(fmt), ## args)
+#endif
 
 struct thermal_cooling_device_instance {
 	int id;
@@ -64,7 +96,7 @@ static int get_idr(struct idr *idr, struct mutex *lock, int *id)
 {
 	int err;
 
-      again:
+again:
 	if (unlikely(idr_pre_get(idr, GFP_KERNEL) == 0))
 		return -ENOMEM;
 
@@ -91,7 +123,6 @@ static void release_idr(struct idr *idr, struct mutex *lock, int id)
 		mutex_unlock(lock);
 }
 
-/* sys I/F for thermal zone */
 
 #define to_thermal_zone(_dev) \
 	container_of(_dev, struct thermal_zone_device, device)
@@ -150,9 +181,9 @@ mode_store(struct device *dev, struct device_attribute *attr,
 	if (!tz->ops->set_mode)
 		return -EPERM;
 
-	if (!strncmp(buf, "enabled", sizeof("enabled")))
+	if (!strncmp(buf, "enabled", sizeof("enabled") - 1))
 		result = tz->ops->set_mode(tz, THERMAL_DEVICE_ENABLED);
-	else if (!strncmp(buf, "disabled", sizeof("disabled")))
+	else if (!strncmp(buf, "disabled", sizeof("disabled") - 1))
 		result = tz->ops->set_mode(tz, THERMAL_DEVICE_DISABLED);
 	else
 		result = -EINVAL;
@@ -286,9 +317,6 @@ passive_store(struct device *dev, struct device_attribute *attr,
 	if (!sscanf(buf, "%d\n", &state))
 		return -EINVAL;
 
-	/* sanity check: values below 1000 millicelcius don't make sense
-	 * and can cause the system to go into a thermal heart attack
-	 */
 	if (state && state < 1000)
 		return -EINVAL;
 
@@ -339,8 +367,7 @@ passive_show(struct device *dev, struct device_attribute *attr,
 static DEVICE_ATTR(type, 0444, type_show, NULL);
 static DEVICE_ATTR(temp, 0444, temp_show, NULL);
 static DEVICE_ATTR(mode, 0644, mode_show, mode_store);
-static DEVICE_ATTR(passive, S_IRUGO | S_IWUSR, passive_show, \
-		   passive_store);
+static DEVICE_ATTR(passive, S_IRUGO | S_IWUSR, passive_show, passive_store);
 
 static struct device_attribute trip_point_attrs[] = {
 	__ATTR(trip_point_0_type, 0644, trip_point_type_show,
@@ -393,23 +420,6 @@ static struct device_attribute trip_point_attrs[] = {
 					trip_point_temp_set),
 };
 
-#define TRIP_POINT_ATTR_ADD(_dev, _index, result)     \
-do {    \
-	result = device_create_file(_dev,	\
-				&trip_point_attrs[_index * 2]);	\
-	if (result)	\
-		break;	\
-	result = device_create_file(_dev,	\
-			&trip_point_attrs[_index * 2 + 1]);	\
-} while (0)
-
-#define TRIP_POINT_ATTR_REMOVE(_dev, _index)	\
-do {	\
-	device_remove_file(_dev, &trip_point_attrs[_index * 2]);	\
-	device_remove_file(_dev, &trip_point_attrs[_index * 2 + 1]);	\
-} while (0)
-
-/* sys I/F for cooling device */
 #define to_cooling_device(_dev)	\
 	container_of(_dev, struct thermal_cooling_device, device)
 
@@ -494,12 +504,31 @@ thermal_cooling_device_trip_point_show(struct device *dev,
 		return sprintf(buf, "%d\n", instance->trip);
 }
 
-/* Device management */
 
 #if defined(CONFIG_THERMAL_HWMON)
 
-/* hwmon sys I/F */
 #include <linux/hwmon.h>
+
+struct thermal_hwmon_device {
+	char type[THERMAL_NAME_LENGTH];
+	struct device *device;
+	int count;
+	struct list_head tz_list;
+	struct list_head node;
+};
+
+struct thermal_hwmon_attr {
+	struct device_attribute attr;
+	char name[16];
+};
+
+struct thermal_hwmon_temp {
+	struct list_head hwmon_node;
+	struct thermal_zone_device *tz;
+	struct thermal_hwmon_attr temp_input;	
+	struct thermal_hwmon_attr temp_crit;	
+};
+
 static LIST_HEAD(thermal_hwmon_list);
 
 static ssize_t
@@ -517,9 +546,10 @@ temp_input_show(struct device *dev, struct device_attribute *attr, char *buf)
 	int ret;
 	struct thermal_hwmon_attr *hwmon_attr
 			= container_of(attr, struct thermal_hwmon_attr, attr);
-	struct thermal_zone_device *tz
-			= container_of(hwmon_attr, struct thermal_zone_device,
+	struct thermal_hwmon_temp *temp
+			= container_of(hwmon_attr, struct thermal_hwmon_temp,
 				       temp_input);
+	struct thermal_zone_device *tz = temp->tz;
 
 	ret = tz->ops->get_temp(tz, &temperature);
 
@@ -535,9 +565,10 @@ temp_crit_show(struct device *dev, struct device_attribute *attr,
 {
 	struct thermal_hwmon_attr *hwmon_attr
 			= container_of(attr, struct thermal_hwmon_attr, attr);
-	struct thermal_zone_device *tz
-			= container_of(hwmon_attr, struct thermal_zone_device,
+	struct thermal_hwmon_temp *temp
+			= container_of(hwmon_attr, struct thermal_hwmon_temp,
 				       temp_crit);
+	struct thermal_zone_device *tz = temp->tz;
 	long temperature;
 	int ret;
 
@@ -549,21 +580,52 @@ temp_crit_show(struct device *dev, struct device_attribute *attr,
 }
 
 
-static int
-thermal_add_hwmon_sysfs(struct thermal_zone_device *tz)
+static struct thermal_hwmon_device *
+thermal_hwmon_lookup_by_type(const struct thermal_zone_device *tz)
 {
 	struct thermal_hwmon_device *hwmon;
-	int new_hwmon_device = 1;
-	int result;
 
 	mutex_lock(&thermal_list_lock);
 	list_for_each_entry(hwmon, &thermal_hwmon_list, node)
 		if (!strcmp(hwmon->type, tz->type)) {
-			new_hwmon_device = 0;
 			mutex_unlock(&thermal_list_lock);
-			goto register_sys_interface;
+			return hwmon;
 		}
 	mutex_unlock(&thermal_list_lock);
+
+	return NULL;
+}
+
+static struct thermal_hwmon_temp *
+thermal_hwmon_lookup_temp(const struct thermal_hwmon_device *hwmon,
+			  const struct thermal_zone_device *tz)
+{
+	struct thermal_hwmon_temp *temp;
+
+	mutex_lock(&thermal_list_lock);
+	list_for_each_entry(temp, &hwmon->tz_list, hwmon_node)
+		if (temp->tz == tz) {
+			mutex_unlock(&thermal_list_lock);
+			return temp;
+		}
+	mutex_unlock(&thermal_list_lock);
+
+	return NULL;
+}
+
+static int
+thermal_add_hwmon_sysfs(struct thermal_zone_device *tz)
+{
+	struct thermal_hwmon_device *hwmon;
+	struct thermal_hwmon_temp *temp;
+	int new_hwmon_device = 1;
+	int result;
+
+	hwmon = thermal_hwmon_lookup_by_type(tz);
+	if (hwmon) {
+		new_hwmon_device = 0;
+		goto register_sys_interface;
+	}
 
 	hwmon = kzalloc(sizeof(struct thermal_hwmon_device), GFP_KERNEL);
 	if (!hwmon)
@@ -582,30 +644,36 @@ thermal_add_hwmon_sysfs(struct thermal_zone_device *tz)
 		goto free_mem;
 
  register_sys_interface:
-	tz->hwmon = hwmon;
+	temp = kzalloc(sizeof(struct thermal_hwmon_temp), GFP_KERNEL);
+	if (!temp) {
+		result = -ENOMEM;
+		goto unregister_name;
+	}
+
+	temp->tz = tz;
 	hwmon->count++;
 
-	snprintf(tz->temp_input.name, THERMAL_NAME_LENGTH,
+	snprintf(temp->temp_input.name, THERMAL_NAME_LENGTH,
 		 "temp%d_input", hwmon->count);
-	tz->temp_input.attr.attr.name = tz->temp_input.name;
-	tz->temp_input.attr.attr.mode = 0444;
-	tz->temp_input.attr.show = temp_input_show;
-	sysfs_attr_init(&tz->temp_input.attr.attr);
-	result = device_create_file(hwmon->device, &tz->temp_input.attr);
+	temp->temp_input.attr.attr.name = temp->temp_input.name;
+	temp->temp_input.attr.attr.mode = 0444;
+	temp->temp_input.attr.show = temp_input_show;
+	sysfs_attr_init(&temp->temp_input.attr.attr);
+	result = device_create_file(hwmon->device, &temp->temp_input.attr);
 	if (result)
-		goto unregister_name;
+		goto free_temp_mem;
 
 	if (tz->ops->get_crit_temp) {
 		unsigned long temperature;
 		if (!tz->ops->get_crit_temp(tz, &temperature)) {
-			snprintf(tz->temp_crit.name, THERMAL_NAME_LENGTH,
+			snprintf(temp->temp_crit.name, THERMAL_NAME_LENGTH,
 				"temp%d_crit", hwmon->count);
-			tz->temp_crit.attr.attr.name = tz->temp_crit.name;
-			tz->temp_crit.attr.attr.mode = 0444;
-			tz->temp_crit.attr.show = temp_crit_show;
-			sysfs_attr_init(&tz->temp_crit.attr.attr);
+			temp->temp_crit.attr.attr.name = temp->temp_crit.name;
+			temp->temp_crit.attr.attr.mode = 0444;
+			temp->temp_crit.attr.show = temp_crit_show;
+			sysfs_attr_init(&temp->temp_crit.attr.attr);
 			result = device_create_file(hwmon->device,
-						    &tz->temp_crit.attr);
+						    &temp->temp_crit.attr);
 			if (result)
 				goto unregister_input;
 		}
@@ -614,13 +682,15 @@ thermal_add_hwmon_sysfs(struct thermal_zone_device *tz)
 	mutex_lock(&thermal_list_lock);
 	if (new_hwmon_device)
 		list_add_tail(&hwmon->node, &thermal_hwmon_list);
-	list_add_tail(&tz->hwmon_node, &hwmon->tz_list);
+	list_add_tail(&temp->hwmon_node, &hwmon->tz_list);
 	mutex_unlock(&thermal_list_lock);
 
 	return 0;
 
  unregister_input:
-	device_remove_file(hwmon->device, &tz->temp_input.attr);
+	device_remove_file(hwmon->device, &temp->temp_input.attr);
+ free_temp_mem:
+	kfree(temp);
  unregister_name:
 	if (new_hwmon_device) {
 		device_remove_file(hwmon->device, &dev_attr_name);
@@ -636,15 +706,30 @@ thermal_add_hwmon_sysfs(struct thermal_zone_device *tz)
 static void
 thermal_remove_hwmon_sysfs(struct thermal_zone_device *tz)
 {
-	struct thermal_hwmon_device *hwmon = tz->hwmon;
+	struct thermal_hwmon_device *hwmon;
+	struct thermal_hwmon_temp *temp;
 
-	tz->hwmon = NULL;
-	device_remove_file(hwmon->device, &tz->temp_input.attr);
+	hwmon = thermal_hwmon_lookup_by_type(tz);
+	if (unlikely(!hwmon)) {
+		
+		dev_dbg(&tz->device, "hwmon device lookup failed!\n");
+		return;
+	}
+
+	temp = thermal_hwmon_lookup_temp(hwmon, tz);
+	if (unlikely(!temp)) {
+		
+		dev_dbg(&tz->device, "temperature input lookup failed!\n");
+		return;
+	}
+
+	device_remove_file(hwmon->device, &temp->temp_input.attr);
 	if (tz->ops->get_crit_temp)
-		device_remove_file(hwmon->device, &tz->temp_crit.attr);
+		device_remove_file(hwmon->device, &temp->temp_crit.attr);
 
 	mutex_lock(&thermal_list_lock);
-	list_del(&tz->hwmon_node);
+	list_del(&temp->hwmon_node);
+	kfree(temp);
 	if (!list_empty(&hwmon->tz_list)) {
 		mutex_unlock(&thermal_list_lock);
 		return;
@@ -678,10 +763,10 @@ static void thermal_zone_device_set_polling(struct thermal_zone_device *tz,
 		return;
 
 	if (delay > 1000)
-		schedule_delayed_work(&(tz->poll_queue),
+		queue_delayed_work(system_freezable_wq, &(tz->poll_queue),
 				      round_jiffies(msecs_to_jiffies(delay)));
 	else
-		schedule_delayed_work(&(tz->poll_queue),
+		queue_delayed_work(system_freezable_wq, &(tz->poll_queue),
 				      msecs_to_jiffies(delay));
 }
 
@@ -693,20 +778,13 @@ static void thermal_zone_device_passive(struct thermal_zone_device *tz,
 	struct thermal_cooling_device *cdev;
 	long state, max_state;
 
-	/*
-	 * Above Trip?
-	 * -----------
-	 * Calculate the thermal trend (using the passive cooling equation)
-	 * and modify the performance limit for all passive cooling devices
-	 * accordingly.  Note that we assume symmetry.
-	 */
 	if (temp >= trip_temp) {
 		tz->passive = true;
 
 		trend = (tz->tc1 * (temp - tz->last_temperature)) +
 			(tz->tc2 * (temp - trip_temp));
 
-		/* Heating up? */
+		
 		if (trend > 0) {
 			list_for_each_entry(instance, &tz->cooling_devices,
 					    node) {
@@ -718,7 +796,7 @@ static void thermal_zone_device_passive(struct thermal_zone_device *tz,
 				if (state++ < max_state)
 					cdev->ops->set_cur_state(cdev, state);
 			}
-		} else if (trend < 0) { /* Cooling off? */
+		} else if (trend < 0) { 
 			list_for_each_entry(instance, &tz->cooling_devices,
 					    node) {
 				if (instance->trip != trip)
@@ -733,13 +811,6 @@ static void thermal_zone_device_passive(struct thermal_zone_device *tz,
 		return;
 	}
 
-	/*
-	 * Below Trip?
-	 * -----------
-	 * Implement passive cooling hysteresis to slowly increase performance
-	 * and avoid thrashing around the passive trip point.  Note that we
-	 * assume symmetry.
-	 */
 	list_for_each_entry(instance, &tz->cooling_devices, node) {
 		if (instance->trip != trip)
 			continue;
@@ -761,15 +832,6 @@ static void thermal_zone_device_check(struct work_struct *work)
 	thermal_zone_device_update(tz);
 }
 
-/**
- * thermal_zone_bind_cooling_device - bind a cooling device to a thermal zone
- * @tz:		thermal zone device
- * @trip:	indicates which trip point the cooling devices is
- *		associated with in this thermal zone.
- * @cdev:	thermal cooling device
- *
- * This function is usually called in the thermal zone device .bind callback.
- */
 int thermal_zone_bind_cooling_device(struct thermal_zone_device *tz,
 				     int trip,
 				     struct thermal_cooling_device *cdev)
@@ -835,26 +897,16 @@ int thermal_zone_bind_cooling_device(struct thermal_zone_device *tz,
 		return 0;
 
 	device_remove_file(&tz->device, &dev->attr);
-      remove_symbol_link:
+remove_symbol_link:
 	sysfs_remove_link(&tz->device.kobj, dev->name);
-      release_idr:
+release_idr:
 	release_idr(&tz->idr, &tz->lock, dev->id);
-      free_mem:
+free_mem:
 	kfree(dev);
 	return result;
 }
-
 EXPORT_SYMBOL(thermal_zone_bind_cooling_device);
 
-/**
- * thermal_zone_unbind_cooling_device - unbind a cooling device from a thermal zone
- * @tz:		thermal zone device
- * @trip:	indicates which trip point the cooling devices is
- *		associated with in this thermal zone.
- * @cdev:	thermal cooling device
- *
- * This function is usually called in the thermal zone device .unbind callback.
- */
 int thermal_zone_unbind_cooling_device(struct thermal_zone_device *tz,
 				       int trip,
 				       struct thermal_cooling_device *cdev)
@@ -873,14 +925,13 @@ int thermal_zone_unbind_cooling_device(struct thermal_zone_device *tz,
 
 	return -ENODEV;
 
-      unbind:
+unbind:
 	device_remove_file(&tz->device, &pos->attr);
 	sysfs_remove_link(&tz->device.kobj, pos->name);
 	release_idr(&tz->idr, &tz->lock, pos->id);
 	kfree(pos);
 	return 0;
 }
-
 EXPORT_SYMBOL(thermal_zone_unbind_cooling_device);
 
 static void thermal_release(struct device *dev)
@@ -888,7 +939,8 @@ static void thermal_release(struct device *dev)
 	struct thermal_zone_device *tz;
 	struct thermal_cooling_device *cdev;
 
-	if (!strncmp(dev_name(dev), "thermal_zone", sizeof "thermal_zone" - 1)) {
+	if (!strncmp(dev_name(dev), "thermal_zone",
+		     sizeof("thermal_zone") - 1)) {
 		tz = to_thermal_zone(dev);
 		kfree(tz);
 	} else {
@@ -902,20 +954,15 @@ static struct class thermal_class = {
 	.dev_release = thermal_release,
 };
 
-/**
- * thermal_cooling_device_register - register a new thermal cooling device
- * @type:	the thermal cooling device type.
- * @devdata:	device private data.
- * @ops:		standard thermal cooling devices callbacks.
- */
-struct thermal_cooling_device *thermal_cooling_device_register(
-     char *type, void *devdata, const struct thermal_cooling_device_ops *ops)
+struct thermal_cooling_device *
+thermal_cooling_device_register(char *type, void *devdata,
+				const struct thermal_cooling_device_ops *ops)
 {
 	struct thermal_cooling_device *cdev;
 	struct thermal_zone_device *pos;
 	int result;
 
-	if ((type == NULL) || (strlen(type) >= THERMAL_NAME_LENGTH))
+	if (strlen(type) >= THERMAL_NAME_LENGTH)
 		return ERR_PTR(-EINVAL);
 
 	if (!ops || !ops->get_max_state || !ops->get_cur_state ||
@@ -944,7 +991,7 @@ struct thermal_cooling_device *thermal_cooling_device_register(
 		return ERR_PTR(result);
 	}
 
-	/* sys I/F */
+	
 	if (type) {
 		result = device_create_file(&cdev->device, &dev_attr_cdev_type);
 		if (result)
@@ -974,21 +1021,13 @@ struct thermal_cooling_device *thermal_cooling_device_register(
 	if (!result)
 		return cdev;
 
-      unregister:
+unregister:
 	release_idr(&thermal_cdev_idr, &thermal_idr_lock, cdev->id);
 	device_unregister(&cdev->device);
 	return ERR_PTR(result);
 }
-
 EXPORT_SYMBOL(thermal_cooling_device_register);
 
-/**
- * thermal_cooling_device_unregister - removes the registered thermal cooling device
- * @cdev:	the thermal cooling device to remove.
- *
- * thermal_cooling_device_unregister() must be called when the device is no
- * longer needed.
- */
 void thermal_cooling_device_unregister(struct
 				       thermal_cooling_device
 				       *cdev)
@@ -1004,7 +1043,7 @@ void thermal_cooling_device_unregister(struct
 	    if (pos == cdev)
 		break;
 	if (pos != cdev) {
-		/* thermal cooling device not found */
+		
 		mutex_unlock(&thermal_list_lock);
 		return;
 	}
@@ -1024,15 +1063,8 @@ void thermal_cooling_device_unregister(struct
 	device_unregister(&cdev->device);
 	return;
 }
-
 EXPORT_SYMBOL(thermal_cooling_device_unregister);
 
-#define THERMAL_TRIP_CRITICAL_RETRY_MAX_COUNT		10
-#define THERMAL_TRIP_CRITICAL_RETRY_MS				1000
-/**
- * thermal_zone_device_update - force an update of a thermal zone's state
- * @ttz:	the thermal zone to update
- */
 
 void thermal_zone_device_update(struct thermal_zone_device *tz)
 {
@@ -1041,24 +1073,28 @@ void thermal_zone_device_update(struct thermal_zone_device *tz)
 	enum thermal_trip_type trip_type;
 	struct thermal_cooling_device_instance *instance;
 	struct thermal_cooling_device *cdev;
-	int retry_temp_count;
+	int denominator;
 
 	mutex_lock(&tz->lock);
 
+	if (!strcmp(tz->type, "pm8921_tz") || !strcmp(tz->type, "pm8038_tz"))
+		denominator = 1000;
+	else
+		denominator = 1;
+
 	if (tz->ops->get_temp(tz, &temp)) {
-		/* get_temp failed - retry it later */
-		printk(KERN_WARNING PREFIX "failed to read out thermal zone "
-		       "%d\n", tz->id);
+		
+		pr_warn("failed to read out thermal zone %d\n", tz->id);
 		goto leave;
 	}
 
-	printk(KERN_INFO "[THERMAL][%s] Current temperature [%ld]...\n",
-					       tz->type, temp);
+	pr_info("%s: Current temperature (%ld C)\n",tz->device.kobj.name, temp/denominator);
 
-	retry_temp_count = tz->thermal_trip_critical_retry_count;
 	for (count = 0; count < tz->trips; count++) {
 		tz->ops->get_trip_type(tz, count, &trip_type);
 		tz->ops->get_trip_temp(tz, count, &trip_temp);
+
+		pr_info("trip_temp:%ld, type:%d\n", trip_temp/denominator, trip_type);
 
 		switch (trip_type) {
 		case THERMAL_TRIP_CRITICAL:
@@ -1067,18 +1103,14 @@ void thermal_zone_device_update(struct thermal_zone_device *tz)
 					ret = tz->ops->notify(tz, count,
 							      trip_type);
 				if (!ret) {
-					if ((++tz->thermal_trip_critical_retry_count) <= THERMAL_TRIP_CRITICAL_RETRY_MAX_COUNT) {
-						printk(KERN_INFO
-						       "[THERMAL][%s] Critical temperature reached %ld (>= %ld), retrying...(%d/%d)\n",
-						       tz->type, temp, trip_temp, tz->thermal_trip_critical_retry_count,
-						       THERMAL_TRIP_CRITICAL_RETRY_MAX_COUNT);
-					} else {
-						printk(KERN_EMERG
-							       "[THERMAL][%s] Critical temperature reached %ld (>= %ld), shutting down.\n",
-							       tz->type, temp, trip_temp);
-						orderly_poweroff(true);
-					}
-				}
+					pr_info("%s:%s: current temp(%ld) higher or equal max limit temp(%ld)\n",
+						__func__, tz->device.kobj.name, temp/denominator, trip_temp/denominator);
+#if defined(CONFIG_THERMAL_MAX_TEMP_PROTECT)
+					pr_emerg("Critical temperature reached (%ld C), shutting down\n",
+						 temp/denominator);
+					orderly_poweroff(true);
+#endif
+}
 			}
 			break;
 		case THERMAL_TRIP_HOT:
@@ -1101,18 +1133,12 @@ void thermal_zone_device_update(struct thermal_zone_device *tz)
 				if (tz->ops->notify)
 					ret = tz->ops->notify(tz, count,
 								trip_type);
-				if (!ret) {
-					if ((++tz->thermal_trip_critical_retry_count) <= THERMAL_TRIP_CRITICAL_RETRY_MAX_COUNT) {
-						printk(KERN_INFO
-						       "[THERMAL][%s] Critical temperature reached %ld (<= %ld), retrying...(%d/%d)\n",
-						       tz->type, temp, trip_temp, tz->thermal_trip_critical_retry_count,
-						       THERMAL_TRIP_CRITICAL_RETRY_MAX_COUNT);
-					} else {
-						printk(KERN_EMERG
-									"[THERMAL][%s] Critical temperature reached %ld (<= %ld), shutting down.\n",
-									tz->type, temp, trip_temp);
-						orderly_poweroff(true);
-					}
+			if (!ret) {
+#if defined(CONFIG_THERMAL_MIN_TEMP_PROTECT)
+				pr_emerg("Critical temperature reached (%ld C), \
+					shutting down.\n", temp/denominator);
+				orderly_poweroff(true);
+#endif
 				}
 			}
 			break;
@@ -1138,24 +1164,14 @@ void thermal_zone_device_update(struct thermal_zone_device *tz)
 		}
 	}
 
-	if (tz->thermal_trip_critical_retry_count &&
-		(tz->thermal_trip_critical_retry_count == retry_temp_count)) {
-		printk(KERN_INFO
-		       "[THERMAL][%s] Retry for critical temperature reached is successful...(%d/%d)\n",
-		       tz->type, tz->thermal_trip_critical_retry_count, THERMAL_TRIP_CRITICAL_RETRY_MAX_COUNT);
-		tz->thermal_trip_critical_retry_count = 0;
-	}
-
 	if (tz->forced_passive)
 		thermal_zone_device_passive(tz, temp, tz->forced_passive,
 					    THERMAL_TRIPS_NONE);
 
 	tz->last_temperature = temp;
 
-      leave:
-	if (tz->thermal_trip_critical_retry_count)
-		thermal_zone_device_set_polling(tz, THERMAL_TRIP_CRITICAL_RETRY_MS);
-	else if (tz->passive)
+leave:
+	if (tz->passive)
 		thermal_zone_device_set_polling(tz, tz->passive_delay);
 	else if (tz->polling_delay)
 		thermal_zone_device_set_polling(tz, tz->polling_delay);
@@ -1165,24 +1181,6 @@ void thermal_zone_device_update(struct thermal_zone_device *tz)
 }
 EXPORT_SYMBOL(thermal_zone_device_update);
 
-/**
- * thermal_zone_device_register - register a new thermal zone device
- * @type:	the thermal zone device type
- * @trips:	the number of trip points the thermal zone support
- * @devdata:	private device data
- * @ops:	standard thermal zone device callbacks
- * @tc1:	thermal coefficient 1 for passive calculations
- * @tc2:	thermal coefficient 2 for passive calculations
- * @passive_delay: number of milliseconds to wait between polls when
- *		   performing passive cooling
- * @polling_delay: number of milliseconds to wait between polls when checking
- *		   whether trip points have been crossed (0 for interrupt
- *		   driven systems)
- *
- * thermal_zone_device_unregister() must be called when the device is no
- * longer needed. The passive cooling formula uses tc1 and tc2 as described in
- * section 11.1.5.1 of the ACPI specification 3.0.
- */
 struct thermal_zone_device *thermal_zone_device_register(char *type,
 	int trips, void *devdata,
 	const struct thermal_zone_device_ops *ops,
@@ -1195,7 +1193,7 @@ struct thermal_zone_device *thermal_zone_device_register(char *type,
 	int count;
 	int passive = 0;
 
-	if ((type == NULL) || (strlen(type) >= THERMAL_NAME_LENGTH))
+	if (strlen(type) >= THERMAL_NAME_LENGTH)
 		return ERR_PTR(-EINVAL);
 
 	if (trips > THERMAL_MAX_TRIPS || trips < 0)
@@ -1226,7 +1224,6 @@ struct thermal_zone_device *thermal_zone_device_register(char *type,
 	tz->tc2 = tc2;
 	tz->passive_delay = passive_delay;
 	tz->polling_delay = polling_delay;
-	tz->thermal_trip_critical_retry_count = 0;
 
 	dev_set_name(&tz->device, "thermal_zone%d", tz->id);
 	result = device_register(&tz->device);
@@ -1236,7 +1233,7 @@ struct thermal_zone_device *thermal_zone_device_register(char *type,
 		return ERR_PTR(result);
 	}
 
-	/* sys I/F */
+	
 	if (type) {
 		result = device_create_file(&tz->device, &dev_attr_type);
 		if (result)
@@ -1254,7 +1251,12 @@ struct thermal_zone_device *thermal_zone_device_register(char *type,
 	}
 
 	for (count = 0; count < trips; count++) {
-		TRIP_POINT_ATTR_ADD(&tz->device, count, result);
+		result = device_create_file(&tz->device,
+					    &trip_point_attrs[count * 2]);
+		if (result)
+			break;
+		result = device_create_file(&tz->device,
+					    &trip_point_attrs[count * 2 + 1]);
 		if (result)
 			goto unregister;
 		tz->ops->get_trip_type(tz, count, &trip_type);
@@ -1290,18 +1292,13 @@ struct thermal_zone_device *thermal_zone_device_register(char *type,
 	if (!result)
 		return tz;
 
-      unregister:
+unregister:
 	release_idr(&thermal_tz_idr, &thermal_idr_lock, tz->id);
 	device_unregister(&tz->device);
 	return ERR_PTR(result);
 }
-
 EXPORT_SYMBOL(thermal_zone_device_register);
 
-/**
- * thermal_device_unregister - removes the registered thermal zone device
- * @tz: the thermal zone device to remove
- */
 void thermal_zone_device_unregister(struct thermal_zone_device *tz)
 {
 	struct thermal_cooling_device *cdev;
@@ -1316,7 +1313,7 @@ void thermal_zone_device_unregister(struct thermal_zone_device *tz)
 	    if (pos == tz)
 		break;
 	if (pos != tz) {
-		/* thermal zone device not found */
+		
 		mutex_unlock(&thermal_list_lock);
 		return;
 	}
@@ -1334,9 +1331,12 @@ void thermal_zone_device_unregister(struct thermal_zone_device *tz)
 	if (tz->ops->get_mode)
 		device_remove_file(&tz->device, &dev_attr_mode);
 
-	for (count = 0; count < tz->trips; count++)
-		TRIP_POINT_ATTR_REMOVE(&tz->device, count);
-
+	for (count = 0; count < tz->trips; count++) {
+		device_remove_file(&tz->device,
+				   &trip_point_attrs[count * 2]);
+		device_remove_file(&tz->device,
+				   &trip_point_attrs[count * 2 + 1]);
+	}
 	thermal_remove_hwmon_sysfs(tz);
 	release_idr(&thermal_tz_idr, &thermal_idr_lock, tz->id);
 	idr_destroy(&tz->idr);
@@ -1344,12 +1344,9 @@ void thermal_zone_device_unregister(struct thermal_zone_device *tz)
 	device_unregister(&tz->device);
 	return;
 }
-
 EXPORT_SYMBOL(thermal_zone_device_unregister);
 
 #ifdef CONFIG_NET
-static unsigned int thermal_event_seqnum;
-
 static struct genl_family thermal_event_genl_family = {
 	.id = GENL_ID_GENERATE,
 	.name = THERMAL_GENL_FAMILY_NAME,
@@ -1361,7 +1358,7 @@ static struct genl_multicast_group thermal_event_mcgrp = {
 	.name = THERMAL_GENL_MCAST_GROUP_NAME,
 };
 
-int generate_netlink_event(u32 orig, enum events event)
+int thermal_generate_netlink_event(u32 orig, enum events event)
 {
 	struct sk_buff *skb;
 	struct nlattr *attr;
@@ -1369,16 +1366,17 @@ int generate_netlink_event(u32 orig, enum events event)
 	void *msg_header;
 	int size;
 	int result;
+	static unsigned int thermal_event_seqnum;
 
-	/* allocate memory */
-	size = nla_total_size(sizeof(struct thermal_genl_event)) + \
-				nla_total_size(0);
+	
+	size = nla_total_size(sizeof(struct thermal_genl_event)) +
+	       nla_total_size(0);
 
 	skb = genlmsg_new(size, GFP_ATOMIC);
 	if (!skb)
 		return -ENOMEM;
 
-	/* add the genetlink message header */
+	
 	msg_header = genlmsg_put(skb, 0, thermal_event_seqnum++,
 				 &thermal_event_genl_family, 0,
 				 THERMAL_GENL_CMD_EVENT);
@@ -1387,9 +1385,9 @@ int generate_netlink_event(u32 orig, enum events event)
 		return -ENOMEM;
 	}
 
-	/* fill the data */
-	attr = nla_reserve(skb, THERMAL_GENL_ATTR_EVENT, \
-			sizeof(struct thermal_genl_event));
+	
+	attr = nla_reserve(skb, THERMAL_GENL_ATTR_EVENT,
+			   sizeof(struct thermal_genl_event));
 
 	if (!attr) {
 		nlmsg_free(skb);
@@ -1407,7 +1405,7 @@ int generate_netlink_event(u32 orig, enum events event)
 	thermal_event->orig = orig;
 	thermal_event->event = event;
 
-	/* send multicast genetlink message */
+	
 	result = genlmsg_end(skb, msg_header);
 	if (result < 0) {
 		nlmsg_free(skb);
@@ -1416,11 +1414,11 @@ int generate_netlink_event(u32 orig, enum events event)
 
 	result = genlmsg_multicast(skb, 0, thermal_event_mcgrp.id, GFP_ATOMIC);
 	if (result)
-		printk(KERN_INFO "failed to send netlink event:%d", result);
+		pr_info("failed to send netlink event:%d\n", result);
 
 	return result;
 }
-EXPORT_SYMBOL(generate_netlink_event);
+EXPORT_SYMBOL(thermal_generate_netlink_event);
 
 static int genetlink_init(void)
 {
@@ -1441,10 +1439,10 @@ static void genetlink_exit(void)
 {
 	genl_unregister_family(&thermal_event_genl_family);
 }
-#else /* !CONFIG_NET */
+#else 
 static inline int genetlink_init(void) { return 0; }
 static inline void genetlink_exit(void) {}
-#endif /* !CONFIG_NET */
+#endif 
 
 static int __init thermal_init(void)
 {
@@ -1456,7 +1454,6 @@ static int __init thermal_init(void)
 		idr_destroy(&thermal_cdev_idr);
 		mutex_destroy(&thermal_idr_lock);
 		mutex_destroy(&thermal_list_lock);
-		return result;
 	}
 	result = genetlink_init();
 	return result;

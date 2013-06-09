@@ -1,7 +1,6 @@
 #ifndef _LINUX_FIRMWARE_H
 #define _LINUX_FIRMWARE_H
 
-#include <linux/module.h>
 #include <linux/types.h>
 #include <linux/compiler.h>
 #include <linux/gfp.h>
@@ -15,6 +14,7 @@ struct firmware {
 	struct page **pages;
 };
 
+struct module;
 struct device;
 
 struct builtin_fw {
@@ -23,8 +23,6 @@ struct builtin_fw {
 	unsigned long size;
 };
 
-/* We have to play tricks here much like stringify() to get the
-   __COUNTER__ macro to be expanded as we want it */
 #define __fw_concat1(x, y) x##y
 #define __fw_concat(x, y) __fw_concat1(x, y)
 

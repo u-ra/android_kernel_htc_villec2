@@ -33,7 +33,7 @@ struct evdev {
 	wait_queue_head_t wait;
 	struct evdev_client __rcu *grab;
 	struct list_head client_list;
-	spinlock_t client_lock; /* protects client_list */
+	spinlock_t client_lock; 
 	struct mutex mutex;
 	struct device dev;
 	bool exist;
@@ -42,8 +42,8 @@ struct evdev {
 struct evdev_client {
 	unsigned int head;
 	unsigned int tail;
-	unsigned int packet_head; /* [future] position of the first element of next packet */
-	spinlock_t buffer_lock; /* protects access to buffer, head and tail */
+	unsigned int packet_head; 
+	spinlock_t buffer_lock; 
 	struct wake_lock wake_lock;
 	char name[28];
 	struct fasync_struct *fasync;
@@ -59,7 +59,7 @@ static DEFINE_MUTEX(evdev_table_mutex);
 static void evdev_pass_event(struct evdev_client *client,
 			     struct input_event *event)
 {
-	/* Interrupts are disabled, just acquire the lock. */
+	
 	spin_lock(&client->buffer_lock);
 
 	wake_lock_timeout(&client->wake_lock, 5 * HZ);
@@ -67,10 +67,6 @@ static void evdev_pass_event(struct evdev_client *client,
 	client->head &= client->bufsize - 1;
 
 	if (unlikely(client->head == client->tail)) {
-		/*
-		 * This effectively "drops" all unconsumed events, leaving
-		 * EV_SYN/SYN_DROPPED plus the newest event in the queue.
-		 */
 		client->tail = (client->head - 2) & (client->bufsize - 1);
 
 		client->buffer[client->tail].time = event->time;
@@ -89,9 +85,6 @@ static void evdev_pass_event(struct evdev_client *client,
 	spin_unlock(&client->buffer_lock);
 }
 
-/*
- * Pass incoming event to all connected clients.
- */
 static void evdev_event(struct input_handle *handle,
 			unsigned int type, unsigned int code, int value)
 {
@@ -156,10 +149,6 @@ static void evdev_free(struct device *dev)
 	kfree(evdev);
 }
 
-/*
- * Grabs an event device (along with underlying input device).
- * This function is called with evdev->mutex taken.
- */
 static int evdev_grab(struct evdev *evdev, struct evdev_client *client)
 {
 	int error;
@@ -235,10 +224,6 @@ static void evdev_close_device(struct evdev *evdev)
 	mutex_unlock(&evdev->mutex);
 }
 
-/*
- * Wake up users waiting for IO so they can disconnect from
- * dead device.
- */
 static void evdev_hangup(struct evdev *evdev)
 {
 	struct evdev_client *client;
@@ -429,7 +414,6 @@ static ssize_t evdev_read(struct file *file, char __user *buffer,
 	return retval;
 }
 
-/* No kernel lock - fine */
 static unsigned int evdev_poll(struct file *file, poll_table *wait)
 {
 	struct evdev_client *client = file->private_data;
@@ -491,7 +475,7 @@ static int bits_to_user(unsigned long *bits, unsigned int maxbit,
 
 	return copy_to_user(p, bits, len) ? -EFAULT : len;
 }
-#endif /* __BIG_ENDIAN */
+#endif 
 
 #else
 
@@ -506,7 +490,7 @@ static int bits_to_user(unsigned long *bits, unsigned int maxbit,
 	return copy_to_user(p, bits, len) ? -EFAULT : len;
 }
 
-#endif /* CONFIG_COMPAT */
+#endif 
 
 static int str_to_user(const char *str, unsigned int maxlen, void __user *p)
 {
@@ -545,11 +529,6 @@ static int handle_eviocgbit(struct input_dev *dev,
 	default: return -EINVAL;
 	}
 
-	/*
-	 * Work around bugs in userspace programs that like to do
-	 * EVIOCGBIT(EV_KEY, KEY_MAX) and not realize that 'len'
-	 * should be in bytes, not in bits.
-	 */
 	if (type == EV_KEY && size == OLD_KEY_MAX) {
 		len = OLD_KEY_MAX;
 		if (printk_timed_ratelimit(&keymax_warn_time, 10 * 1000))
@@ -573,7 +552,7 @@ static int evdev_handle_get_keycode(struct input_dev *dev, void __user *p)
 	int __user *ip = (int __user *)p;
 	int error;
 
-	/* legacy case */
+	
 	if (copy_from_user(ke.scancode, p, sizeof(unsigned int)))
 		return -EFAULT;
 
@@ -648,7 +627,7 @@ static long evdev_do_ioctl(struct file *file, unsigned int cmd,
 	unsigned int size;
 	int error;
 
-	/* First we check for fixed-length commands */
+	
 	switch (cmd) {
 
 	case EVIOCGVERSION:
@@ -712,7 +691,7 @@ static long evdev_do_ioctl(struct file *file, unsigned int cmd,
 
 	size = _IOC_SIZE(cmd);
 
-	/* Now check variable-length commands */
+	
 #define EVIOC_MASK_SIZE(nr)	((nr) & ~(_IOC_SIZEMASK << _IOC_SIZESHIFT))
 	switch (EVIOC_MASK_SIZE(cmd)) {
 
@@ -753,7 +732,7 @@ static long evdev_do_ioctl(struct file *file, unsigned int cmd,
 		return error;
 	}
 
-	/* Multi-number variable-length handlers */
+	
 	if (_IOC_TYPE(cmd) != 'E')
 		return -EINVAL;
 
@@ -796,15 +775,10 @@ static long evdev_do_ioctl(struct file *file, unsigned int cmd,
 			if (size < sizeof(struct input_absinfo))
 				abs.resolution = 0;
 
-			/* We can't change number of reserved MT slots */
+			
 			if (t == ABS_MT_SLOT)
 				return -EINVAL;
 
-			/*
-			 * Take event lock to ensure that we are not
-			 * changing device parameters in the middle
-			 * of event.
-			 */
 			spin_lock_irq(&dev->event_lock);
 			dev->absinfo[t] = abs;
 			spin_unlock_irq(&dev->event_lock);
@@ -870,29 +844,17 @@ static const struct file_operations evdev_fops = {
 
 static int evdev_install_chrdev(struct evdev *evdev)
 {
-	/*
-	 * No need to do any locking here as calls to connect and
-	 * disconnect are serialized by the input core
-	 */
 	evdev_table[evdev->minor] = evdev;
 	return 0;
 }
 
 static void evdev_remove_chrdev(struct evdev *evdev)
 {
-	/*
-	 * Lock evdev table to prevent race with evdev_open()
-	 */
 	mutex_lock(&evdev_table_mutex);
 	evdev_table[evdev->minor] = NULL;
 	mutex_unlock(&evdev_table_mutex);
 }
 
-/*
- * Mark device non-existent. This disables writes, ioctls and
- * prevents new users from opening the device. Already posted
- * blocking reads will stay, however new ones will fail.
- */
 static void evdev_mark_dead(struct evdev *evdev)
 {
 	mutex_lock(&evdev->mutex);
@@ -908,17 +870,13 @@ static void evdev_cleanup(struct evdev *evdev)
 	evdev_hangup(evdev);
 	evdev_remove_chrdev(evdev);
 
-	/* evdev is marked dead so no one else accesses evdev->open */
+	
 	if (evdev->open) {
 		input_flush_device(handle, NULL);
 		input_close_device(handle);
 	}
 }
 
-/*
- * Create new evdev device. Note that input core serializes calls
- * to connect and disconnect so we don't need to lock evdev_table here.
- */
 static int evdev_connect(struct input_handler *handler, struct input_dev *dev,
 			 const struct input_device_id *id)
 {
@@ -993,8 +951,8 @@ static void evdev_disconnect(struct input_handle *handle)
 }
 
 static const struct input_device_id evdev_ids[] = {
-	{ .driver_info = 1 },	/* Matches all devices */
-	{ },			/* Terminating zero entry */
+	{ .driver_info = 1 },	
+	{ },			
 };
 
 MODULE_DEVICE_TABLE(input, evdev_ids);

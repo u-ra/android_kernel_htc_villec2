@@ -20,5 +20,5 @@
 
 void DelayMS(word M_Sec)
 {
-	hr_msleep(M_Sec);
+	msleep(M_Sec);
 }

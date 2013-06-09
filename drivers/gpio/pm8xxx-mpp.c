@@ -1,7 +1,7 @@
 /*
  * Qualcomm PM8XXX Multi-Purpose Pin (MPP) driver
  *
- * Copyright (c) 2011, Code Aurora Forum. All rights reserved.
+ * Copyright (c) 2011-2012, Code Aurora Forum. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -15,6 +15,7 @@
 
 #define pr_fmt(fmt) "%s: " fmt, __func__
 
+#include <linux/module.h>
 #include <linux/platform_device.h>
 #include <linux/gpio.h>
 #include <linux/seq_file.h>
@@ -23,15 +24,12 @@
 #include <linux/mfd/pm8xxx/core.h>
 #include <linux/mfd/pm8xxx/mpp.h>
 
-/* MPP Type */
 #define	PM8XXX_MPP_TYPE_MASK		0xE0
 #define	PM8XXX_MPP_TYPE_SHIFT		5
 
-/* MPP Config Level */
 #define	PM8XXX_MPP_CONFIG_LVL_MASK	0x1C
 #define	PM8XXX_MPP_CONFIG_LVL_SHIFT	2
 
-/* MPP Config Control */
 #define	PM8XXX_MPP_CONFIG_CTRL_MASK	0x03
 #define	PM8XXX_MPP_CONFIG_CTRL_SHIFT	0
 
@@ -198,10 +196,216 @@ int pm8xxx_mpp_config(unsigned mpp, struct pm8xxx_mpp_config_data *config)
 }
 EXPORT_SYMBOL_GPL(pm8xxx_mpp_config);
 
+int mpp_transform(char gpio_buf[128], int len, int ctrl_value)
+{
+	int mpp_function = 0, mpp_config_1 = 0, mpp_config_2 = 0, num = 0;
+	num = ctrl_value;
+	mpp_function = ctrl_value / 32;
+	ctrl_value = ctrl_value % 32;
+	mpp_config_1 = ctrl_value / 8;
+	ctrl_value = ctrl_value / 8;
+	mpp_config_2 = ctrl_value % 8;
+
+	switch (mpp_function) {
+	case 0:
+		switch (mpp_config_1) {
+		case 0: len += sprintf(gpio_buf + len, "[CTRL]  IRQ");
+		break;
+		case 1: len += sprintf(gpio_buf + len, "[CTRL]  DT1");
+		break;
+		case 2: len += sprintf(gpio_buf + len, "[CTRL]  DT2");
+		break;
+		case 3: len += sprintf(gpio_buf + len, "[CTRL]  DT3");
+		break;
+		default: sprintf(gpio_buf + len, "[CTRL] NULL");
+		}
+		len += sprintf(gpio_buf + len, ", ");
+		switch (mpp_config_2) {
+		case 0: len += sprintf(gpio_buf + len, "[LV]  Vio_0"); break;
+		case 1: len += sprintf(gpio_buf + len, "[LV]     S4"); break;
+		case 2: len += sprintf(gpio_buf + len, "[LV]  Vio_2"); break;
+		case 3: len += sprintf(gpio_buf + len, "[LV]    L15"); break;
+		case 4: len += sprintf(gpio_buf + len, "[LV]    L17"); break;
+		case 5: len += sprintf(gpio_buf + len, "[LV]  Vio_5"); break;
+		case 6: len += sprintf(gpio_buf + len, "[LV]  Vio_6"); break;
+		case 7: len += sprintf(gpio_buf + len, "[LV]    VPH"); break;
+		default: sprintf(gpio_buf + len, "[LV]   NULL");
+		}
+	break;
+	case 1:
+		switch (mpp_config_1) {
+		case 0: len += sprintf(gpio_buf + len, "[CTRL]  LOW");
+		break;
+		case 1: len += sprintf(gpio_buf + len, "[CTRL] HIGH");
+		break;
+		case 2: len += sprintf(gpio_buf + len, "[CTRL]  MPP");
+		break;
+		case 3: len += sprintf(gpio_buf + len, "[CTRL]NoMPP");
+		break;
+		default: sprintf(gpio_buf + len, "[CTRL] NULL");
+		}
+		len += sprintf(gpio_buf + len, ", ");
+		switch (mpp_config_2) {
+		case 0: len += sprintf(gpio_buf + len, "[LV]  Vio_0"); break;
+		case 1: len += sprintf(gpio_buf + len, "[LV]     S4"); break;
+		case 2: len += sprintf(gpio_buf + len, "[LV]  Vio_2"); break;
+		case 3: len += sprintf(gpio_buf + len, "[LV]    L15"); break;
+		case 4: len += sprintf(gpio_buf + len, "[LV]    L17"); break;
+		case 5: len += sprintf(gpio_buf + len, "[LV]  Vio_5"); break;
+		case 6: len += sprintf(gpio_buf + len, "[LV]  Vio_6"); break;
+		case 7: len += sprintf(gpio_buf + len, "[LV]    VPH"); break;
+		default: sprintf(gpio_buf + len, "[LV]   NULL");
+		}
+	break;
+	case 2:
+		switch (mpp_config_1) {
+		case 0: len += sprintf(gpio_buf + len, "[CTRL] PU1K");
+		break;
+		case 1: len += sprintf(gpio_buf + len, "[CTRL] OPEN");
+		break;
+		case 2: len += sprintf(gpio_buf + len, "[CTRL]PU10K");
+		break;
+		case 3: len += sprintf(gpio_buf + len, "[CTRL]PU30K");
+		break;
+		default: sprintf(gpio_buf + len, "[CTRL] NULL");
+		}
+		len += sprintf(gpio_buf + len, ", ");
+		switch (mpp_config_2) {
+		case 0: len += sprintf(gpio_buf + len, "[LV]  Vio_0"); break;
+		case 1: len += sprintf(gpio_buf + len, "[LV]  Vio_1"); break;
+		case 2: len += sprintf(gpio_buf + len, "[LV]  Vio_2"); break;
+		case 3: len += sprintf(gpio_buf + len, "[LV]  Vio_3"); break;
+		case 4: len += sprintf(gpio_buf + len, "[LV]  Vio_4"); break;
+		case 5: len += sprintf(gpio_buf + len, "[LV]  Vio_5"); break;
+		case 6: len += sprintf(gpio_buf + len, "[LV]  Vio_6"); break;
+		case 7: len += sprintf(gpio_buf + len, "[LV]  Vio_7"); break;
+		default: sprintf(gpio_buf + len, "[LV]   NULL");
+		}
+	break;
+	case 3:
+		len += sprintf(gpio_buf + len, "[CTRL]  REV, ");
+		switch (mpp_config_2) {
+		case 0: len += sprintf(gpio_buf + len, "[LV]AIN_CH5"); break;
+		case 1: len += sprintf(gpio_buf + len, "[LV]AIN_CH6"); break;
+		case 2: len += sprintf(gpio_buf + len, "[LV]AIN_CH7"); break;
+		case 3: len += sprintf(gpio_buf + len, "[LV]AIN_CH8"); break;
+		case 4: len += sprintf(gpio_buf + len, "[LV]AIN_CH9"); break;
+		case 5: len += sprintf(gpio_buf + len, "[LV]  ABUS1"); break;
+		case 6: len += sprintf(gpio_buf + len, "[LV]  ABUS2"); break;
+		case 7: len += sprintf(gpio_buf + len, "[LV]  ABUS3"); break;
+		default: len += sprintf(gpio_buf + len, "[LV]Reserve");
+		}
+	break;
+	case 4:
+		switch (mpp_config_1) {
+		case 0: len += sprintf(gpio_buf + len, "[CTRL]  OFF");
+		break;
+		case 1: len += sprintf(gpio_buf + len, "[CTRL]   ON");
+		break;
+		case 2: len += sprintf(gpio_buf + len, "[CTRL]MPPHI");
+		break;
+		case 3: len += sprintf(gpio_buf + len, "[CTRL]MPPLO");
+		break;
+		default: sprintf(gpio_buf + len, "[CTRL] NULL");
+		}
+		len += sprintf(gpio_buf + len, ", ");
+		switch (mpp_config_2) {
+		case 0: len += sprintf(gpio_buf + len, "[LV]   1V25"); break;
+		case 1: len += sprintf(gpio_buf + len, "[LV] 1V25_2"); break;
+		case 2: len += sprintf(gpio_buf + len, "[LV]  0V625"); break;
+		case 3: len += sprintf(gpio_buf + len, "[LV] 0V3125"); break;
+		case 4: len += sprintf(gpio_buf + len, "[LV]    MPP"); break;
+		case 5: len += sprintf(gpio_buf + len, "[LV]  ABUS1"); break;
+		case 6: len += sprintf(gpio_buf + len, "[LV]  ABUS2"); break;
+		case 7: len += sprintf(gpio_buf + len, "[LV]  ABUS3"); break;
+		default: sprintf(gpio_buf + len, "[LV]   NULL");
+		}
+	break;
+	case 5:
+		switch (mpp_config_1) {
+		case 0: len += sprintf(gpio_buf + len, "[CTRL]  OFF");
+		break;
+		case 1: len += sprintf(gpio_buf + len, "[CTRL]   ON");
+		break;
+		case 2: len += sprintf(gpio_buf + len, "[CTRL]MPPHI");
+		break;
+		case 3: len += sprintf(gpio_buf + len, "[CTRL]MPPLO");
+		break;
+		default: sprintf(gpio_buf + len, "[CTRL] NULL");
+		}
+		len += sprintf(gpio_buf + len, ", ");
+		switch (mpp_config_2) {
+		case 0: len += sprintf(gpio_buf + len, "[LV]    5mA"); break;
+		case 1: len += sprintf(gpio_buf + len, "[LV]   10mA"); break;
+		case 2: len += sprintf(gpio_buf + len, "[LV]   15mA"); break;
+		case 3: len += sprintf(gpio_buf + len, "[LV]   20mA"); break;
+		case 4: len += sprintf(gpio_buf + len, "[LV]   25mA"); break;
+		case 5: len += sprintf(gpio_buf + len, "[LV]   30mA"); break;
+		case 6: len += sprintf(gpio_buf + len, "[LV]   35mA"); break;
+		case 7: len += sprintf(gpio_buf + len, "[LV]   40mA"); break;
+		default: sprintf(gpio_buf + len, "[LV]   NULL");
+		}
+	break;
+	case 6:
+		switch (mpp_config_1) {
+		case 0: len += sprintf(gpio_buf + len, "[CTRL]  EN1");
+		break;
+		case 1: len += sprintf(gpio_buf + len, "[CTRL]  EN2");
+		break;
+		case 2: len += sprintf(gpio_buf + len, "[CTRL]  EN3");
+		break;
+		case 3: len += sprintf(gpio_buf + len, "[CTRL]  EN4");
+		break;
+		default: sprintf(gpio_buf + len, "[CTRL] NULL");
+		}
+		len += sprintf(gpio_buf + len, ", ");
+		switch (mpp_config_2) {
+		case 0: len += sprintf(gpio_buf + len, "[LV]    5mA"); break;
+		case 1: len += sprintf(gpio_buf + len, "[LV]   10mA"); break;
+		case 2: len += sprintf(gpio_buf + len, "[LV]   15mA"); break;
+		case 3: len += sprintf(gpio_buf + len, "[LV]   20mA"); break;
+		case 4: len += sprintf(gpio_buf + len, "[LV]   25mA"); break;
+		case 5: len += sprintf(gpio_buf + len, "[LV]   30mA"); break;
+		case 6: len += sprintf(gpio_buf + len, "[LV]   35mA"); break;
+		case 7: len += sprintf(gpio_buf + len, "[LV]   40mA"); break;
+		default: sprintf(gpio_buf + len, "[LV]   NULL");
+		}
+	break;
+	case 7:
+		switch (mpp_config_1) {
+		case 0: len += sprintf(gpio_buf + len, "[CTRL]DBUS1");
+		break;
+		case 1: len += sprintf(gpio_buf + len, "[CTRL]DBUS2");
+		break;
+		case 2: len += sprintf(gpio_buf + len, "[CTRL]DBUS3");
+		break;
+		case 3: len += sprintf(gpio_buf + len, "[CTRL]DBUS4");
+		break;
+		default: sprintf(gpio_buf + len, "[CTRL] NULL");
+		}
+		len += sprintf(gpio_buf + len, ", ");
+		switch (mpp_config_2) {
+		case 0: len += sprintf(gpio_buf + len, "[LV]  Vio_0"); break;
+		case 1: len += sprintf(gpio_buf + len, "[LV]  Vio_1"); break;
+		case 2: len += sprintf(gpio_buf + len, "[LV]  Vio_2"); break;
+		case 3: len += sprintf(gpio_buf + len, "[LV]  Vio_3"); break;
+		case 4: len += sprintf(gpio_buf + len, "[LV]  Vio_4"); break;
+		case 5: len += sprintf(gpio_buf + len, "[LV]  Vio_5"); break;
+		case 6: len += sprintf(gpio_buf + len, "[LV]  Vio_6"); break;
+		case 7: len += sprintf(gpio_buf + len, "[LV]  Vio_7"); break;
+		default: sprintf(gpio_buf + len, "[LV]   NULL");
+		}
+	break;
+	default: sprintf(gpio_buf + len, "[CTRL] NULL, [LV]   NULL");
+	}
+	len += sprintf(gpio_buf + len, ", ");
+	return len;
+}
+
 int pm8xxx_dump_mpp(struct seq_file *m, int curr_len, char *gpio_buffer)
 {
-	static const char *ctype[] = { "d_in", "d_out", "bi_dir", "a_in",
-		"a_out", "sink", "dtest_sink", "dtest_out" };
+	static const char *ctype[] = { "D_IN", "D_OUT", "BI_DIR", "A_IN",
+								   "A_OUT", "SINK", "DTEST_SINK", "DTEST_OUT" };
 
 	u8 type, state, ctrl;
 	const char *label;
@@ -235,8 +439,8 @@ int pm8xxx_dump_mpp(struct seq_file *m, int curr_len, char *gpio_buffer)
 
 			len += sprintf(gpio_buf + len, "GPIO[%2d]: ", i+1);
 			len += sprintf(gpio_buf + len, "[TYPE]%10s, ", ctype[type]);
-			len += sprintf(gpio_buf + len, "[VAL]%s, ", state? "HIGH" : " LOW");
-			len += sprintf(gpio_buf + len, "[CTRL][0x%02x]", ctrl);
+			len = mpp_transform(gpio_buf, len, ctrl);
+			len += sprintf(gpio_buf + len, "[VAL]%s", state? "HIGH" : " LOW");
 
 			gpio_buf[127] = '\0';
 			if (m) {
@@ -306,7 +510,7 @@ static int __devinit pm8xxx_mpp_probe(struct platform_device *pdev)
 	mpp_chip->gpio_chip.set = pm8xxx_mpp_set;
 	mpp_chip->gpio_chip.dbg_show = pm8xxx_mpp_dbg_show;
 	mpp_chip->gpio_chip.ngpio = pdata->core_data.nmpps;
-	mpp_chip->gpio_chip.can_sleep = 0; /* Fix me */
+	mpp_chip->gpio_chip.can_sleep = 0;
 	mpp_chip->gpio_chip.dev = &pdev->dev;
 	mpp_chip->gpio_chip.base = pdata->mpp_base;
 	mpp_chip->irq_base = platform_get_irq(pdev, 0);

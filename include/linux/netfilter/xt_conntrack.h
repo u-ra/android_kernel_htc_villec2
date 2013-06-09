@@ -6,6 +6,7 @@
 #define _XT_CONNTRACK_H
 
 #include <linux/types.h>
+#include <linux/netfilter.h>
 #include <linux/netfilter/nf_conntrack_tuple_common.h>
 
 #define XT_CONNTRACK_STATE_BIT(ctinfo) (1 << ((ctinfo)%IP_CT_IS_REPLY+1))
@@ -15,7 +16,6 @@
 #define XT_CONNTRACK_STATE_DNAT (1 << (IP_CT_NUMBER + 2))
 #define XT_CONNTRACK_STATE_UNTRACKED (1 << (IP_CT_NUMBER + 3))
 
-/* flags, invflags: */
 enum {
 	XT_CONNTRACK_STATE        = 1 << 0,
 	XT_CONNTRACK_PROTO        = 1 << 1,
@@ -73,4 +73,4 @@ struct xt_conntrack_mtinfo3 {
 	__u16 replsrc_port_high, repldst_port_high;
 };
 
-#endif /*_XT_CONNTRACK_H*/
+#endif 

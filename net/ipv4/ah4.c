@@ -1,3 +1,5 @@
+#define pr_fmt(fmt) "IPsec: " fmt
+
 #include <crypto/hash.h>
 #include <linux/err.h>
 #include <linux/module.h>
@@ -69,9 +71,6 @@ static inline struct scatterlist *ah_req_sg(struct crypto_ahash *ahash,
 			     __alignof__(struct scatterlist));
 }
 
-/* Clear mutable options and find final destination to substitute
- * into IP header for icv calculation. Options are already checked
- * for validity, so paranoia is not required. */
 
 static int ip_clear_mutable_options(const struct iphdr *iph, __be32 *daddr)
 {
@@ -93,17 +92,17 @@ static int ip_clear_mutable_options(const struct iphdr *iph, __be32 *daddr)
 			return -EINVAL;
 		switch (*optptr) {
 		case IPOPT_SEC:
-		case 0x85:	/* Some "Extended Security" crap. */
+		case 0x85:	
 		case IPOPT_CIPSO:
 		case IPOPT_RA:
-		case 0x80|21:	/* RFC1770 */
+		case 0x80|21:	
 			break;
 		case IPOPT_LSRR:
 		case IPOPT_SSRR:
 			if (optlen < 6)
 				return -EINVAL;
 			memcpy(daddr, optptr+optlen-4, 4);
-			/* Fall through */
+			
 		default:
 			memset(optptr, 0, optlen);
 		}
@@ -313,8 +312,6 @@ static int ah_input(struct xfrm_state *x, struct sk_buff *skb)
 	if (!pskb_may_pull(skb, ah_hlen))
 		goto out;
 
-	/* We are going to _remove_ AH header to keep sockets happy,
-	 * so... Later this can change. */
 	if (skb_cloned(skb) &&
 	    pskb_expand_head(skb, 0, 0, GFP_ATOMIC))
 		goto out;
@@ -434,20 +431,15 @@ static int ah_init_state(struct xfrm_state *x)
 				(x->aalg->alg_key_len + 7) / 8))
 		goto error;
 
-	/*
-	 * Lookup the algorithm description maintained by xfrm_algo,
-	 * verify crypto transform properties, and store information
-	 * we need for AH processing.  This lookup cannot fail here
-	 * after a successful crypto_alloc_ahash().
-	 */
 	aalg_desc = xfrm_aalg_get_byname(x->aalg->alg_name, 0);
 	BUG_ON(!aalg_desc);
 
 	if (aalg_desc->uinfo.auth.icv_fullbits/8 !=
 	    crypto_ahash_digestsize(ahash)) {
-		printk(KERN_INFO "AH: %s digestsize %u != %hu\n",
-		       x->aalg->alg_name, crypto_ahash_digestsize(ahash),
-		       aalg_desc->uinfo.auth.icv_fullbits/8);
+		pr_info("%s: %s digestsize %u != %hu\n",
+			__func__, x->aalg->alg_name,
+			crypto_ahash_digestsize(ahash),
+			aalg_desc->uinfo.auth.icv_fullbits / 8);
 		goto error;
 	}
 
@@ -510,11 +502,11 @@ static const struct net_protocol ah4_protocol = {
 static int __init ah4_init(void)
 {
 	if (xfrm_register_type(&ah_type, AF_INET) < 0) {
-		printk(KERN_INFO "ip ah init: can't add xfrm type\n");
+		pr_info("%s: can't add xfrm type\n", __func__);
 		return -EAGAIN;
 	}
 	if (inet_add_protocol(&ah4_protocol, IPPROTO_AH) < 0) {
-		printk(KERN_INFO "ip ah init: can't add protocol\n");
+		pr_info("%s: can't add protocol\n", __func__);
 		xfrm_unregister_type(&ah_type, AF_INET);
 		return -EAGAIN;
 	}
@@ -524,9 +516,9 @@ static int __init ah4_init(void)
 static void __exit ah4_fini(void)
 {
 	if (inet_del_protocol(&ah4_protocol, IPPROTO_AH) < 0)
-		printk(KERN_INFO "ip ah close: can't remove protocol\n");
+		pr_info("%s: can't remove protocol\n", __func__);
 	if (xfrm_unregister_type(&ah_type, AF_INET) < 0)
-		printk(KERN_INFO "ip ah close: can't remove xfrm type\n");
+		pr_info("%s: can't remove xfrm type\n", __func__);
 }
 
 module_init(ah4_init);

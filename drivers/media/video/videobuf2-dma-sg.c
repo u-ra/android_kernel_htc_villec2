@@ -155,7 +155,7 @@ static void *vb2_dma_sg_get_userptr(void *alloc_ctx, unsigned long vaddr,
 					     vaddr & PAGE_MASK,
 					     buf->sg_desc.num_pages,
 					     write,
-					     1, /* force */
+					     1, 
 					     buf->pages,
 					     NULL);
 	up_read(&current->mm->mmap_sem);
@@ -187,10 +187,6 @@ userptr_fail_sglist_alloc:
 	return NULL;
 }
 
-/*
- * @put_userptr: inform the allocator that a USERPTR buffer will no longer
- *		 be used
- */
 static void vb2_dma_sg_put_userptr(void *buf_priv)
 {
 	struct vb2_dma_sg_buf *buf = buf_priv;
@@ -222,7 +218,7 @@ static void *vb2_dma_sg_vaddr(void *buf_priv)
 					-1,
 					PAGE_KERNEL);
 
-	/* add offset in case userptr is not page-aligned */
+	
 	return buf->vaddr + buf->offset;
 }
 
@@ -259,9 +255,6 @@ static int vb2_dma_sg_mmap(void *buf_priv, struct vm_area_struct *vma)
 	} while (usize > 0);
 
 
-	/*
-	 * Use common vm_area operations to track buffer refcount.
-	 */
 	vma->vm_private_data	= &buf->handler;
 	vma->vm_ops		= &vb2_common_vm_ops;
 

@@ -1,6 +1,3 @@
-/*
- * Common values for SHA algorithms
- */
 
 #ifndef _CRYPTO_SHA_H
 #define _CRYPTO_SHA_H
@@ -81,5 +78,10 @@ struct sha512_state {
 	u64 state[SHA512_DIGEST_SIZE / 8];
 	u8 buf[SHA512_BLOCK_SIZE];
 };
+
+struct shash_desc;
+
+extern int crypto_sha1_update(struct shash_desc *desc, const u8 *data,
+			      unsigned int len);
 
 #endif

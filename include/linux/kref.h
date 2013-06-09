@@ -15,16 +15,39 @@
 #ifndef _KREF_H_
 #define _KREF_H_
 
-#include <linux/types.h>
+#include <linux/bug.h>
+#include <linux/atomic.h>
+#include <linux/kernel.h>
 
 struct kref {
 	atomic_t refcount;
 };
 
-void kref_init(struct kref *kref);
-void kref_get(struct kref *kref);
-int kref_put(struct kref *kref, void (*release) (struct kref *kref));
-int kref_sub(struct kref *kref, unsigned int count,
-	     void (*release) (struct kref *kref));
+static inline void kref_init(struct kref *kref)
+{
+	atomic_set(&kref->refcount, 1);
+}
 
-#endif /* _KREF_H_ */
+static inline void kref_get(struct kref *kref)
+{
+	WARN_ON(!atomic_read(&kref->refcount));
+	atomic_inc(&kref->refcount);
+}
+
+static inline int kref_sub(struct kref *kref, unsigned int count,
+	     void (*release)(struct kref *kref))
+{
+	WARN_ON(release == NULL);
+
+	if (atomic_sub_and_test((int) count, &kref->refcount)) {
+		release(kref);
+		return 1;
+	}
+	return 0;
+}
+
+static inline int kref_put(struct kref *kref, void (*release)(struct kref *kref))
+{
+	return kref_sub(kref, 1, release);
+}
+#endif 

@@ -70,26 +70,29 @@ static int ipcomp_decompress(struct xfrm_state *x, struct sk_buff *skb)
 
 	while ((scratch += len, dlen -= len) > 0) {
 		skb_frag_t *frag;
+		struct page *page;
 
 		err = -EMSGSIZE;
 		if (WARN_ON(skb_shinfo(skb)->nr_frags >= MAX_SKB_FRAGS))
 			goto out;
 
 		frag = skb_shinfo(skb)->frags + skb_shinfo(skb)->nr_frags;
-		frag->page = alloc_page(GFP_ATOMIC);
+		page = alloc_page(GFP_ATOMIC);
 
 		err = -ENOMEM;
-		if (!frag->page)
+		if (!page)
 			goto out;
+
+		__skb_frag_set_page(frag, page);
 
 		len = PAGE_SIZE;
 		if (dlen < len)
 			len = dlen;
 
-		memcpy(page_address(frag->page), scratch, len);
-
 		frag->page_offset = 0;
-		frag->size = len;
+		skb_frag_size_set(frag, len);
+		memcpy(skb_frag_address(frag), scratch, len);
+
 		skb->truesize += len;
 		skb->data_len += len;
 		skb->len += len;
@@ -115,7 +118,7 @@ int ipcomp_input(struct xfrm_state *x, struct sk_buff *skb)
 
 	skb->ip_summed = CHECKSUM_NONE;
 
-	/* Remove ipcomp header and decompress original payload */
+	
 	ipch = (void *)skb->data;
 	nexthdr = ipch->nexthdr;
 
@@ -172,7 +175,7 @@ int ipcomp_output(struct xfrm_state *x, struct sk_buff *skb)
 	struct ipcomp_data *ipcd = x->data;
 
 	if (skb->len < ipcd->threshold) {
-		/* Don't bother compressing */
+		
 		goto out_ok;
 	}
 
@@ -185,7 +188,7 @@ int ipcomp_output(struct xfrm_state *x, struct sk_buff *skb)
 		goto out_ok;
 	}
 
-	/* Install ipcomp header, convert into ipcomp datagram. */
+	
 	ipch = ip_comp_hdr(skb);
 	ipch->nexthdr = *skb_mac_header(skb);
 	ipch->flags = 0;
@@ -273,7 +276,7 @@ static struct crypto_comp * __percpu *ipcomp_alloc_tfms(const char *alg_name)
 	struct crypto_comp * __percpu *tfms;
 	int cpu;
 
-	/* This can be any valid CPU ID so we don't need locking. */
+	
 	cpu = raw_smp_processor_id();
 
 	list_for_each_entry(pos, &ipcomp_tfms_list, list) {

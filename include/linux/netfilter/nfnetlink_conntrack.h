@@ -28,7 +28,7 @@ enum ctattr_type {
 	CTA_PROTOINFO,
 	CTA_HELP,
 	CTA_NAT_SRC,
-#define CTA_NAT	CTA_NAT_SRC	/* backwards compatibility */
+#define CTA_NAT	CTA_NAT_SRC	
 	CTA_TIMEOUT,
 	CTA_MARK,
 	CTA_COUNTERS_ORIG,
@@ -39,10 +39,11 @@ enum ctattr_type {
 	CTA_TUPLE_MASTER,
 	CTA_NAT_SEQ_ADJ_ORIG,
 	CTA_NAT_SEQ_ADJ_REPLY,
-	CTA_SECMARK,		/* obsolete */
+	CTA_SECMARK,		
 	CTA_ZONE,
 	CTA_SECCTX,
 	CTA_TIMESTAMP,
+	CTA_MARK_MASK,
 	__CTA_MAX
 };
 #define CTA_MAX (__CTA_MAX - 1)
@@ -120,10 +121,10 @@ enum ctattr_protoinfo_sctp {
 
 enum ctattr_counters {
 	CTA_COUNTERS_UNSPEC,
-	CTA_COUNTERS_PACKETS,		/* 64bit counters */
-	CTA_COUNTERS_BYTES,		/* 64bit counters */
-	CTA_COUNTERS32_PACKETS,		/* old 32bit counters, unused */
-	CTA_COUNTERS32_BYTES,		/* old 32bit counters, unused */
+	CTA_COUNTERS_PACKETS,		
+	CTA_COUNTERS_BYTES,		
+	CTA_COUNTERS32_PACKETS,		
+	CTA_COUNTERS32_BYTES,		
 	__CTA_COUNTERS_MAX
 };
 #define CTA_COUNTERS_MAX (__CTA_COUNTERS_MAX - 1)
@@ -172,9 +173,20 @@ enum ctattr_expect {
 	CTA_EXPECT_HELP_NAME,
 	CTA_EXPECT_ZONE,
 	CTA_EXPECT_FLAGS,
+	CTA_EXPECT_CLASS,
+	CTA_EXPECT_NAT,
+	CTA_EXPECT_FN,
 	__CTA_EXPECT_MAX
 };
 #define CTA_EXPECT_MAX (__CTA_EXPECT_MAX - 1)
+
+enum ctattr_expect_nat {
+	CTA_EXPECT_NAT_UNSPEC,
+	CTA_EXPECT_NAT_DIR,
+	CTA_EXPECT_NAT_TUPLE,
+	__CTA_EXPECT_NAT_MAX
+};
+#define CTA_EXPECT_NAT_MAX (__CTA_EXPECT_NAT_MAX - 1)
 
 enum ctattr_help {
 	CTA_HELP_UNSPEC,
@@ -190,4 +202,4 @@ enum ctattr_secctx {
 };
 #define CTA_SECCTX_MAX (__CTA_SECCTX_MAX - 1)
 
-#endif /* _IPCONNTRACK_NETLINK_H */
+#endif 

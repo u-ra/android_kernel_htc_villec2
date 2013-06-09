@@ -14,11 +14,11 @@
 #include <sys/stat.h>
 #include <sys/time.h>
 
-#define LKC_DIRECT_LINK
 #include "lkc.h"
 
 static void conf(struct menu *menu);
 static void check_conf(struct menu *menu);
+static void xfgets(char *str, int size, FILE *in);
 
 enum input_mode {
 	oldaskconfig,
@@ -34,8 +34,6 @@ enum input_mode {
 	listnewconfig,
 	oldnoconfig,
 } input_mode = oldaskconfig;
-
-char *defconfig_file;
 
 static int indent = 1;
 static int valid_stdin = 1;
@@ -106,6 +104,7 @@ static int conf_askvalue(struct symbol *sym, const char *def)
 			return 0;
 		}
 		check_stdin();
+		
 	case oldaskconfig:
 		fflush(stdout);
 		xfgets(line, 128, stdin);
@@ -144,12 +143,13 @@ static int conf_string(struct menu *menu)
 		case '\n':
 			break;
 		case '?':
-			/* print help */
+			
 			if (line[1] == '\n') {
 				print_help(menu);
 				def = NULL;
 				break;
 			}
+			
 		default:
 			line[strlen(line)-1] = 0;
 			def = line;
@@ -304,6 +304,7 @@ static int conf_choice(struct menu *menu)
 				break;
 			}
 			check_stdin();
+			
 		case oldaskconfig:
 			fflush(stdout);
 			xfgets(line, 128, stdin);
@@ -369,6 +370,7 @@ static void conf(struct menu *menu)
 				check_conf(menu);
 				return;
 			}
+			
 		case P_COMMENT:
 			prompt = menu_get_prompt(menu);
 			if (prompt)
@@ -456,10 +458,30 @@ static struct option long_opts[] = {
 	{NULL, 0, NULL, 0}
 };
 
+static void conf_usage(const char *progname)
+{
+
+	printf("Usage: %s [option] <kconfig-file>\n", progname);
+	printf("[option] is _one_ of the following:\n");
+	printf("  --listnewconfig         List new options\n");
+	printf("  --oldaskconfig          Start a new configuration using a line-oriented program\n");
+	printf("  --oldconfig             Update a configuration using a provided .config as base\n");
+	printf("  --silentoldconfig       Same as oldconfig, but quietly, additionally update deps\n");
+	printf("  --oldnoconfig           Same as silentoldconfig but set new symbols to no\n");
+	printf("  --defconfig <file>      New config with default defined in <file>\n");
+	printf("  --savedefconfig <file>  Save the minimal current configuration to <file>\n");
+	printf("  --allnoconfig           New config where all options are answered with no\n");
+	printf("  --allyesconfig          New config where all options are answered with yes\n");
+	printf("  --allmodconfig          New config where all options are answered with mod\n");
+	printf("  --alldefconfig          New config with all symbols set to default\n");
+	printf("  --randconfig            New config with random answer to all options\n");
+}
+
 int main(int ac, char **av)
 {
+	const char *progname = av[0];
 	int opt;
-	const char *name;
+	const char *name, *defconfig_file = NULL ;
 	struct stat tmpstat;
 
 	setlocale(LC_ALL, "");
@@ -481,29 +503,35 @@ int main(int ac, char **av)
 			struct timeval now;
 			unsigned int seed;
 
-			/*
-			 * Use microseconds derived seed,
-			 * compensate for systems where it may be zero
-			 */
 			gettimeofday(&now, NULL);
 
 			seed = (unsigned int)((now.tv_sec + 1) * (now.tv_usec + 1));
 			srand(seed);
 			break;
 		}
+		case oldaskconfig:
+		case oldconfig:
+		case allnoconfig:
+		case allyesconfig:
+		case allmodconfig:
+		case alldefconfig:
+		case listnewconfig:
+		case oldnoconfig:
+			break;
 		case '?':
-			fprintf(stderr, _("See README for usage info\n"));
+			conf_usage(progname);
 			exit(1);
 			break;
 		}
 	}
 	if (ac == optind) {
 		printf(_("%s: Kconfig file missing\n"), av[0]);
+		conf_usage(progname);
 		exit(1);
 	}
 	name = av[optind];
 	conf_parse(name);
-	//zconfdump(stdout);
+	
 	if (sync_kconfig) {
 		name = conf_get_configname();
 		if (stat(name, &tmpstat)) {
@@ -600,12 +628,12 @@ int main(int ac, char **av)
 		rootEntry = &rootmenu;
 		conf(&rootmenu);
 		input_mode = silentoldconfig;
-		/* fall through */
+		
 	case oldconfig:
 	case listnewconfig:
 	case oldnoconfig:
 	case silentoldconfig:
-		/* Update until a loop caused no more changes */
+		
 		do {
 			conf_cnt = 0;
 			check_conf(&rootmenu);
@@ -616,9 +644,6 @@ int main(int ac, char **av)
 	}
 
 	if (sync_kconfig) {
-		/* silentoldconfig is used during the build so we shall update autoconf.
-		 * All other commands are only used to generate a config.
-		 */
 		if (conf_get_changed() && conf_write(NULL)) {
 			fprintf(stderr, _("\n*** Error during writing of the configuration.\n\n"));
 			exit(1);
@@ -641,13 +666,8 @@ int main(int ac, char **av)
 	}
 	return 0;
 }
-/*
- * Helper function to facilitate fgets() by Jean Sacren.
- */
-void xfgets(str, size, in)
-	char *str;
-	int size;
-	FILE *in;
+
+void xfgets(char *str, int size, FILE *in)
 {
 	if (fgets(str, size, in) == NULL)
 		fprintf(stderr, "\nError in reading or end of file.\n");

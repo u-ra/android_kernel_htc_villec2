@@ -42,61 +42,54 @@ enum flashlight_mode_flags {
 	FL_MODE_CAMERA_EFFECT_PRE_FLASH,
 	FL_MODE_FLASH_LEVEL1,
 	FL_MODE_FLASH_LEVEL2,
-//HTC_START_Simon.Ti_Liu_20120209 linear led
 	FL_MODE_FLASH_LEVEL3,
 	FL_MODE_FLASH_LEVEL4,
 	FL_MODE_FLASH_LEVEL5,
 	FL_MODE_FLASH_LEVEL6,
 	FL_MODE_FLASH_LEVEL7,
-//HTC_END
 
 };
-#if defined(CONFIG_FLASHLIGHT_AAT1271) || defined(CONFIG_LEDS_MAX8957_FLASH)
+
+#ifdef CONFIG_FLASHLIGHT_AAT
 struct flashlight_platform_data {
 	void (*gpio_init) (void);
 	uint32_t torch;
 	uint32_t flash;
-	uint32_t flash_duration_ms;
-	uint8_t led_count; /* 0: 1 LED, 1: 2 LED */
-
-};
-int aat1271_flashlight_control(int mode);
-#endif
-
-
-#ifdef CONFIG_FLASHLIGHT_AAT1277
-struct flashlight_platform_data {
-	void (*gpio_init) (void);
-	uint32_t torch;
-	uint32_t flash;
+	uint32_t flash_adj;
 	uint32_t torch_set1;
 	uint32_t torch_set2;
 	uint32_t flash_duration_ms;
+	uint8_t led_count; 
+	uint32_t chip_model;
 };
-int aat1277_flashlight_control(int mode);
-#endif
 
-
-#ifdef CONFIG_FLASHLIGHT_AAT3177
-struct flashlight_platform_data {
-	void (*gpio_init) (void);
-	uint32_t flash;
-	uint32_t flash_duration_ms;
-
+enum flashlight_chip{
+	AAT1271 = 0,
+	AAT3177,
+	AAT1277,
 };
-int aat3177_flashlight_control(int mode);
 #endif
-
 
 #ifdef CONFIG_FLASHLIGHT_TPS61310
 struct TPS61310_flashlight_platform_data {
 	void (*gpio_init) (void);
 	uint32_t flash_duration_ms;
-	uint8_t led_count; /* 0: 1 LED, 1: 2 LED */
+	uint8_t led_count; 
 	uint32_t tps61310_strb0;
 	uint32_t tps61310_strb1;
+	uint32_t tps61310_reset;
+	uint8_t mode_pin_suspend_state_low;
+	uint8_t enable_FLT_1500mA;
+	uint8_t disable_tx_mask;
+	uint32_t power_save; 
 };
+
+int aat1271_flashlight_control(int mode);
+int adp1650_flashlight_control(int mode);
+int aat3177_flashlight_control(int mode);
+int aat1277_flashlight_control(int mode);
 int tps61310_flashlight_control(int mode);
+int htc_flashlight_control(int flashlight_mode);
 #endif
 
 #undef __HTC_FLASHLIGHT_H

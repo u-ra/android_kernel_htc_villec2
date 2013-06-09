@@ -21,12 +21,7 @@ static inline char *bind_textdomain_codeset(const char *dn, char *c) { return c;
 extern "C" {
 #endif
 
-#ifdef LKC_DIRECT_LINK
 #define P(name,type,arg)	extern type name arg
-#else
-#include "lkc_defs.h"
-#define P(name,type,arg)	extern type (*name ## _p) arg
-#endif
 #include "lkc_proto.h"
 #undef P
 
@@ -68,9 +63,7 @@ struct kconf_id {
 	enum symbol_type stype;
 };
 
-#ifdef YYDEBUG
 extern int zconfdebug;
-#endif
 
 int zconfparse(void);
 void zconfdump(FILE *out);
@@ -81,10 +74,6 @@ void zconf_nextfile(const char *name);
 int zconf_lineno(void);
 const char *zconf_curname(void);
 
-/* conf.c */
-void xfgets(char *str, int size, FILE *in);
-
-/* confdata.c */
 const char *conf_get_configname(void);
 const char *conf_get_autoconfig_name(void);
 char *conf_get_default_confname(void);
@@ -92,17 +81,19 @@ void sym_set_change_count(int count);
 void sym_add_change_count(int count);
 void conf_set_all_new_symbols(enum conf_def_mode mode);
 
-/* confdata.c and expr.c */
+struct conf_printer {
+	void (*print_symbol)(FILE *, struct symbol *, const char *, void *);
+	void (*print_comment)(FILE *, const char *, void *);
+};
+
 static inline void xfwrite(const void *str, size_t len, size_t count, FILE *out)
 {
-	if (fwrite(str, len, count, out) < count)
-		fprintf(stderr, "\nError in writing or end of file.\n");
+	assert(len != 0);
+
+	if (fwrite(str, len, count, out) != count)
+		fprintf(stderr, "Error in writing or end of file.\n");
 }
 
-/* kconfig_load.c */
-void kconfig_load(void);
-
-/* menu.c */
 void _menu_init(void);
 void menu_warn(struct menu *menu, const char *fmt, ...);
 struct menu *menu_add_menu(void);
@@ -119,17 +110,12 @@ void menu_add_option(int token, char *arg);
 void menu_finalize(struct menu *parent);
 void menu_set_type(int type);
 
-/* util.c */
 struct file *file_lookup(const char *name);
 int file_write_dep(const char *name);
 
 struct gstr {
 	size_t len;
 	char  *s;
-	/*
-	* when max_width is not zero long lines in string s (if any) get
-	* wrapped not to exceed the max_width value
-	*/
 	int max_width;
 };
 struct gstr str_new(void);
@@ -139,7 +125,6 @@ void str_append(struct gstr *gs, const char *s);
 void str_printf(struct gstr *gs, const char *fmt, ...);
 const char *str_get(struct gstr *gs);
 
-/* symbol.c */
 extern struct expr *sym_env_list;
 
 void sym_init(void);
@@ -193,4 +178,4 @@ static inline bool sym_has_value(struct symbol *sym)
 }
 #endif
 
-#endif /* LKC_H */
+#endif 

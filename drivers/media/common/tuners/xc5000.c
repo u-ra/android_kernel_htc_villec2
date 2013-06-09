@@ -49,41 +49,36 @@ static LIST_HEAD(hybrid_tuner_instance_list);
 #define dprintk(level, fmt, arg...) if (debug >= level) \
 	printk(KERN_INFO "%s: " fmt, "xc5000", ## arg)
 
-#define XC5000_DEFAULT_FIRMWARE "dvb-fe-xc5000-1.6.114.fw"
-#define XC5000_DEFAULT_FIRMWARE_SIZE 12401
-
 struct xc5000_priv {
 	struct tuner_i2c_props i2c_props;
 	struct list_head hybrid_tuner_instance_list;
 
 	u32 if_khz;
+	u32 xtal_khz;
 	u32 freq_hz;
 	u32 bandwidth;
 	u8  video_standard;
 	u8  rf_mode;
 	u8  radio_input;
+
+	int chip_id;
 };
 
-/* Misc Defines */
 #define MAX_TV_STANDARD			24
 #define XC_MAX_I2C_WRITE_LENGTH		64
 
-/* Signal Types */
 #define XC_RF_MODE_AIR			0
 #define XC_RF_MODE_CABLE		1
 
-/* Result codes */
 #define XC_RESULT_SUCCESS		0
 #define XC_RESULT_RESET_FAILURE		1
 #define XC_RESULT_I2C_WRITE_FAILURE	2
 #define XC_RESULT_I2C_READ_FAILURE	3
 #define XC_RESULT_OUT_OF_RANGE		5
 
-/* Product id */
 #define XC_PRODUCT_ID_FW_NOT_LOADED	0x2000
 #define XC_PRODUCT_ID_FW_LOADED 	0x1388
 
-/* Registers */
 #define XREG_INIT         0x00
 #define XREG_VIDEO_MODE   0x01
 #define XREG_AUDIO_MODE   0x02
@@ -91,10 +86,9 @@ struct xc5000_priv {
 #define XREG_D_CODE       0x04
 #define XREG_IF_OUT       0x05
 #define XREG_SEEK_MODE    0x07
-#define XREG_POWER_DOWN   0x0A /* Obsolete */
-/* Set the output amplitude - SIF for analog, DTVP/DTVN for digital */
+#define XREG_POWER_DOWN   0x0A 
 #define XREG_OUTPUT_AMP   0x0B
-#define XREG_SIGNALSOURCE 0x0D /* 0=Air, 1=Cable */
+#define XREG_SIGNALSOURCE 0x0D 
 #define XREG_SMOOTHEDCVBS 0x0E
 #define XREG_XTALFREQ     0x0F
 #define XREG_FINERFREQ    0x10
@@ -112,46 +106,12 @@ struct xc5000_priv {
 #define XREG_BUSY         0x09
 #define XREG_BUILD        0x0D
 
-/*
-   Basic firmware description. This will remain with
-   the driver for documentation purposes.
-
-   This represents an I2C firmware file encoded as a
-   string of unsigned char. Format is as follows:
-
-   char[0  ]=len0_MSB  -> len = len_MSB * 256 + len_LSB
-   char[1  ]=len0_LSB  -> length of first write transaction
-   char[2  ]=data0 -> first byte to be sent
-   char[3  ]=data1
-   char[4  ]=data2
-   char[   ]=...
-   char[M  ]=dataN  -> last byte to be sent
-   char[M+1]=len1_MSB  -> len = len_MSB * 256 + len_LSB
-   char[M+2]=len1_LSB  -> length of second write transaction
-   char[M+3]=data0
-   char[M+4]=data1
-   ...
-   etc.
-
-   The [len] value should be interpreted as follows:
-
-   len= len_MSB _ len_LSB
-   len=1111_1111_1111_1111   : End of I2C_SEQUENCE
-   len=0000_0000_0000_0000   : Reset command: Do hardware reset
-   len=0NNN_NNNN_NNNN_NNNN   : Normal transaction: number of bytes = {1:32767)
-   len=1WWW_WWWW_WWWW_WWWW   : Wait command: wait for {1:32767} ms
-
-   For the RESET and WAIT commands, the two following bytes will contain
-   immediately the length of the following transaction.
-
-*/
 struct XC_TV_STANDARD {
 	char *Name;
 	u16 AudioMode;
 	u16 VideoMode;
 };
 
-/* Tuner standards */
 #define MN_NTSC_PAL_BTSC	0
 #define MN_NTSC_PAL_A2		1
 #define MN_NTSC_PAL_EIAJ	2
@@ -204,6 +164,33 @@ static struct XC_TV_STANDARD XC5000_Standard[MAX_TV_STANDARD] = {
 	{"FM Radio-INPUT1_MONO", 0x0278, 0x9002}
 };
 
+
+struct xc5000_fw_cfg {
+	char *name;
+	u16 size;
+};
+
+static const struct xc5000_fw_cfg xc5000a_1_6_114 = {
+	.name = "dvb-fe-xc5000-1.6.114.fw",
+	.size = 12401,
+};
+
+static const struct xc5000_fw_cfg xc5000c_41_024_5 = {
+	.name = "dvb-fe-xc5000c-41.024.5.fw",
+	.size = 16497,
+};
+
+static inline const struct xc5000_fw_cfg *xc5000_assign_firmware(int chip_id)
+{
+	switch (chip_id) {
+	default:
+	case XC5000A:
+		return &xc5000a_1_6_114;
+	case XC5000C:
+		return &xc5000c_41_024_5;
+	}
+}
+
 static int xc_load_fw_and_init_tuner(struct dvb_frontend *fe);
 static int xc5000_is_firmware_loaded(struct dvb_frontend *fe);
 static int xc5000_readreg(struct xc5000_priv *priv, u16 reg, u16 *val);
@@ -222,9 +209,6 @@ static int xc_send_i2c_data(struct xc5000_priv *priv, u8 *buf, int len)
 }
 
 #if 0
-/* This routine is never used because the only time we read data from the
-   i2c bus is when we read registers, and we want that to be an atomic i2c
-   transaction in case we are on a multi-master bus */
 static int xc_read_i2c_data(struct xc5000_priv *priv, u8 *buf, int len)
 {
 	struct i2c_msg msg = { .addr = priv->i2c_props.addr,
@@ -299,15 +283,15 @@ static int xc_write_reg(struct xc5000_priv *priv, u16 regAddr, u16 i2cData)
 	buf[3] = i2cData & 0xFF;
 	result = xc_send_i2c_data(priv, buf, 4);
 	if (result == XC_RESULT_SUCCESS) {
-		/* wait for busy flag to clear */
+		
 		while ((WatchDogTimer > 0) && (result == XC_RESULT_SUCCESS)) {
 			result = xc5000_readreg(priv, XREG_BUSY, (u16 *)buf);
 			if (result == XC_RESULT_SUCCESS) {
 				if ((buf[0] == 0) && (buf[1] == 0)) {
-					/* busy flag cleared */
+					
 					break;
 				} else {
-					xc_wait(5); /* wait 5 ms */
+					xc_wait(5); 
 					WatchDogTimer--;
 				}
 			}
@@ -332,19 +316,16 @@ static int xc_load_i2c_sequence(struct dvb_frontend *fe, const u8 *i2c_sequence)
 		(i2c_sequence[index + 1] != 0xFF)) {
 		len = i2c_sequence[index] * 256 + i2c_sequence[index+1];
 		if (len == 0x0000) {
-			/* RESET command */
+			
 			result = xc5000_TunerReset(fe);
 			index += 2;
 			if (result != XC_RESULT_SUCCESS)
 				return result;
 		} else if (len & 0x8000) {
-			/* WAIT command */
+			
 			xc_wait(len & 0x7FFF);
 			index += 2;
 		} else {
-			/* Send i2c data whilst ensuring individual transactions
-			 * do not exceed XC_MAX_I2C_WRITE_LENGTH bytes.
-			 */
 			index += 2;
 			buf[0] = i2c_sequence[index];
 			buf[1] = i2c_sequence[index + 1];
@@ -423,9 +404,6 @@ static int xc_set_RF_frequency(struct xc5000_priv *priv, u32 freq_hz)
 
 	freq_code = (u16)(freq_hz / 15625);
 
-	/* Starting in firmware version 1.1.44, Xceive recommends using the
-	   FINERFREQ for all normal tuning (the doc indicates reg 0x03 should
-	   only be used for fast scanning for channel lock) */
 	return xc_write_reg(priv, XREG_FINERFREQ, freq_code);
 }
 
@@ -546,18 +524,45 @@ static int xc_tune_channel(struct xc5000_priv *priv, u32 freq_hz, int mode)
 	return found;
 }
 
+static int xc_set_xtal(struct dvb_frontend *fe)
+{
+	struct xc5000_priv *priv = fe->tuner_priv;
+	int ret = XC_RESULT_SUCCESS;
+
+	switch (priv->chip_id) {
+	default:
+	case XC5000A:
+		
+		break;
+	case XC5000C:
+		switch (priv->xtal_khz) {
+		default:
+		case 32000:
+			
+			break;
+		case 31875:
+			
+			ret = xc_write_reg(priv, 0x000f, 0x8081);
+			break;
+		}
+		break;
+	}
+	return ret;
+}
 
 static int xc5000_fwupload(struct dvb_frontend *fe)
 {
 	struct xc5000_priv *priv = fe->tuner_priv;
 	const struct firmware *fw;
 	int ret;
+	const struct xc5000_fw_cfg *desired_fw =
+		xc5000_assign_firmware(priv->chip_id);
 
-	/* request the firmware, this will block and timeout */
+	
 	printk(KERN_INFO "xc5000: waiting for firmware upload (%s)...\n",
-		XC5000_DEFAULT_FIRMWARE);
+		desired_fw->name);
 
-	ret = request_firmware(&fw, XC5000_DEFAULT_FIRMWARE,
+	ret = request_firmware(&fw, desired_fw->name,
 		priv->i2c_props.adap->dev.parent);
 	if (ret) {
 		printk(KERN_ERR "xc5000: Upload failed. (file not found?)\n");
@@ -569,12 +574,14 @@ static int xc5000_fwupload(struct dvb_frontend *fe)
 		ret = XC_RESULT_SUCCESS;
 	}
 
-	if (fw->size != XC5000_DEFAULT_FIRMWARE_SIZE) {
+	if (fw->size != desired_fw->size) {
 		printk(KERN_ERR "xc5000: firmware incorrect size\n");
 		ret = XC_RESULT_RESET_FAILURE;
 	} else {
 		printk(KERN_INFO "xc5000: firmware uploading...\n");
 		ret = xc_load_i2c_sequence(fe,  fw->data);
+		if (XC_RESULT_SUCCESS == ret)
+			ret = xc_set_xtal(fe);
 		printk(KERN_INFO "xc5000: firmware upload complete...\n");
 	}
 
@@ -595,10 +602,6 @@ static void xc_debug_dump(struct xc5000_priv *priv)
 	u8 fw_majorversion = 0, fw_minorversion = 0;
 	u16 fw_buildversion = 0;
 
-	/* Wait for stats to stabilize.
-	 * Frame Lines needs two frame times after initial lock
-	 * before it is valid.
-	 */
 	xc_wait(100);
 
 	xc_get_ADC_Envelope(priv,  &adc_envelope);
@@ -628,20 +631,13 @@ static void xc_debug_dump(struct xc5000_priv *priv)
 	dprintk(1, "*** Quality (0:<8dB, 7:>56dB) = %d\n", quality);
 }
 
-/*
- * As defined on EN 300 429, the DVB-C roll-off factor is 0.15.
- * So, the amount of the needed bandwith is given by:
- * 	Bw = Symbol_rate * (1 + 0.15)
- * As such, the maximum symbol rate supported by 6 MHz is given by:
- *	max_symbol_rate = 6 MHz / 1.15 = 5217391 Bauds
- */
-#define MAX_SYMBOL_RATE_6MHz	5217391
-
-static int xc5000_set_params(struct dvb_frontend *fe,
-	struct dvb_frontend_parameters *params)
+static int xc5000_set_params(struct dvb_frontend *fe)
 {
+	int ret, b;
 	struct xc5000_priv *priv = fe->tuner_priv;
-	int ret;
+	u32 bw = fe->dtv_property_cache.bandwidth_hz;
+	u32 freq = fe->dtv_property_cache.frequency;
+	u32 delsys  = fe->dtv_property_cache.delivery_system;
 
 	if (xc5000_is_firmware_loaded(fe) != XC_RESULT_SUCCESS) {
 		if (xc_load_fw_and_init_tuner(fe) != XC_RESULT_SUCCESS) {
@@ -650,88 +646,69 @@ static int xc5000_set_params(struct dvb_frontend *fe,
 		}
 	}
 
-	dprintk(1, "%s() frequency=%d (Hz)\n", __func__, params->frequency);
+	dprintk(1, "%s() frequency=%d (Hz)\n", __func__, freq);
 
-	if (fe->ops.info.type == FE_ATSC) {
-		dprintk(1, "%s() ATSC\n", __func__);
-		switch (params->u.vsb.modulation) {
-		case VSB_8:
-		case VSB_16:
-			dprintk(1, "%s() VSB modulation\n", __func__);
-			priv->rf_mode = XC_RF_MODE_AIR;
-			priv->freq_hz = params->frequency - 1750000;
-			priv->bandwidth = BANDWIDTH_6_MHZ;
-			priv->video_standard = DTV6;
-			break;
-		case QAM_64:
-		case QAM_256:
-		case QAM_AUTO:
-			dprintk(1, "%s() QAM modulation\n", __func__);
-			priv->rf_mode = XC_RF_MODE_CABLE;
-			priv->freq_hz = params->frequency - 1750000;
-			priv->bandwidth = BANDWIDTH_6_MHZ;
-			priv->video_standard = DTV6;
-			break;
-		default:
-			return -EINVAL;
-		}
-	} else if (fe->ops.info.type == FE_OFDM) {
+	switch (delsys) {
+	case SYS_ATSC:
+		dprintk(1, "%s() VSB modulation\n", __func__);
+		priv->rf_mode = XC_RF_MODE_AIR;
+		priv->freq_hz = freq - 1750000;
+		priv->video_standard = DTV6;
+		break;
+	case SYS_DVBC_ANNEX_B:
+		dprintk(1, "%s() QAM modulation\n", __func__);
+		priv->rf_mode = XC_RF_MODE_CABLE;
+		priv->freq_hz = freq - 1750000;
+		priv->video_standard = DTV6;
+		break;
+	case SYS_DVBT:
+	case SYS_DVBT2:
 		dprintk(1, "%s() OFDM\n", __func__);
-		switch (params->u.ofdm.bandwidth) {
-		case BANDWIDTH_6_MHZ:
-			priv->bandwidth = BANDWIDTH_6_MHZ;
+		switch (bw) {
+		case 6000000:
 			priv->video_standard = DTV6;
-			priv->freq_hz = params->frequency - 1750000;
+			priv->freq_hz = freq - 1750000;
 			break;
-		case BANDWIDTH_7_MHZ:
-			printk(KERN_ERR "xc5000 bandwidth 7MHz not supported\n");
-			return -EINVAL;
-		case BANDWIDTH_8_MHZ:
-			priv->bandwidth = BANDWIDTH_8_MHZ;
+		case 7000000:
+			priv->video_standard = DTV7;
+			priv->freq_hz = freq - 2250000;
+			break;
+		case 8000000:
 			priv->video_standard = DTV8;
-			priv->freq_hz = params->frequency - 2750000;
+			priv->freq_hz = freq - 2750000;
 			break;
 		default:
 			printk(KERN_ERR "xc5000 bandwidth not set!\n");
 			return -EINVAL;
 		}
 		priv->rf_mode = XC_RF_MODE_AIR;
-	} else if (fe->ops.info.type == FE_QAM) {
-		switch (params->u.qam.modulation) {
-		case QAM_256:
-		case QAM_AUTO:
-		case QAM_16:
-		case QAM_32:
-		case QAM_64:
-		case QAM_128:
-			dprintk(1, "%s() QAM modulation\n", __func__);
-			priv->rf_mode = XC_RF_MODE_CABLE;
-			/*
-			 * Using a 8MHz bandwidth sometimes fail
-			 * with 6MHz-spaced channels, due to inter-carrier
-			 * interference. So, use DTV6 firmware
-			 */
-			if (params->u.qam.symbol_rate <= MAX_SYMBOL_RATE_6MHz) {
-				priv->bandwidth = BANDWIDTH_6_MHZ;
-				priv->video_standard = DTV6;
-				priv->freq_hz = params->frequency - 1750000;
-			} else {
-				priv->bandwidth = BANDWIDTH_8_MHZ;
-				priv->video_standard = DTV7_8;
-				priv->freq_hz = params->frequency - 2750000;
-			}
-			break;
-		default:
-			dprintk(1, "%s() Unsupported QAM type\n", __func__);
-			return -EINVAL;
+	case SYS_DVBC_ANNEX_A:
+	case SYS_DVBC_ANNEX_C:
+		dprintk(1, "%s() QAM modulation\n", __func__);
+		priv->rf_mode = XC_RF_MODE_CABLE;
+		if (bw <= 6000000) {
+			priv->video_standard = DTV6;
+			priv->freq_hz = freq - 1750000;
+			b = 6;
+		} else if (bw <= 7000000) {
+			priv->video_standard = DTV7;
+			priv->freq_hz = freq - 2250000;
+			b = 7;
+		} else {
+			priv->video_standard = DTV7_8;
+			priv->freq_hz = freq - 2750000;
+			b = 8;
 		}
-	} else {
-		printk(KERN_ERR "xc5000 modulation type not supported!\n");
+		dprintk(1, "%s() Bandwidth %dMHz (%d)\n", __func__,
+			b, bw);
+		break;
+	default:
+		printk(KERN_ERR "xc5000: delivery system is not supported!\n");
 		return -EINVAL;
 	}
 
-	dprintk(1, "%s() frequency=%d (compensated)\n",
-		__func__, priv->freq_hz);
+	dprintk(1, "%s() frequency=%d (compensated to %d)\n",
+		__func__, freq, priv->freq_hz);
 
 	ret = xc_SetSignalSource(priv, priv->rf_mode);
 	if (ret != XC_RESULT_SUCCESS) {
@@ -762,6 +739,8 @@ static int xc5000_set_params(struct dvb_frontend *fe,
 
 	if (debug)
 		xc_debug_dump(priv);
+
+	priv->bandwidth = bw;
 
 	return 0;
 }
@@ -794,43 +773,40 @@ static int xc5000_set_tv_freq(struct dvb_frontend *fe,
 	dprintk(1, "%s() frequency=%d (in units of 62.5khz)\n",
 		__func__, params->frequency);
 
-	/* Fix me: it could be air. */
+	
 	priv->rf_mode = params->mode;
 	if (params->mode > XC_RF_MODE_CABLE)
 		priv->rf_mode = XC_RF_MODE_CABLE;
 
-	/* params->frequency is in units of 62.5khz */
+	
 	priv->freq_hz = params->frequency * 62500;
 
-	/* FIX ME: Some video standards may have several possible audio
-		   standards. We simply default to one of them here.
-	 */
 	if (params->std & V4L2_STD_MN) {
-		/* default to BTSC audio standard */
+		
 		priv->video_standard = MN_NTSC_PAL_BTSC;
 		goto tune_channel;
 	}
 
 	if (params->std & V4L2_STD_PAL_BG) {
-		/* default to NICAM audio standard */
+		
 		priv->video_standard = BG_PAL_NICAM;
 		goto tune_channel;
 	}
 
 	if (params->std & V4L2_STD_PAL_I) {
-		/* default to NICAM audio standard */
+		
 		priv->video_standard = I_PAL_NICAM;
 		goto tune_channel;
 	}
 
 	if (params->std & V4L2_STD_PAL_DK) {
-		/* default to NICAM audio standard */
+		
 		priv->video_standard = DK_PAL_NICAM;
 		goto tune_channel;
 	}
 
 	if (params->std & V4L2_STD_SECAM_DK) {
-		/* default to A2 DK1 audio standard */
+		
 		priv->video_standard = DK_SECAM_A2DK1;
 		goto tune_channel;
 	}
@@ -968,6 +944,14 @@ static int xc5000_get_frequency(struct dvb_frontend *fe, u32 *freq)
 	return 0;
 }
 
+static int xc5000_get_if_frequency(struct dvb_frontend *fe, u32 *freq)
+{
+	struct xc5000_priv *priv = fe->tuner_priv;
+	dprintk(1, "%s()\n", __func__);
+	*freq = priv->if_khz * 1000;
+	return 0;
+}
+
 static int xc5000_get_bandwidth(struct dvb_frontend *fe, u32 *bw)
 {
 	struct xc5000_priv *priv = fe->tuner_priv;
@@ -1002,17 +986,12 @@ static int xc_load_fw_and_init_tuner(struct dvb_frontend *fe)
 			return ret;
 	}
 
-	/* Start the tuner self-calibration process */
+	
 	ret |= xc_initialize(priv);
 
-	/* Wait for calibration to complete.
-	 * We could continue but XC5000 will clock stretch subsequent
-	 * I2C transactions until calibration is complete.  This way we
-	 * don't have to rely on clock stretching working.
-	 */
 	xc_wait(100);
 
-	/* Default to "CABLE" mode */
+	
 	ret |= xc_write_reg(priv, XREG_SIGNALSOURCE, XC_RF_MODE_CABLE);
 
 	return ret;
@@ -1024,13 +1003,10 @@ static int xc5000_sleep(struct dvb_frontend *fe)
 
 	dprintk(1, "%s()\n", __func__);
 
-	/* Avoid firmware reload on slow devices */
+	
 	if (no_poweroff)
 		return 0;
 
-	/* According to Xceive technical support, the "powerdown" register
-	   was removed in newer versions of the firmware.  The "supported"
-	   way to sleep the tuner is to pull the reset pin low for 10ms */
 	ret = xc5000_TunerReset(fe);
 	if (ret != XC_RESULT_SUCCESS) {
 		printk(KERN_ERR
@@ -1108,6 +1084,7 @@ static const struct dvb_tuner_ops xc5000_tuner_ops = {
 	.set_params	   = xc5000_set_params,
 	.set_analog_params = xc5000_set_analog_params,
 	.get_frequency	   = xc5000_get_frequency,
+	.get_if_frequency  = xc5000_get_if_frequency,
 	.get_bandwidth	   = xc5000_get_bandwidth,
 	.get_status	   = xc5000_get_status
 };
@@ -1134,29 +1111,29 @@ struct dvb_frontend *xc5000_attach(struct dvb_frontend *fe,
 		goto fail;
 		break;
 	case 1:
-		/* new tuner instance */
-		priv->bandwidth = BANDWIDTH_6_MHZ;
+		
+		priv->bandwidth = 6000000;
 		fe->tuner_priv = priv;
 		break;
 	default:
-		/* existing tuner instance */
+		
 		fe->tuner_priv = priv;
 		break;
 	}
 
 	if (priv->if_khz == 0) {
-		/* If the IF hasn't been set yet, use the value provided by
-		   the caller (occurs in hybrid devices where the analog
-		   call to xc5000_attach occurs before the digital side) */
 		priv->if_khz = cfg->if_khz;
 	}
+
+	if (priv->xtal_khz == 0)
+		priv->xtal_khz = cfg->xtal_khz;
 
 	if (priv->radio_input == 0)
 		priv->radio_input = cfg->radio_input;
 
-	/* Check if firmware has been loaded. It is possible that another
-	   instance of the driver has loaded the firmware.
-	 */
+	if ((priv->chip_id == 0) || (cfg->chip_id))
+		priv->chip_id = (cfg->chip_id) ? cfg->chip_id : 0;
+
 	if (xc5000_readreg(priv, XREG_PRODUCT_ID, &id) != XC_RESULT_SUCCESS)
 		goto fail;
 

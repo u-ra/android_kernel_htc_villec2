@@ -31,7 +31,7 @@ int snd_pcm_hw_param_last(struct snd_pcm_substream *pcm,
 int snd_pcm_hw_param_value(const struct snd_pcm_hw_params *params,
 			   snd_pcm_hw_param_t var, int *dir);
 
-#define SNDRV_MASK_BITS	64	/* we use so far 64bits only */
+#define SNDRV_MASK_BITS	64	
 #define SNDRV_MASK_SIZE	(SNDRV_MASK_BITS / 32)
 #define MASK_OFS(i)	((i) >> 5)
 #define MASK_BIT(i)	(1U << ((i) & 31))
@@ -337,5 +337,19 @@ static inline unsigned int sub(unsigned int a, unsigned int b)
 	return 0;
 }
 
-#endif /* __SOUND_PCM_PARAMS_H */
+#define params_access(p) ((__force snd_pcm_access_t)\
+		snd_mask_min(hw_param_mask_c((p), SNDRV_PCM_HW_PARAM_ACCESS)))
+#define params_format(p) ((__force snd_pcm_format_t)\
+		snd_mask_min(hw_param_mask_c((p), SNDRV_PCM_HW_PARAM_FORMAT)))
+#define params_subformat(p) \
+	snd_mask_min(hw_param_mask_c((p), SNDRV_PCM_HW_PARAM_SUBFORMAT))
 
+static inline unsigned int
+params_period_bytes(const struct snd_pcm_hw_params *p)
+{
+	return (params_period_size(p) *
+		snd_pcm_format_physical_width(params_format(p)) *
+		params_channels(p)) / 8;
+}
+
+#endif 

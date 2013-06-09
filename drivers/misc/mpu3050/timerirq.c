@@ -42,10 +42,6 @@
 #include "mltypes.h"
 #include "timerirq.h"
 
-#define INITIAL_TIMERS_PERIOD     67
-#define INITIAL_QUICK_EVENT_COUNT 10
-
-/* function which gets timer data and sends it to TIMER */
 struct timerirq_data {
 	int pid;
 	int data_ready;
@@ -57,7 +53,6 @@ struct timerirq_data {
 	wait_queue_head_t timerirq_wait;
 	struct timer_list timer;
 	struct miscdevice *dev;
-	unsigned int event_num;
 };
 
 static struct miscdevice *timerirq_dev_data;
@@ -67,8 +62,6 @@ static void timerirq_handler(unsigned long arg)
 	struct timerirq_data *data = (struct timerirq_data *)arg;
 	struct timeval irqtime;
 
-	/* dev_info(data->dev->this_device,
-	   "%s, %ld\n", __func__, (unsigned long)data); */
 
 	data->data.interruptcount++;
 
@@ -81,18 +74,11 @@ static void timerirq_handler(unsigned long arg)
 
 	wake_up_interruptible(&data->timerirq_wait);
 
-	if (data->run) {
-		if (data->event_num >= INITIAL_QUICK_EVENT_COUNT)
-			mod_timer(&data->timer,
-				jiffies + msecs_to_jiffies(data->period));
-		else if (data->event_num < INITIAL_QUICK_EVENT_COUNT)
-			mod_timer(&data->timer,
-				jiffies + msecs_to_jiffies(INITIAL_TIMERS_PERIOD));
-	} else {
+	if (data->run)
+		mod_timer(&data->timer,
+			jiffies + msecs_to_jiffies(data->period));
+	else
 		complete(&data->timer_done);
-	}
-
-	data->event_num++;
 }
 
 static int start_timerirq(struct timerirq_data *data)
@@ -100,11 +86,11 @@ static int start_timerirq(struct timerirq_data *data)
 	dev_dbg(data->dev->this_device,
 		"%s current->pid %d\n", __func__, current->pid);
 
-	/* Timer already running... success */
+	
 	if (data->run)
 		return 0;
 
-	/* Don't allow a period of 0 since this would fire constantly */
+	
 	if (!data->period)
 		return -EINVAL;
 
@@ -113,17 +99,12 @@ static int start_timerirq(struct timerirq_data *data)
 
 	printk(KERN_DEBUG "[GSNR][MPU3050][TIMERIRQ]%s: data->period = %lu\n",
 		__func__, data->period);
-/*
-	printk(KERN_NOTICE "[GSNR][MPU3050][TIMERIRQ]%s: data = 0x%x, &data->timer = 0x%x\n",
-		__func__, (unsigned int)data, (unsigned int)&(data->timer));
-	printk(KERN_NOTICE "[GSNR][MPU3050][TIMERIRQ]%s: timerirq_handler = 0x%x\n",
-		__func__, (unsigned int)timerirq_handler);*/
 
 	data->run = TRUE;
 	data->data_ready = FALSE;
 
 	return mod_timer(&data->timer,
-			jiffies + msecs_to_jiffies(1));
+			jiffies + msecs_to_jiffies(data->period));
 }
 
 static int stop_timerirq(struct timerirq_data *data)
@@ -136,30 +117,19 @@ static int stop_timerirq(struct timerirq_data *data)
 	printk(KERN_DEBUG "[GSNR][MPU3050][TIMERIRQ]%s: data->period = %lu, "
 			  "data->run = %d\n",
 			__func__, data->period, data->run);
-	/*
-	printk(KERN_NOTICE "[GSNR][MPU3050][TIMERIRQ]%s: data = 0x%x, &data->timer = 0x%x\n",
-		__func__, (unsigned int)data, (unsigned int)&(data->timer));*/
 
 	if (data->run) {
 		data->run = FALSE;
-		data->event_num = 0;
 		mod_timer(&data->timer, jiffies + 1);
 		wait_for_completion(&data->timer_done);
 
 		rc = del_timer_sync(&(data->timer));
-		/*printk(KERN_DEBUG "[GSNR][MPU3050][TIMERIRQ]%s: del_timer_sync"
-			"() return = %d\n", __func__, rc);*/
 	}
 	return 0;
 }
 
-/* The following depends on patch fa1f68db6ca7ebb6fc4487ac215bffba06c01c28
- * drivers: misc: pass miscdevice pointer via file private data
- */
 static int timerirq_open(struct inode *inode, struct file *file)
 {
-	/* Device node is availabe in the file->private_data, this is
-	 * exactly what we want so we leave it there */
 	struct miscdevice *dev_data = file->private_data;
 	struct timerirq_data *data = kzalloc(sizeof(*data), GFP_KERNEL);
 	if (!data)
@@ -176,8 +146,6 @@ static int timerirq_open(struct inode *inode, struct file *file)
 	init_completion(&data->timer_done);
 	setup_timer(&data->timer, timerirq_handler, (unsigned long)data);
 
-	data->event_num = 0;
-
 	printk(KERN_DEBUG "[TIMERIRQ]%s: current->pid %d\n",
 		__func__, current->pid);
 
@@ -192,7 +160,7 @@ static int timerirq_release(struct inode *inode, struct file *file)
 	printk(KERN_DEBUG "[TIMERIRQ] %s: data->run = %d\n",
 				__func__, data->run);
 
-	/*WARN_ON(1);*/
+	
 
 	if (data->run)
 		stop_timerirq(data);
@@ -205,7 +173,6 @@ static int timerirq_release(struct inode *inode, struct file *file)
 	return 0;
 }
 
-/* read function called when from /dev/timerirq is read */
 static ssize_t timerirq_read(struct file *file,
 			   char *buf, size_t count, loff_t *ppos)
 {
@@ -246,7 +213,6 @@ unsigned int timerirq_poll(struct file *file, struct poll_table_struct *poll)
 	return mask;
 }
 
-/* ioctl - I/O control */
 static long timerirq_ioctl(struct file *file,
 			   unsigned int cmd, unsigned long arg)
 {
@@ -286,7 +252,6 @@ static long timerirq_ioctl(struct file *file,
 	return retval;
 }
 
-/* define which file operations are supported */
 static const struct file_operations timerirq_fops = {
 	.owner = THIS_MODULE,
 	.read = timerirq_read,

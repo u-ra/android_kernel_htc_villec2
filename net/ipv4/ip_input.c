@@ -113,7 +113,8 @@
  *		2 of the License, or (at your option) any later version.
  */
 
-#include <asm/system.h>
+#define pr_fmt(fmt) "IPv4: " fmt
+
 #include <linux/module.h>
 #include <linux/types.h>
 #include <linux/kernel.h>
@@ -145,10 +146,7 @@
 #include <linux/mroute.h>
 #include <linux/netlink.h>
 
-/*
- *	Process Router Attention IP option (RFC 2113)
- */
-int ip_call_ra_chain(struct sk_buff *skb)
+bool ip_call_ra_chain(struct sk_buff *skb)
 {
 	struct ip_ra_chain *ra;
 	u8 protocol = ip_hdr(skb)->protocol;
@@ -158,16 +156,13 @@ int ip_call_ra_chain(struct sk_buff *skb)
 	for (ra = rcu_dereference(ip_ra_chain); ra; ra = rcu_dereference(ra->next)) {
 		struct sock *sk = ra->sk;
 
-		/* If socket is bound to an interface, only report
-		 * the packet if it came  from that interface.
-		 */
 		if (sk && inet_sk(sk)->inet_num == protocol &&
 		    (!sk->sk_bound_dev_if ||
 		     sk->sk_bound_dev_if == dev->ifindex) &&
 		    net_eq(sock_net(sk), dev_net(dev))) {
-			if (ip_hdr(skb)->frag_off & htons(IP_MF | IP_OFFSET)) {
+			if (ip_is_fragment(ip_hdr(skb))) {
 				if (ip_defrag(skb, IP_DEFRAG_CALL_RA_CHAIN))
-					return 1;
+					return true;
 			}
 			if (last) {
 				struct sk_buff *skb2 = skb_clone(skb, GFP_ATOMIC);
@@ -180,9 +175,9 @@ int ip_call_ra_chain(struct sk_buff *skb)
 
 	if (last) {
 		raw_rcv(last, skb);
-		return 1;
+		return true;
 	}
-	return 0;
+	return false;
 }
 
 static int ip_local_deliver_finish(struct sk_buff *skb)
@@ -191,7 +186,7 @@ static int ip_local_deliver_finish(struct sk_buff *skb)
 
 	__skb_pull(skb, ip_hdrlen(skb));
 
-	/* Point into the IP datagram, just past the header. */
+	
 	skb_reset_transport_header(skb);
 
 	rcu_read_lock();
@@ -247,16 +242,10 @@ static int ip_local_deliver_finish(struct sk_buff *skb)
 	return 0;
 }
 
-/*
- * 	Deliver IP Packets to the higher protocol layers.
- */
 int ip_local_deliver(struct sk_buff *skb)
 {
-	/*
-	 *	Reassemble IP fragments.
-	 */
 
-	if (ip_hdr(skb)->frag_off & htons(IP_MF | IP_OFFSET)) {
+	if (ip_is_fragment(ip_hdr(skb))) {
 		if (ip_defrag(skb, IP_DEFRAG_LOCAL_DELIVER))
 			return 0;
 	}
@@ -265,19 +254,12 @@ int ip_local_deliver(struct sk_buff *skb)
 		       ip_local_deliver_finish);
 }
 
-static inline int ip_rcv_options(struct sk_buff *skb)
+static inline bool ip_rcv_options(struct sk_buff *skb)
 {
 	struct ip_options *opt;
 	const struct iphdr *iph;
 	struct net_device *dev = skb->dev;
 
-	/* It looks as overkill, because not all
-	   IP options require packet mangling.
-	   But it is the easiest for now, especially taking
-	   into account that combination of IP options
-	   and running sniffer is extremely rare condition.
-					      --ANK (980813)
-	*/
 	if (skb_cow(skb, skb_headroom(skb))) {
 		IP_INC_STATS_BH(dev_net(dev), IPSTATS_MIB_INDISCARDS);
 		goto drop;
@@ -299,8 +281,8 @@ static inline int ip_rcv_options(struct sk_buff *skb)
 			if (!IN_DEV_SOURCE_ROUTE(in_dev)) {
 				if (IN_DEV_LOG_MARTIANS(in_dev) &&
 				    net_ratelimit())
-					printk(KERN_INFO "source route option %pI4 -> %pI4\n",
-					       &iph->saddr, &iph->daddr);
+					pr_info("source route option %pI4 -> %pI4\n",
+						&iph->saddr, &iph->daddr);
 				goto drop;
 			}
 		}
@@ -309,9 +291,9 @@ static inline int ip_rcv_options(struct sk_buff *skb)
 			goto drop;
 	}
 
-	return 0;
+	return false;
 drop:
-	return -1;
+	return true;
 }
 
 static int ip_rcv_finish(struct sk_buff *skb)
@@ -319,10 +301,6 @@ static int ip_rcv_finish(struct sk_buff *skb)
 	const struct iphdr *iph = ip_hdr(skb);
 	struct rtable *rt;
 
-	/*
-	 *	Initialise the virtual path cache for the packet. It describes
-	 *	how the packet travels inside Linux networking.
-	 */
 	if (skb_dst(skb) == NULL) {
 		int err = ip_route_input_noref(skb, iph->daddr, iph->saddr,
 					       iph->tos, skb->dev);
@@ -369,17 +347,11 @@ drop:
 	return NET_RX_DROP;
 }
 
-/*
- * 	Main IP Receive routine.
- */
 int ip_rcv(struct sk_buff *skb, struct net_device *dev, struct packet_type *pt, struct net_device *orig_dev)
 {
 	const struct iphdr *iph;
 	u32 len;
 
-	/* When the interface is in promisc. mode, drop all the crap
-	 * that it receives, do not try to analyse it.
-	 */
 	if (skb->pkt_type == PACKET_OTHERHOST)
 		goto drop;
 
@@ -396,16 +368,6 @@ int ip_rcv(struct sk_buff *skb, struct net_device *dev, struct packet_type *pt, 
 
 	iph = ip_hdr(skb);
 
-	/*
-	 *	RFC1122: 3.2.1.2 MUST silently discard any IP frame that fails the checksum.
-	 *
-	 *	Is the datagram acceptable?
-	 *
-	 *	1.	Length at least the size of an ip header
-	 *	2.	Version of 4
-	 *	3.	Checksums correctly. [Speed optimisation for later, skip loopback checksums]
-	 *	4.	Doesn't have a bogus length
-	 */
 
 	if (iph->ihl < 5 || iph->version != 4)
 		goto inhdr_error;
@@ -425,19 +387,15 @@ int ip_rcv(struct sk_buff *skb, struct net_device *dev, struct packet_type *pt, 
 	} else if (len < (iph->ihl*4))
 		goto inhdr_error;
 
-	/* Our transport medium may have padded the buffer out. Now we know it
-	 * is IP we can trim to the true length of the frame.
-	 * Note this now means skb->len holds ntohs(iph->tot_len).
-	 */
 	if (pskb_trim_rcsum(skb, len)) {
 		IP_INC_STATS_BH(dev_net(dev), IPSTATS_MIB_INDISCARDS);
 		goto drop;
 	}
 
-	/* Remove any debris in the socket control block */
+	
 	memset(IPCB(skb), 0, sizeof(struct inet_skb_parm));
 
-	/* Must drop socket now because of tproxy. */
+	
 	skb_orphan(skb);
 
 	return NF_HOOK(NFPROTO_IPV4, NF_INET_PRE_ROUTING, skb, dev, NULL,

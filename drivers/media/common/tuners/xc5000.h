@@ -27,28 +27,25 @@
 struct dvb_frontend;
 struct i2c_adapter;
 
+#define XC5000A 1
+#define XC5000C 2
+
 struct xc5000_config {
 	u8   i2c_address;
 	u32  if_khz;
 	u8   radio_input;
+	u32  xtal_khz;
+
+	int chip_id;
 };
 
-/* xc5000 callback command */
 #define XC5000_TUNER_RESET		0
 
-/* Possible Radio inputs */
 #define XC5000_RADIO_NOT_CONFIGURED		0
 #define XC5000_RADIO_FM1			1
 #define XC5000_RADIO_FM2			2
 #define XC5000_RADIO_FM1_MONO			3
 
-/* For each bridge framework, when it attaches either analog or digital,
- * it has to store a reference back to its _core equivalent structure,
- * so that it can service the hardware by steering gpio's etc.
- * Each bridge implementation is different so cast devptr accordingly.
- * The xc5000 driver cares not for this value, other than ensuring
- * it's passed back to a bridge during tuner_callback().
- */
 
 #if defined(CONFIG_MEDIA_TUNER_XC5000) || \
     (defined(CONFIG_MEDIA_TUNER_XC5000_MODULE) && defined(MODULE))

@@ -19,18 +19,11 @@
 #include <mach/mhl.h>
 #include "TypeDefs.h"
 #include <mach/board.h>
-bool TPI_Init(void);				/* Document purpose, usage */
-void TPI_Poll(void);			/* Document purpose, usage, rename */
+bool TPI_Init(void);				
+void TPI_Poll(void);			
 byte Status_Query(void);
 void D2ToD3(void);
 bool tpi_get_hpd_state(void);
-
-#ifdef CONFIG_FB_MSM_HDMI_MHL_SUPERDEMO
-extern void Tpi_reset_remote_intr(void);
-extern int Tpi_query_remote_type(uint16_t *evt_type);
-extern void Tpi_query_remote_keyInfo(T_MHL_REMOTE_KEY_DATA *data);
-extern void Tpi_query_remote_touchInfo(uint16_t *finger_num, T_MHL_REMOTE_FINGER_DATA *data);
-#endif
 
 #define	POWER_STATE_D3				3
 #define	POWER_STATE_D0_NO_MHL		2

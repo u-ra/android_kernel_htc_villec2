@@ -17,21 +17,18 @@
 #include <linux/mfd/core.h>
 #include <linux/pm_runtime.h>
 #include <linux/slab.h>
-
-static struct device_type mfd_dev_type = {
-	.name	= "mfd_device",
-};
+#include <linux/module.h>
 
 int mfd_cell_enable(struct platform_device *pdev)
 {
 	const struct mfd_cell *cell = mfd_get_cell(pdev);
 	int err = 0;
 
-	/* only call enable hook if the cell wasn't previously enabled */
+	
 	if (atomic_inc_return(cell->usage_count) == 1)
 		err = cell->enable(pdev);
 
-	/* if the enable hook failed, decrement counter to allow retries */
+	
 	if (err)
 		atomic_dec(cell->usage_count);
 
@@ -44,15 +41,15 @@ int mfd_cell_disable(struct platform_device *pdev)
 	const struct mfd_cell *cell = mfd_get_cell(pdev);
 	int err = 0;
 
-	/* only disable if no other clients are using it */
+	
 	if (atomic_dec_return(cell->usage_count) == 0)
 		err = cell->disable(pdev);
 
-	/* if the disable hook failed, increment to allow retries */
+	
 	if (err)
 		atomic_inc(cell->usage_count);
 
-	/* sanity check; did someone call disable too many times? */
+	
 	WARN_ON(atomic_read(cell->usage_count) < 0);
 
 	return err;
@@ -91,7 +88,6 @@ static int mfd_add_device(struct device *parent, int id,
 		goto fail_device;
 
 	pdev->dev.parent = parent;
-	pdev->dev.type = &mfd_dev_type;
 
 	if (cell->pdata_size) {
 		ret = platform_device_add_data(pdev,
@@ -108,7 +104,7 @@ static int mfd_add_device(struct device *parent, int id,
 		res[r].name = cell->resources[r].name;
 		res[r].flags = cell->resources[r].flags;
 
-		/* Find out base to use */
+		
 		if ((cell->resources[r].flags & IORESOURCE_MEM) && mem_base) {
 			res[r].parent = mem_base;
 			res[r].start = mem_base->start +
@@ -165,8 +161,8 @@ int mfd_add_devices(struct device *parent, int id,
 	int ret = 0;
 	atomic_t *cnts;
 
-	/* initialize reference counting for all cells */
-	cnts = kcalloc(sizeof(*cnts), n_devs, GFP_KERNEL);
+	
+	cnts = kcalloc(n_devs, sizeof(*cnts), GFP_KERNEL);
 	if (!cnts)
 		return -ENOMEM;
 
@@ -187,17 +183,11 @@ EXPORT_SYMBOL(mfd_add_devices);
 
 static int mfd_remove_devices_fn(struct device *dev, void *c)
 {
-	struct platform_device *pdev;
-	const struct mfd_cell *cell;
+	struct platform_device *pdev = to_platform_device(dev);
+	const struct mfd_cell *cell = mfd_get_cell(pdev);
 	atomic_t **usage_count = c;
 
-	if (dev->type != &mfd_dev_type)
-		return 0;
-
-	pdev = to_platform_device(dev);
-	cell = mfd_get_cell(pdev);
-
-	/* find the base address of usage_count pointers (for freeing) */
+	
 	if (!*usage_count || (cell->usage_count < *usage_count))
 		*usage_count = cell->usage_count;
 
@@ -221,7 +211,7 @@ int mfd_clone_cell(const char *cell, const char **clones, size_t n_clones)
 	struct platform_device *pdev;
 	int i;
 
-	/* fetch the parent cell's device (should already be registered!) */
+	
 	dev = bus_find_device_by_name(&platform_bus_type, NULL, cell);
 	if (!dev) {
 		printk(KERN_ERR "failed to find device for cell %s\n", cell);
@@ -234,7 +224,7 @@ int mfd_clone_cell(const char *cell, const char **clones, size_t n_clones)
 
 	for (i = 0; i < n_clones; i++) {
 		cell_entry.name = clones[i];
-		/* don't give up if a single call fails; just report error */
+		
 		if (mfd_add_device(pdev->dev.parent, -1, &cell_entry, NULL, 0))
 			dev_err(dev, "failed to create platform device '%s'\n",
 					clones[i]);

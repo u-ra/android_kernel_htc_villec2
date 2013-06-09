@@ -22,13 +22,12 @@
 
 #include <mach/gpio.h>
 #include <mach/dal.h>
-#include <mach/tpa2051d3.h>
-#include <mach/qdsp6v2_1x/snddev_icodec.h>
-#include <mach/qdsp6v2_1x/snddev_ecodec.h>
-#include <mach/qdsp6v2_1x/snddev_hdmi.h>
-#include <mach/qdsp6v2_1x/audio_dev_ctl.h>
-#include <mach/qdsp6v2_1x/apr_audio.h>
-#include <mach/qdsp6v2_1x/q6asm.h>
+#include "qdsp6v2/snddev_icodec.h"
+#include "qdsp6v2/snddev_ecodec.h"
+#include "qdsp6v2/snddev_hdmi.h"
+#include <mach/qdsp6v2/audio_dev_ctl.h>
+#include <sound/apr_audio.h>
+#include <sound/q6asm.h>
 #include <mach/htc_acoustic_8x60.h>
 #include <mach/board_htc.h>
 
@@ -37,17 +36,15 @@
 #define PM8058_GPIO_BASE					NR_MSM_GPIOS
 #define PM8058_GPIO_PM_TO_SYS(pm_gpio)		(pm_gpio + PM8058_GPIO_BASE)
 
-static struct mutex bt_sco_lock;
 static struct mutex mic_lock;
 static atomic_t q6_effect_mode = ATOMIC_INIT(-1);
 
 static uint32_t msm_snddev_gpio[] = {
-	GPIO_CFG(108, 1, GPIO_CFG_OUTPUT, GPIO_CFG_NO_PULL, GPIO_CFG_2MA), /* AUD_TX_MCLK */
-	GPIO_CFG(109, 1, GPIO_CFG_OUTPUT, GPIO_CFG_NO_PULL, GPIO_CFG_2MA), /* AUD_RX_MCLK1 */
-	GPIO_CFG(110, 1, GPIO_CFG_OUTPUT, GPIO_CFG_NO_PULL, GPIO_CFG_2MA), /* AUD_TX_I2S_SD2 */
+	GPIO_CFG(108, 1, GPIO_CFG_OUTPUT, GPIO_CFG_NO_PULL, GPIO_CFG_2MA), 
+	GPIO_CFG(109, 1, GPIO_CFG_OUTPUT, GPIO_CFG_NO_PULL, GPIO_CFG_2MA), 
+	GPIO_CFG(110, 1, GPIO_CFG_OUTPUT, GPIO_CFG_NO_PULL, GPIO_CFG_2MA), 
 };
 
-//static struct regulator *snddev_reg_l11;
 
 void villec2_mic_bias_on(int en)
 {
@@ -92,10 +89,10 @@ void villec2_snddev_poweramp_on(int en)
 {
 	pr_aud_info("%s %d\n", __func__, en);
 	if (en) {
-		gpio_request(PM8058_GPIO_PM_TO_SYS(VILLEC2_AUD_SPK_ENO), "AUD_SPK_ENO");
+		
 		gpio_direction_output(PM8058_GPIO_PM_TO_SYS(VILLEC2_AUD_SPK_ENO), 1);
 	} else {
-		gpio_request(PM8058_GPIO_PM_TO_SYS(VILLEC2_AUD_SPK_ENO), "AUD_SPK_ENO");
+		
 		gpio_direction_output(PM8058_GPIO_PM_TO_SYS(VILLEC2_AUD_SPK_ENO), 0);
 	}
 }
@@ -108,7 +105,6 @@ void villec2_snddev_usb_headset_pamp_on(int en)
 	}
 }
 
-//static struct regulator *snddev_reg_ncp = NULL;
 
 void villec2_snddev_hsed_pamp_on(int en)
 {
@@ -158,20 +154,14 @@ void villec2_snddev_receiver_pamp_on(int en)
 {
 	pr_aud_info("%s %d\n", __func__, en);
 	if (en) {
-		gpio_request(PM8058_GPIO_PM_TO_SYS(VILLEC2_AUD_HANDSET_ENO), "AUD_HANDSET_ENO");
+		
 		gpio_direction_output(PM8058_GPIO_PM_TO_SYS(VILLEC2_AUD_HANDSET_ENO), 1);
 	} else {
-		gpio_request(PM8058_GPIO_PM_TO_SYS(VILLEC2_AUD_HANDSET_ENO), "AUD_HANDSET_ENO");
+		
 		gpio_direction_output(PM8058_GPIO_PM_TO_SYS(VILLEC2_AUD_HANDSET_ENO), 0);
 	}
 }
 
-void villec2_snddev_bt_sco_pamp_on(int en)
-{
-	/* to be implemented */
-}
-
-/* power on/off externnal mic bias */
 void villec2_mic_enable(int en, int shift)
 {
 	pr_aud_info("%s: %d, shift %d\n", __func__, en, shift);
@@ -239,9 +229,9 @@ void villec2_snddev_emic_pamp_on(int en)
 {
 	pr_aud_info("%s %d\n", __func__, en);
 
-#if 0 /* headset driver will handle this part, and corresponding to plug-in and plug-out */
+#if 0 
 	if (en) {
-		/* select external mic path */
+		
 		gpio_request(PM8058_GPIO_PM_TO_SYS(VILLEC2_AUD_2V85_EN), "AUD_2V85_EN");
 		gpio_direction_output(PM8058_GPIO_PM_TO_SYS(VILLEC2_AUD_2V85_EN), 1);
 	} else {
@@ -269,7 +259,7 @@ int villec2_get_rx_vol(uint8_t hw, int network, int level)
 {
 	int vol = 0;
 
-	/* to be implemented */
+	
 
 	pr_aud_info("%s(%d, %d, %d) => %d\n", __func__, hw, network, level, vol);
 
@@ -278,16 +268,17 @@ int villec2_get_rx_vol(uint8_t hw, int network, int level)
 
 int villec2_get_speaker_channels(void)
 {
-	/* 1 - Mono, 2 - Stereo */
+	
 	return 1;
 }
 
 int villec2_support_beats(void)
 {
-	/* HW revision support 1V output from headset */
+	
 	return 1;
 }
 
+#if 0
 void villec2_enable_beats(int en)
 {
 	pr_aud_info("%s: %d\n", __func__, en);
@@ -296,15 +287,11 @@ void villec2_enable_beats(int en)
 	else
 		adie_codec_set_device_analog_volume(NULL, 2, 0x14);
 }
+#endif
 
 int villec2_is_msm_i2s_slave(void)
 {
-	/* 1 - CPU slave, 0 - CPU master */
-	return 0;
-}
-
-int villec2_support_aic3254(void)
-{
+	
 	return 0;
 }
 
@@ -320,13 +307,17 @@ int villec2_support_back_mic(void)
 
 int villec2_is_msm_i2s_master(void)
 {
-	/* 0 - CPU slave, 1 - CPU master */
+	
 	return 1;
 }
 
-int villec2_support_opendsp(void)
+void villec2_enable_beats(int en)
 {
-	return 0; // FIXME
+	pr_aud_info("%s: %d\n", __func__, en);
+	if (en)
+		adie_codec_set_device_analog_volume(NULL, 2, 0x04);
+	else
+		adie_codec_set_device_analog_volume(NULL, 2, 0x14);
 }
 
 void villec2_set_q6_effect_mode(int mode)
@@ -347,7 +338,6 @@ static struct q6v2audio_analog_ops ops = {
 	.headset_enable	        = villec2_snddev_hsed_pamp_on,
 	.handset_enable	        = villec2_snddev_receiver_pamp_on,
 	.headset_speaker_enable	= villec2_snddev_hs_spk_pamp_on,
-	.bt_sco_enable	        = villec2_snddev_bt_sco_pamp_on,
 	.int_mic_enable         = villec2_snddev_imic_pamp_on,
 	.back_mic_enable        = villec2_snddev_bmic_pamp_on,
 	.ext_mic_enable         = villec2_snddev_emic_pamp_on,
@@ -359,18 +349,12 @@ static struct q6v2audio_analog_ops ops = {
 };
 
 static struct q6v2audio_icodec_ops iops = {
-	.support_aic3254 = villec2_support_aic3254,
 	.is_msm_i2s_slave = villec2_is_msm_i2s_slave,
 	.support_adie = villec2_support_adie,
 };
 
-static struct q6v2audio_ecodec_ops eops = {
-	.bt_sco_enable  = villec2_snddev_bt_sco_pamp_on,
-};
-
 static struct acoustic_ops acoustic = {
 	.enable_mic_bias = villec2_mic_enable,
-	.support_aic3254 = villec2_support_aic3254,
 	.support_adie = villec2_support_adie,
 	.support_back_mic = villec2_support_back_mic,
 	.get_speaker_channels = villec2_get_speaker_channels,
@@ -379,29 +363,31 @@ static struct acoustic_ops acoustic = {
 	.set_q6_effect = villec2_set_q6_effect_mode,
 };
 
-static struct dev_ctrl_ops dops = {
-	.support_opendsp = villec2_support_opendsp,
-};
-
 static struct q6asm_ops qops = {
 	.get_q6_effect = villec2_get_q6_effect_mode,
 };
 
+void villec2_audio_gpios_init(void)
+{
+	pr_aud_info("%s\n", __func__);
+	gpio_request(PM8058_GPIO_PM_TO_SYS(VILLEC2_AUD_SPK_ENO), "AUD_SPK_ENO");
+	gpio_request(PM8058_GPIO_PM_TO_SYS(VILLEC2_AUD_HANDSET_ENO), "AUD_HANDSET_ENO");
+}
+
 void __init villec2_audio_init(void)
 {
 	int i = 0;
-	mutex_init(&bt_sco_lock);
 	mutex_init(&mic_lock);
 
 	pr_aud_info("%s\n", __func__);
 	htc_8x60_register_analog_ops(&ops);
-	htc_8x60_register_ecodec_ops(&eops);
 	htc_8x60_register_icodec_ops(&iops);
-	htc_8x60_register_q6asm_ops(&qops);
-	htc_8x60_register_dev_ctrl_ops(&dops);
+	htc_register_q6asm_ops(&qops);
 	acoustic_register_ops(&acoustic);
 
-	/* PMIC GPIO Init (See board-villec2.c) */
+	
 	for (i = 0 ; i < ARRAY_SIZE(msm_snddev_gpio); i++)
 		gpio_tlmm_config(msm_snddev_gpio[i], GPIO_CFG_DISABLE);
+
+	villec2_audio_gpios_init();
 }

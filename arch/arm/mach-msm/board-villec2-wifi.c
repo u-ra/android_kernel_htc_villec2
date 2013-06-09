@@ -1,5 +1,3 @@
-/* linux/arch/arm/mach-msm/board-villec2-wifi.c
-*/
 #include <linux/kernel.h>
 #include <linux/init.h>
 #include <linux/platform_device.h>
@@ -30,7 +28,6 @@ int villec2_wifi_get_mac_addr(unsigned char *buf);
 
 #define WLAN_SKB_BUF_NUM	16
 
-/*#define HW_OOB 1*/
 
 static struct sk_buff *wlan_static_skb[WLAN_SKB_BUF_NUM];
 
@@ -78,7 +75,7 @@ int __init villec2_init_wifi_mem(void)
 
 static struct resource villec2_wifi_resources[] = {
 	[0] = {
-		.name		= "bcm4329_wlan_irq",
+		.name		= "bcmdhd_wlan_irq",
 		.start		= MSM_GPIO_TO_INT(VILLEC2_GPIO_WIFI_IRQ),
 		.end		= MSM_GPIO_TO_INT(VILLEC2_GPIO_WIFI_IRQ),
 #ifdef HW_OOB
@@ -98,7 +95,7 @@ static struct wifi_platform_data villec2_wifi_control = {
 };
 
 static struct platform_device villec2_wifi_device = {
-	.name           = "bcm4329_wlan",
+	.name           = "bcmdhd_wlan",
 	.id             = 1,
 	.num_resources  = ARRAY_SIZE(villec2_wifi_resources),
 	.resource       = villec2_wifi_resources,
@@ -117,10 +114,10 @@ static unsigned villec2_wifi_update_nvs(char *str)
 	if (!str)
 		return -EINVAL;
 	ptr = get_wifi_nvs_ram();
-	/* Size in format LE assumed */
+	
 	memcpy(&len, ptr + NVS_LEN_OFFSET, sizeof(len));
 
-	/* the last bye in NVRAM is 0, trim it */
+	
 	if (ptr[NVS_DATA_OFFSET + len - 1] == 0)
 		len -= 1;
 
@@ -149,10 +146,10 @@ static unsigned strip_nvs_param(char *param)
 	if (!param)
 		return -EINVAL;
 	ptr = get_wifi_nvs_ram();
-	/* Size in format LE assumed */
+	
 	memcpy(&len, ptr + NVS_LEN_OFFSET, sizeof(len));
 
-	/* the last bye in NVRAM is 0, trim it */
+	
 	if (ptr[NVS_DATA_OFFSET + len - 1] == 0)
 		len -= 1;
 
@@ -160,7 +157,7 @@ static unsigned strip_nvs_param(char *param)
 
 	param_len = strlen(param);
 
-	/* search param */
+	
 	for (start_idx = 0; start_idx < len - param_len; start_idx++) {
 		if (memcmp(&nvs_data[start_idx], param, param_len) == 0)
 			break;
@@ -168,7 +165,7 @@ static unsigned strip_nvs_param(char *param)
 
 	end_idx = 0;
 	if (start_idx < len - param_len) {
-		/* search end-of-line */
+		
 		for (end_idx = start_idx + param_len; end_idx < len; end_idx++) {
 			if (nvs_data[end_idx] == '\n' || nvs_data[end_idx] == 0)
 				break;
@@ -176,7 +173,7 @@ static unsigned strip_nvs_param(char *param)
 	}
 
 	if (start_idx < end_idx) {
-		/* move the remain data forward */
+		
 		for (; end_idx + 1 < len; start_idx++, end_idx++)
 			nvs_data[start_idx] = nvs_data[end_idx+1];
 
@@ -188,18 +185,17 @@ static unsigned strip_nvs_param(char *param)
 #endif
 
 #define WIFI_MAC_PARAM_STR     "macaddr="
-#define WIFI_MAX_MAC_LEN       17 /* XX:XX:XX:XX:XX:XX */
+#define WIFI_MAX_MAC_LEN       17 
 
 static uint
 get_mac_from_wifi_nvs_ram(char *buf, unsigned int buf_len)
 {
+	uint len = 0;
 	unsigned char *nvs_ptr;
 	unsigned char *mac_ptr;
-	uint len = 0;
 
 	if (!buf || !buf_len)
 		return 0;
-
 	nvs_ptr = get_wifi_nvs_ram();
 	if (nvs_ptr)
 		nvs_ptr += NVS_DATA_OFFSET;
@@ -208,11 +204,11 @@ get_mac_from_wifi_nvs_ram(char *buf, unsigned int buf_len)
 	if (mac_ptr) {
 		mac_ptr += strlen(WIFI_MAC_PARAM_STR);
 
-		/* skip leading space */
+		
 		while (mac_ptr[0] == ' ')
 			mac_ptr++;
 
-		/* locate end-of-line */
+		
 		len = 0;
 		while (mac_ptr[len] != '\r' && mac_ptr[len] != '\n' &&
 			mac_ptr[len] != '\0') {
@@ -224,7 +220,6 @@ get_mac_from_wifi_nvs_ram(char *buf, unsigned int buf_len)
 
 		memcpy(buf, mac_ptr, len);
 	}
-
 	return len;
 }
 
@@ -239,7 +234,7 @@ int villec2_wifi_get_mac_addr(unsigned char *buf)
 
 	mac_len = get_mac_from_wifi_nvs_ram(mac, WIFI_MAX_MAC_LEN);
 	if (mac_len > 0) {
-		/* Mac address to pattern */
+		
 		sscanf(mac, "%02x:%02x:%02x:%02x:%02x:%02x",
 		&macpattern[0], &macpattern[1], &macpattern[2],
 		&macpattern[3], &macpattern[4], &macpattern[5]

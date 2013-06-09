@@ -1,6 +1,6 @@
 /*
  * Copyright (C) 2007 Google, Inc.
- * Copyright (c) 2007-2011, Code Aurora Forum. All rights reserved.
+ * Copyright (c) 2007-2012, Code Aurora Forum. All rights reserved.
  *
  * This software is licensed under the terms of the GNU General Public
  * License version 2, as published by the Free Software Foundation, and
@@ -29,8 +29,6 @@ static int clock_debug_rate_set(void *data, u64 val)
 	struct clk *clock = data;
 	int ret;
 
-	/* Only increases to max rate will succeed, but that's actually good
-	 * for debugging purposes so we don't check for error. */
 	if (clock->flags & CLKFLAG_MAX)
 		clk_set_max_rate(clock, val);
 	ret = clk_set_rate(clock, val);
@@ -54,12 +52,24 @@ static struct clk *measure;
 
 static int clock_debug_measure_get(void *data, u64 *val)
 {
-	int ret;
 	struct clk *clock = data;
+	int ret, is_hw_gated;
+
+	
+	if (clock->flags & CLKFLAG_HWCG)
+		is_hw_gated = clock->ops->in_hwcg_mode(clock);
+	else
+		is_hw_gated = 0;
 
 	ret = clk_set_parent(measure, clock);
-	if (!ret)
+	if (!ret) {
+		if (is_hw_gated && clock->count)
+			clock->ops->disable_hwcg(clock);
 		*val = clk_get_rate(measure);
+		
+		if (is_hw_gated && clock->count)
+			clock->ops->enable_hwcg(clock);
+	}
 
 	return ret;
 }
@@ -73,9 +83,9 @@ static int clock_debug_enable_set(void *data, u64 val)
 	int rc = 0;
 
 	if (val)
-		rc = clk_enable(clock);
+		rc = clk_prepare_enable(clock);
 	else
-		clk_disable(clock);
+		clk_disable_unprepare(clock);
 
 	return rc;
 }
@@ -101,13 +111,31 @@ static int clock_debug_local_get(void *data, u64 *val)
 {
 	struct clk *clock = data;
 
-	*val = clock->ops->is_local(clock);
+	if (!clock->ops->is_local)
+		*val = true;
+	else
+		*val = clock->ops->is_local(clock);
 
 	return 0;
 }
 
 DEFINE_SIMPLE_ATTRIBUTE(clock_local_fops, clock_debug_local_get,
 			NULL, "%llu\n");
+
+static int clock_debug_hwcg_get(void *data, u64 *val)
+{
+	struct clk *clock = data;
+	*val = !!(clock->flags & CLKFLAG_HWCG);
+	return 0;
+}
+
+DEFINE_SIMPLE_ATTRIBUTE(clock_hwcg_fops, clock_debug_hwcg_get,
+			NULL, "%llu\n");
+
+static struct dentry *debugfs_base;
+static u32 debug_suspend;
+static struct clk_lookup *msm_clocks;
+static size_t num_msm_clocks;
 
 struct clk *clock_debug_parent_get(void *data)
 {
@@ -116,24 +144,15 @@ struct clk *clock_debug_parent_get(void *data)
 	if (clock->ops->get_parent)
 		return clock->ops->get_parent(clock);
 
-	return 0;
+	return NULL;
 }
-
-static struct dentry *debugfs_base;
-static u32 debug_suspend;
-static struct clk_lookup *msm_clocks;
-static size_t num_msm_clocks;
 
 int htc_clock_dump(struct clk *clock, struct seq_file *m)
 {
 	int len = 0;
 	u64 value = 0;
 	struct clk *parent;
-	char nam_buf[20];
-	char en_buf[20];
-	char hz_buf[20];
-	char loc_buf[20];
-	char par_buf[20];
+	char nam_buf[20], en_buf[20], hz_buf[20], loc_buf[20], par_buf[20];
 
 	if (!clock)
 		return 0;
@@ -208,10 +227,8 @@ static const struct file_operations list_clocks_fops = {
 
 static struct dentry *debugfs_clock_base;
 
-int __init htc_clock_status_debug_init(void)
+int htc_clock_status_debug_init(void)
 {
-	int err = 0;
-
 	debugfs_clock_base = debugfs_create_dir("htc_clock", NULL);
 	if (!debugfs_clock_base)
 		return -ENOMEM;
@@ -220,13 +237,11 @@ int __init htc_clock_status_debug_init(void)
 				&msm_clocks, &list_clocks_fops))
 		return -ENOMEM;
 
-	return err;
+	return 0;
 }
 
 int __init clock_debug_init(struct clock_init_data *data)
 {
-	int ret = 0;
-
 	debugfs_base = debugfs_create_dir("clk", NULL);
 	if (!debugfs_base)
 		return -ENOMEM;
@@ -239,28 +254,33 @@ int __init clock_debug_init(struct clock_init_data *data)
 	num_msm_clocks = data->size;
 
 	measure = clk_get_sys("debug", "measure");
-	if (IS_ERR(measure)) {
-		ret = PTR_ERR(measure);
+	if (IS_ERR(measure))
 		measure = NULL;
-	}
-	htc_clock_status_debug_init();
 
-	return ret;
+	htc_clock_status_debug_init();
+	return 0;
 }
 
 
 static int clock_debug_print_clock(struct clk *c)
 {
-	size_t ln = 0;
-	char s[128];
+	char *start = "";
 
 	if (!c || !c->count)
 		return 0;
 
-	ln += snprintf(s, sizeof(s), "\t%s", c->dbg_name);
-	while (ln < sizeof(s) && (c = clk_get_parent(c)))
-		ln += snprintf(s + ln, sizeof(s) - ln, " -> %s", c->dbg_name);
-	pr_info("%s\n", s);
+	pr_info("\t");
+	do {
+		if (c->vdd_class)
+			pr_cont("%s%s [%ld, %lu]", start, c->dbg_name, c->rate,
+				c->vdd_class->cur_level);
+		else
+			pr_cont("%s%s [%ld]", start, c->dbg_name, c->rate);
+		start = " -> ";
+	} while ((c = clk_get_parent(c)));
+
+	pr_cont("\n");
+
 	return 1;
 }
 
@@ -269,10 +289,8 @@ void clock_debug_print_enabled(void)
 	unsigned i;
 	int cnt = 0;
 
-/*
 	if (likely(!debug_suspend))
 		return;
-*/
 
 	pr_info("Enabled clocks:\n");
 	for (i = 0; i < num_msm_clocks; i++)
@@ -290,7 +308,7 @@ static int list_rates_show(struct seq_file *m, void *unused)
 	struct clk *clock = m->private;
 	int rate, level, fmax = 0, i = 0;
 
-	/* Find max frequency supported within voltage constraints. */
+	
 	if (!clock->vdd_class) {
 		fmax = INT_MAX;
 	} else {
@@ -299,10 +317,6 @@ static int list_rates_show(struct seq_file *m, void *unused)
 				fmax = clock->fmax[level];
 	}
 
-	/*
-	 * List supported frequencies <= fmax. Higher frequencies may appear in
-	 * the frequency table, but are not valid and should not be listed.
-	 */
 	while ((rate = clock->ops->list_rate(clock, i++)) >= 0) {
 		if (rate <= fmax)
 			seq_printf(m, "%u\n", rate);
@@ -349,6 +363,10 @@ int __init clock_debug_add(struct clk *clock)
 
 	if (!debugfs_create_file("is_local", S_IRUGO, clk_dir, clock,
 				&clock_local_fops))
+		goto error;
+
+	if (!debugfs_create_file("has_hw_gating", S_IRUGO, clk_dir, clock,
+				&clock_hwcg_fops))
 		goto error;
 
 	if (measure &&

@@ -8,32 +8,17 @@
 #ifndef _ASMARM_UACCESS_H
 #define _ASMARM_UACCESS_H
 
-/*
- * User space memory access functions
- */
 #include <linux/string.h>
 #include <linux/thread_info.h>
 #include <asm/errno.h>
 #include <asm/memory.h>
 #include <asm/domain.h>
-#include <asm/system.h>
 #include <asm/unified.h>
+#include <asm/compiler.h>
 
 #define VERIFY_READ 0
 #define VERIFY_WRITE 1
 
-/*
- * The exception table consists of pairs of addresses: the first is the
- * address of an instruction that is allowed to fault, and the second is
- * the address at which the program should continue.  No registers are
- * modified, so it is entirely up to the continuation code to figure out
- * what to do.
- *
- * All the routines below use bits of fixup code that are out of line
- * with the main instruction path.  This means when everything is well,
- * we don't even have to jump over them.  Further, they do not intrude
- * on our cache or tlb entries.
- */
 
 struct exception_table_entry
 {
@@ -42,16 +27,9 @@ struct exception_table_entry
 
 extern int fixup_exception(struct pt_regs *regs);
 
-/*
- * These two are intentionally not defined anywhere - if the kernel
- * code generates any references to them, that's a bug.
- */
 extern int __get_user_bad(void);
 extern int __put_user_bad(void);
 
-/*
- * Note that this is actually 0x1,0000,0000
- */
 #define KERNEL_DS	0x00000000
 #define get_ds()	(KERNEL_DS)
 
@@ -76,7 +54,6 @@ static inline void set_fs(mm_segment_t fs)
 		: "cc"); \
 	(flag == 0); })
 
-/* We use 33-bit arithmetic here... */
 #define __range_ok(addr,size) ({ \
 	unsigned long flag, roksum; \
 	__chk_user_ptr(addr);	\
@@ -86,17 +63,6 @@ static inline void set_fs(mm_segment_t fs)
 		: "cc"); \
 	flag; })
 
-/*
- * Single-value transfer routines.  They automatically use the right
- * size if we just have the right pointer type.  Note that the functions
- * which read from user space (*get_*) need to take care not to leak
- * kernel data even if the calling code is buggy and fails to check
- * the return value.  This means zeroing out the destination variable
- * or buffer on error.  Normally this is done out of line by the
- * fixup code, but there are a few places where it intrudes on the
- * main code path.  When we only write to user space, there is no
- * problem.
- */
 extern int __get_user_1(void *);
 extern int __get_user_2(void *);
 extern int __get_user_4(void *);
@@ -166,11 +132,8 @@ extern int __put_user_8(void *, unsigned long long);
 		__e;							\
 	})
 
-#else /* CONFIG_MMU */
+#else 
 
-/*
- * uClinux has only one addr space, so has simplified address limits.
- */
 #define USER_DS			KERNEL_DS
 
 #define segment_eq(a,b)		(1)
@@ -185,19 +148,10 @@ static inline void set_fs(mm_segment_t fs)
 #define get_user(x,p)	__get_user(x,p)
 #define put_user(x,p)	__put_user(x,p)
 
-#endif /* CONFIG_MMU */
+#endif 
 
 #define access_ok(type,addr,size)	(__range_ok(addr,size) == 0)
 
-/*
- * The "__xxx" versions of the user access functions do not verify the
- * address space - it must have been done previously with a separate
- * "access_ok()" call.
- *
- * The "xxx_error" versions set the third argument to EFAULT if an
- * error occurs, and leave it unchanged on success.  Note that these
- * versions are void (ie, don't return a value as such).
- */
 #define __get_user(x,ptr)						\
 ({									\
 	long __gu_err = 0;						\
@@ -227,7 +181,7 @@ do {									\
 
 #define __get_user_asm_byte(x,addr,err)				\
 	__asm__ __volatile__(					\
-	"1:	" T(ldrb) "	%1,[%2],#0\n"			\
+	"1:	" TUSER(ldrb) "	%1,[%2],#0\n"			\
 	"2:\n"							\
 	"	.pushsection .fixup,\"ax\"\n"			\
 	"	.align	2\n"					\
@@ -263,7 +217,7 @@ do {									\
 
 #define __get_user_asm_word(x,addr,err)				\
 	__asm__ __volatile__(					\
-	"1:	" T(ldr) "	%1,[%2],#0\n"			\
+	"1:	" TUSER(ldr) "	%1,[%2],#0\n"			\
 	"2:\n"							\
 	"	.pushsection .fixup,\"ax\"\n"			\
 	"	.align	2\n"					\
@@ -308,7 +262,7 @@ do {									\
 
 #define __put_user_asm_byte(x,__pu_addr,err)			\
 	__asm__ __volatile__(					\
-	"1:	" T(strb) "	%1,[%2],#0\n"			\
+	"1:	" TUSER(strb) "	%1,[%2],#0\n"			\
 	"2:\n"							\
 	"	.pushsection .fixup,\"ax\"\n"			\
 	"	.align	2\n"					\
@@ -341,7 +295,7 @@ do {									\
 
 #define __put_user_asm_word(x,__pu_addr,err)			\
 	__asm__ __volatile__(					\
-	"1:	" T(str) "	%1,[%2],#0\n"			\
+	"1:	" TUSER(str) "	%1,[%2],#0\n"			\
 	"2:\n"							\
 	"	.pushsection .fixup,\"ax\"\n"			\
 	"	.align	2\n"					\
@@ -366,10 +320,10 @@ do {									\
 
 #define __put_user_asm_dword(x,__pu_addr,err)			\
 	__asm__ __volatile__(					\
- ARM(	"1:	" T(str) "	" __reg_oper1 ", [%1], #4\n"	)	\
- ARM(	"2:	" T(str) "	" __reg_oper0 ", [%1]\n"	)	\
- THUMB(	"1:	" T(str) "	" __reg_oper1 ", [%1]\n"	)	\
- THUMB(	"2:	" T(str) "	" __reg_oper0 ", [%1, #4]\n"	)	\
+ ARM(	"1:	" TUSER(str) "	" __reg_oper1 ", [%1], #4\n"	) \
+ ARM(	"2:	" TUSER(str) "	" __reg_oper0 ", [%1]\n"	) \
+ THUMB(	"1:	" TUSER(str) "	" __reg_oper1 ", [%1]\n"	) \
+ THUMB(	"2:	" TUSER(str) "	" __reg_oper0 ", [%1, #4]\n"	) \
 	"3:\n"							\
 	"	.pushsection .fixup,\"ax\"\n"			\
 	"	.align	2\n"					\
@@ -405,7 +359,7 @@ static inline unsigned long __must_check copy_from_user(void *to, const void __u
 {
 	if (access_ok(VERIFY_READ, from, n))
 		n = __copy_from_user(to, from, n);
-	else /* security hole - plug it */
+	else 
 		memset(to, 0, n);
 	return n;
 }
@@ -447,4 +401,4 @@ static inline long __must_check strnlen_user(const char __user *s, long n)
 	return res;
 }
 
-#endif /* _ASMARM_UACCESS_H */
+#endif 

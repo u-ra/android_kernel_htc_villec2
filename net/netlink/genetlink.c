@@ -1,10 +1,3 @@
-/*
- * NETLINK      Generic Netlink Family
- *
- * 		Authors:	Jamal Hadi Salim
- * 				Thomas Graf <tgraf@suug.ch>
- *				Johannes Berg <johannes@sipsolutions.net>
- */
 
 #include <linux/module.h>
 #include <linux/kernel.h>
@@ -19,7 +12,7 @@
 #include <net/sock.h>
 #include <net/genetlink.h>
 
-static DEFINE_MUTEX(genl_mutex); /* serialization of message processing */
+static DEFINE_MUTEX(genl_mutex); 
 
 void genl_lock(void)
 {
@@ -33,17 +26,18 @@ void genl_unlock(void)
 }
 EXPORT_SYMBOL(genl_unlock);
 
+#ifdef CONFIG_PROVE_LOCKING
+int lockdep_genl_is_held(void)
+{
+	return lockdep_is_held(&genl_mutex);
+}
+EXPORT_SYMBOL(lockdep_genl_is_held);
+#endif
+
 #define GENL_FAM_TAB_SIZE	16
 #define GENL_FAM_TAB_MASK	(GENL_FAM_TAB_SIZE - 1)
 
 static struct list_head family_ht[GENL_FAM_TAB_SIZE];
-/*
- * Bitmap of multicast groups that are currently in use.
- *
- * To avoid an allocation at boot of just one unsigned long,
- * declare it global instead.
- * Bit 0 is marked as already used since group 0 is invalid.
- */
 static unsigned long mc_group_start = 0x1;
 static unsigned long *mc_groups = &mc_group_start;
 static unsigned long mc_groups_longs = 1;
@@ -95,10 +89,7 @@ static struct genl_ops *genl_get_cmd(u8 cmd, struct genl_family *family)
 	return NULL;
 }
 
-/* Of course we are going to have problems once we hit
- * 2^16 alive types, but that can only happen by year 2K
-*/
-static inline u16 genl_generate_id(void)
+static u16 genl_generate_id(void)
 {
 	static u16 id_gen_idx = GENL_MIN_ID;
 	int i;
@@ -115,17 +106,6 @@ static inline u16 genl_generate_id(void)
 
 static struct genl_multicast_group notify_grp;
 
-/**
- * genl_register_mc_group - register a multicast group
- *
- * Registers the specified multicast group and notifies userspace
- * about the new group.
- *
- * Returns 0 on success or a negative error code.
- *
- * @family: The generic netlink family the group shall be registered for.
- * @grp: The group to register, must have a name.
- */
 int genl_register_mc_group(struct genl_family *family,
 			   struct genl_multicast_group *grp)
 {
@@ -134,11 +114,10 @@ int genl_register_mc_group(struct genl_family *family,
 	int err = 0;
 
 	BUG_ON(grp->name[0] == '\0');
-	BUG_ON(memchr(grp->name, '\0', GENL_NAMSIZ) == NULL);
 
 	genl_lock();
 
-	/* special-case our own group */
+	
 	if (grp == &notify_grp)
 		id = GENL_ID_CTRL;
 	else
@@ -178,12 +157,6 @@ int genl_register_mc_group(struct genl_family *family,
 			err = __netlink_change_ngroups(net->genl_sock,
 					mc_groups_longs * BITS_PER_LONG);
 			if (err) {
-				/*
-				 * No need to roll back, can only fail if
-				 * memory allocation fails and then the
-				 * number of _possible_ groups has been
-				 * increased on some sockets which is ok.
-				 */
 				rcu_read_unlock();
 				netlink_table_ungrab();
 				goto out;
@@ -230,20 +203,6 @@ static void __genl_unregister_mc_group(struct genl_family *family,
 	grp->family = NULL;
 }
 
-/**
- * genl_unregister_mc_group - unregister a multicast group
- *
- * Unregisters the specified multicast group and notifies userspace
- * about it. All current listeners on the group are removed.
- *
- * Note: It is not necessary to unregister all multicast groups before
- *       unregistering the family, unregistering the family will cause
- *       all assigned multicast groups to be unregistered automatically.
- *
- * @family: Generic netlink family the group belongs to.
- * @grp: The group to unregister, must have been registered successfully
- *	 previously.
- */
 void genl_unregister_mc_group(struct genl_family *family,
 			      struct genl_multicast_group *grp)
 {
@@ -261,21 +220,6 @@ static void genl_unregister_mc_groups(struct genl_family *family)
 		__genl_unregister_mc_group(family, grp);
 }
 
-/**
- * genl_register_ops - register generic netlink operations
- * @family: generic netlink family
- * @ops: operations to be registered
- *
- * Registers the specified operations and assigns them to the specified
- * family. Either a doit or dumpit callback must be specified or the
- * operation will fail. Only one operation structure per command
- * identifier may be registered.
- *
- * See include/net/genetlink.h for more documenation on the operations
- * structure.
- *
- * Returns 0 on success or a negative error code.
- */
 int genl_register_ops(struct genl_family *family, struct genl_ops *ops)
 {
 	int err = -EINVAL;
@@ -306,22 +250,6 @@ errout:
 }
 EXPORT_SYMBOL(genl_register_ops);
 
-/**
- * genl_unregister_ops - unregister generic netlink operations
- * @family: generic netlink family
- * @ops: operations to be unregistered
- *
- * Unregisters the specified operations and unassigns them from the
- * specified family. The operation blocks until the current message
- * processing has finished and doesn't start again until the
- * unregister process has finished.
- *
- * Note: It is not necessary to unregister all operations before
- *       unregistering the family, unregistering the family will cause
- *       all assigned operations to be unregistered automatically.
- *
- * Returns 0 on success or a negative error code.
- */
 int genl_unregister_ops(struct genl_family *family, struct genl_ops *ops)
 {
 	struct genl_ops *rc;
@@ -341,17 +269,6 @@ int genl_unregister_ops(struct genl_family *family, struct genl_ops *ops)
 }
 EXPORT_SYMBOL(genl_unregister_ops);
 
-/**
- * genl_register_family - register a generic netlink family
- * @family: generic netlink family
- *
- * Registers the specified family after validating it first. Only one
- * family may be registered with the same family name or identifier.
- * The family id may equal GENL_ID_GENERATE causing an unique id to
- * be automatically generated and assigned.
- *
- * Return 0 on success or a negative error code.
- */
 int genl_register_family(struct genl_family *family)
 {
 	int err = -EINVAL;
@@ -410,31 +327,6 @@ errout:
 }
 EXPORT_SYMBOL(genl_register_family);
 
-/**
- * genl_register_family_with_ops - register a generic netlink family
- * @family: generic netlink family
- * @ops: operations to be registered
- * @n_ops: number of elements to register
- *
- * Registers the specified family and operations from the specified table.
- * Only one family may be registered with the same family name or identifier.
- *
- * The family id may equal GENL_ID_GENERATE causing an unique id to
- * be automatically generated and assigned.
- *
- * Either a doit or dumpit callback must be specified for every registered
- * operation or the function will fail. Only one operation structure per
- * command identifier may be registered.
- *
- * See include/net/genetlink.h for more documenation on the operations
- * structure.
- *
- * This is equivalent to calling genl_register_family() followed by
- * genl_register_ops() for every operation entry in the table taking
- * care to unregister the family on error path.
- *
- * Return 0 on success or a negative error code.
- */
 int genl_register_family_with_ops(struct genl_family *family,
 	struct genl_ops *ops, size_t n_ops)
 {
@@ -456,14 +348,6 @@ err_out:
 }
 EXPORT_SYMBOL(genl_register_family_with_ops);
 
-/**
- * genl_unregister_family - unregister generic netlink family
- * @family: generic netlink family
- *
- * Unregisters the specified family.
- *
- * Returns 0 on success or a negative error code.
- */
 int genl_unregister_family(struct genl_family *family)
 {
 	struct genl_family *rc;
@@ -491,6 +375,26 @@ int genl_unregister_family(struct genl_family *family)
 }
 EXPORT_SYMBOL(genl_unregister_family);
 
+void *genlmsg_put(struct sk_buff *skb, u32 pid, u32 seq,
+				struct genl_family *family, int flags, u8 cmd)
+{
+	struct nlmsghdr *nlh;
+	struct genlmsghdr *hdr;
+
+	nlh = nlmsg_put(skb, pid, seq, family->id, GENL_HDRLEN +
+			family->hdrsize, flags);
+	if (nlh == NULL)
+		return NULL;
+
+	hdr = nlmsg_data(nlh);
+	hdr->cmd = cmd;
+	hdr->version = family->version;
+	hdr->reserved = 0;
+
+	return (char *) hdr + GENL_HDRLEN;
+}
+EXPORT_SYMBOL(genlmsg_put);
+
 static int genl_rcv_msg(struct sk_buff *skb, struct nlmsghdr *nlh)
 {
 	struct genl_ops *ops;
@@ -504,7 +408,7 @@ static int genl_rcv_msg(struct sk_buff *skb, struct nlmsghdr *nlh)
 	if (family == NULL)
 		return -ENOENT;
 
-	/* this family doesn't exist in this netns */
+	
 	if (!family->netnsok && !net_eq(net, &init_net))
 		return -ENOENT;
 
@@ -517,7 +421,7 @@ static int genl_rcv_msg(struct sk_buff *skb, struct nlmsghdr *nlh)
 		return -EOPNOTSUPP;
 
 	if ((ops->flags & GENL_ADMIN_PERM) &&
-	    security_netlink_recv(skb, CAP_NET_ADMIN))
+	    !capable(CAP_NET_ADMIN))
 		return -EPERM;
 
 	if (nlh->nlmsg_flags & NLM_F_DUMP) {
@@ -525,8 +429,13 @@ static int genl_rcv_msg(struct sk_buff *skb, struct nlmsghdr *nlh)
 			return -EOPNOTSUPP;
 
 		genl_unlock();
-		err = netlink_dump_start(net->genl_sock, skb, nlh,
-					 ops->dumpit, ops->done, 0);
+		{
+			struct netlink_dump_control c = {
+				.dump = ops->dumpit,
+				.done = ops->done,
+			};
+			err = netlink_dump_start(net->genl_sock, skb, nlh, &c);
+		}
 		genl_lock();
 		return err;
 	}
@@ -571,9 +480,6 @@ static void genl_rcv(struct sk_buff *skb)
 	genl_unlock();
 }
 
-/**************************************************************************
- * Controller
- **************************************************************************/
 
 static struct genl_family genl_ctrl = {
 	.id = GENL_ID_CTRL,
@@ -785,6 +691,15 @@ static int ctrl_getfamily(struct sk_buff *skb, struct genl_info *info)
 
 		name = nla_data(info->attrs[CTRL_ATTR_FAMILY_NAME]);
 		res = genl_family_find_byname(name);
+#ifdef CONFIG_MODULES
+		if (res == NULL) {
+			genl_unlock();
+			request_module("net-pf-%d-proto-%d-type-%s",
+				       PF_NETLINK, NETLINK_GENERIC, name);
+			genl_lock();
+			res = genl_family_find_byname(name);
+		}
+#endif
 		err = -ENOENT;
 	}
 
@@ -792,7 +707,7 @@ static int ctrl_getfamily(struct sk_buff *skb, struct genl_info *info)
 		return err;
 
 	if (!res->netnsok && !net_eq(genl_info_net(info), &init_net)) {
-		/* family doesn't exist here */
+		
 		return -ENOENT;
 	}
 
@@ -810,7 +725,7 @@ static int genl_ctrl_event(int event, void *data)
 	struct genl_family *family;
 	struct genl_multicast_group *grp;
 
-	/* genl is still initialising */
+	
 	if (!init_net.genl_sock)
 		return 0;
 
@@ -858,7 +773,7 @@ static struct genl_multicast_group notify_grp = {
 
 static int __net_init genl_pernet_init(struct net *net)
 {
-	/* we'll bump the group number right afterwards */
+	
 	net->genl_sock = netlink_kernel_create(net, NETLINK_GENERIC, 0,
 					       genl_rcv, &genl_mutex,
 					       THIS_MODULE);
@@ -947,3 +862,16 @@ int genlmsg_multicast_allns(struct sk_buff *skb, u32 pid, unsigned int group,
 	return genlmsg_mcast(skb, pid, group, flags);
 }
 EXPORT_SYMBOL(genlmsg_multicast_allns);
+
+void genl_notify(struct sk_buff *skb, struct net *net, u32 pid, u32 group,
+		 struct nlmsghdr *nlh, gfp_t flags)
+{
+	struct sock *sk = net->genl_sock;
+	int report = 0;
+
+	if (nlh)
+		report = nlmsg_report(nlh);
+
+	nlmsg_notify(sk, skb, pid, group, report, flags);
+}
+EXPORT_SYMBOL(genl_notify);

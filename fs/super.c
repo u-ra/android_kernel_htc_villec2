@@ -20,31 +20,74 @@
  *  Heavily rewritten for 'one fs - one tree' dcache architecture. AV, Mar 2000
  */
 
-#include <linux/module.h>
+#include <linux/export.h>
 #include <linux/slab.h>
 #include <linux/acct.h>
 #include <linux/blkdev.h>
 #include <linux/mount.h>
 #include <linux/security.h>
-#include <linux/writeback.h>		/* for the emergency remount stuff */
+#include <linux/writeback.h>		
 #include <linux/idr.h>
 #include <linux/mutex.h>
 #include <linux/backing-dev.h>
 #include <linux/rculist_bl.h>
 #include <linux/cleancache.h>
+#include <linux/fsnotify.h>
 #include "internal.h"
 
+atomic_t vfs_emergency_remount;
 
 LIST_HEAD(super_blocks);
 DEFINE_SPINLOCK(sb_lock);
 
-/**
- *	alloc_super	-	create new superblock
- *	@type:	filesystem type superblock should belong to
- *
- *	Allocates and initializes a new &struct super_block.  alloc_super()
- *	returns a pointer new superblock or %NULL if allocation had failed.
- */
+static int prune_super(struct shrinker *shrink, struct shrink_control *sc)
+{
+	struct super_block *sb;
+	int	fs_objects = 0;
+	int	total_objects;
+
+	sb = container_of(shrink, struct super_block, s_shrink);
+
+	if (sc->nr_to_scan && !(sc->gfp_mask & __GFP_FS))
+		return -1;
+
+	if (!grab_super_passive(sb))
+		return !sc->nr_to_scan ? 0 : -1;
+
+	if (sb->s_op && sb->s_op->nr_cached_objects)
+		fs_objects = sb->s_op->nr_cached_objects(sb);
+
+	total_objects = sb->s_nr_dentry_unused +
+			sb->s_nr_inodes_unused + fs_objects + 1;
+
+	if (sc->nr_to_scan) {
+		int	dentries;
+		int	inodes;
+
+		
+		dentries = (sc->nr_to_scan * sb->s_nr_dentry_unused) /
+							total_objects;
+		inodes = (sc->nr_to_scan * sb->s_nr_inodes_unused) /
+							total_objects;
+		if (fs_objects)
+			fs_objects = (sc->nr_to_scan * fs_objects) /
+							total_objects;
+		prune_dcache_sb(sb, dentries);
+		prune_icache_sb(sb, inodes);
+
+		if (fs_objects && sb->s_op->free_cached_objects) {
+			sb->s_op->free_cached_objects(sb, fs_objects);
+			fs_objects = sb->s_op->nr_cached_objects(sb);
+		}
+		total_objects = sb->s_nr_dentry_unused +
+				sb->s_nr_inodes_unused + fs_objects;
+	}
+
+	total_objects = (total_objects / 100) * sysctl_vfs_cache_pressure;
+	drop_super(sb);
+	return total_objects;
+}
+
 static struct super_block *alloc_super(struct file_system_type *type)
 {
 	struct super_block *s = kzalloc(sizeof(struct super_block),  GFP_USER);
@@ -73,34 +116,17 @@ static struct super_block *alloc_super(struct file_system_type *type)
 		INIT_LIST_HEAD(&s->s_files);
 #endif
 		s->s_bdi = &default_backing_dev_info;
-		INIT_LIST_HEAD(&s->s_instances);
+		INIT_HLIST_NODE(&s->s_instances);
 		INIT_HLIST_BL_HEAD(&s->s_anon);
 		INIT_LIST_HEAD(&s->s_inodes);
 		INIT_LIST_HEAD(&s->s_dentry_lru);
+		INIT_LIST_HEAD(&s->s_inode_lru);
+		spin_lock_init(&s->s_inode_lru_lock);
+		INIT_LIST_HEAD(&s->s_mounts);
 		init_rwsem(&s->s_umount);
 		mutex_init(&s->s_lock);
 		lockdep_set_class(&s->s_umount, &type->s_umount_key);
-		/*
-		 * The locking rules for s_lock are up to the
-		 * filesystem. For example ext3fs has different
-		 * lock ordering than usbfs:
-		 */
 		lockdep_set_class(&s->s_lock, &type->s_lock_key);
-		/*
-		 * sget() can have s_umount recursion.
-		 *
-		 * When it cannot find a suitable sb, it allocates a new
-		 * one (this one), and tries again to find a suitable old
-		 * one.
-		 *
-		 * In case that succeeds, it will acquire the s_umount
-		 * lock of the old one. Since these are clearly distrinct
-		 * locks, and this object isn't exposed yet, there's no
-		 * risk of deadlocks.
-		 *
-		 * Annotate this by putting this lock in a different
-		 * subclass.
-		 */
 		down_write_nested(&s->s_umount, SINGLE_DEPTH_NESTING);
 		s->s_count = 1;
 		atomic_set(&s->s_active, 1);
@@ -114,34 +140,29 @@ static struct super_block *alloc_super(struct file_system_type *type)
 		s->s_op = &default_op;
 		s->s_time_gran = 1000000000;
 		s->cleancache_poolid = -1;
+
+		s->s_shrink.seeks = DEFAULT_SEEKS;
+		s->s_shrink.shrink = prune_super;
+		s->s_shrink.batch = 1024;
 	}
 out:
 	return s;
 }
 
-/**
- *	destroy_super	-	frees a superblock
- *	@s: superblock to free
- *
- *	Frees a superblock.
- */
 static inline void destroy_super(struct super_block *s)
 {
 #ifdef CONFIG_SMP
 	free_percpu(s->s_files);
 #endif
 	security_sb_free(s);
+	WARN_ON(!list_empty(&s->s_mounts));
 	kfree(s->s_subtype);
 	kfree(s->s_options);
 	kfree(s);
 }
 
-/* Superblock refcounting  */
 
-/*
- * Drop a superblock's refcount.  The caller must hold sb_lock.
- */
-void __put_super(struct super_block *sb)
+static void __put_super(struct super_block *sb)
 {
 	if (!--sb->s_count) {
 		list_del_init(&sb->s_list);
@@ -149,14 +170,7 @@ void __put_super(struct super_block *sb)
 	}
 }
 
-/**
- *	put_super	-	drop a temporary reference to superblock
- *	@sb: superblock in question
- *
- *	Drops a temporary reference, frees superblock if there's no
- *	references left.
- */
-void put_super(struct super_block *sb)
+static void put_super(struct super_block *sb)
 {
 	spin_lock(&sb_lock);
 	__put_super(sb);
@@ -164,27 +178,16 @@ void put_super(struct super_block *sb)
 }
 
 
-/**
- *	deactivate_locked_super	-	drop an active reference to superblock
- *	@s: superblock to deactivate
- *
- *	Drops an active reference to superblock, converting it into a temprory
- *	one if there is no other active references left.  In that case we
- *	tell fs driver to shut it down and drop the temporary reference we
- *	had just acquired.
- *
- *	Caller holds exclusive lock on superblock; that lock is released.
- */
 void deactivate_locked_super(struct super_block *s)
 {
 	struct file_system_type *fs = s->s_type;
 	if (atomic_dec_and_test(&s->s_active)) {
-		cleancache_flush_fs(s);
+		cleancache_invalidate_fs(s);
 		fs->kill_sb(s);
-		/*
-		 * We need to call rcu_barrier so all the delayed rcu free
-		 * inodes are flushed before we release the fs module.
-		 */
+
+		
+		unregister_shrinker(&s->s_shrink);
+
 		rcu_barrier();
 		put_filesystem(fs);
 		put_super(s);
@@ -195,14 +198,6 @@ void deactivate_locked_super(struct super_block *s)
 
 EXPORT_SYMBOL(deactivate_locked_super);
 
-/**
- *	deactivate_super	-	drop an active reference to superblock
- *	@s: superblock to deactivate
- *
- *	Variant of deactivate_locked_super(), except that superblock is *not*
- *	locked by caller.  If we are going to drop the final active reference,
- *	lock will be acquired prior to that.
- */
 void deactivate_super(struct super_block *s)
 {
         if (!atomic_add_unless(&s->s_active, -1, 1)) {
@@ -213,74 +208,63 @@ void deactivate_super(struct super_block *s)
 
 EXPORT_SYMBOL(deactivate_super);
 
-/**
- *	grab_super - acquire an active reference
- *	@s: reference we are trying to make active
- *
- *	Tries to acquire an active reference.  grab_super() is used when we
- * 	had just found a superblock in super_blocks or fs_type->fs_supers
- *	and want to turn it into a full-blown active reference.  grab_super()
- *	is called with sb_lock held and drops it.  Returns 1 in case of
- *	success, 0 if we had failed (superblock contents was already dead or
- *	dying when grab_super() had been called).
- */
 static int grab_super(struct super_block *s) __releases(sb_lock)
 {
 	if (atomic_inc_not_zero(&s->s_active)) {
 		spin_unlock(&sb_lock);
 		return 1;
 	}
-	/* it's going away */
+	
 	s->s_count++;
 	spin_unlock(&sb_lock);
-	/* wait for it to die */
+	
 	down_write(&s->s_umount);
 	up_write(&s->s_umount);
 	put_super(s);
 	return 0;
 }
 
-/*
- * Superblock locking.  We really ought to get rid of these two.
- */
+bool grab_super_passive(struct super_block *sb)
+{
+	spin_lock(&sb_lock);
+	if (hlist_unhashed(&sb->s_instances)) {
+		spin_unlock(&sb_lock);
+		return false;
+	}
+
+	sb->s_count++;
+	spin_unlock(&sb_lock);
+
+	if (down_read_trylock(&sb->s_umount)) {
+		if (sb->s_root && (sb->s_flags & MS_BORN))
+			return true;
+		up_read(&sb->s_umount);
+	}
+
+	put_super(sb);
+	return false;
+}
+
 void lock_super(struct super_block * sb)
 {
-	get_fs_excl();
 	mutex_lock(&sb->s_lock);
 }
 
 void unlock_super(struct super_block * sb)
 {
-	put_fs_excl();
 	mutex_unlock(&sb->s_lock);
 }
 
 EXPORT_SYMBOL(lock_super);
 EXPORT_SYMBOL(unlock_super);
 
-/**
- *	generic_shutdown_super	-	common helper for ->kill_sb()
- *	@sb: superblock to kill
- *
- *	generic_shutdown_super() does all fs-independent work on superblock
- *	shutdown.  Typical ->kill_sb() should pick all fs-specific objects
- *	that need destruction out of superblock, call generic_shutdown_super()
- *	and release aforementioned objects.  Note: dentries and inodes _are_
- *	taken care of and do not need specific handling.
- *
- *	Upon calling this function, the filesystem may no longer alter or
- *	rearrange the set of dentries belonging to this super_block, nor may it
- *	change the attachments of dentries to inodes.
- */
 void generic_shutdown_super(struct super_block *sb)
 {
 	const struct super_operations *sop = sb->s_op;
 
-
 	if (sb->s_root) {
 		shrink_dcache_for_umount(sb);
 		sync_filesystem(sb);
-		get_fs_excl();
 		sb->s_flags &= ~MS_ACTIVE;
 
 		fsnotify_unmount_inodes(&sb->s_inodes);
@@ -295,37 +279,30 @@ void generic_shutdown_super(struct super_block *sb)
 			   "Self-destruct in 5 seconds.  Have a nice day...\n",
 			   sb->s_id);
 		}
-		put_fs_excl();
 	}
 	spin_lock(&sb_lock);
-	/* should be initialized for __put_super_and_need_restart() */
-	list_del_init(&sb->s_instances);
+	
+	hlist_del_init(&sb->s_instances);
 	spin_unlock(&sb_lock);
 	up_write(&sb->s_umount);
 }
 
 EXPORT_SYMBOL(generic_shutdown_super);
 
-/**
- *	sget	-	find or create a superblock
- *	@type:	filesystem type superblock should belong to
- *	@test:	comparison callback
- *	@set:	setup callback
- *	@data:	argument to each of them
- */
 struct super_block *sget(struct file_system_type *type,
 			int (*test)(struct super_block *,void *),
 			int (*set)(struct super_block *,void *),
 			void *data)
 {
 	struct super_block *s = NULL;
+	struct hlist_node *node;
 	struct super_block *old;
 	int err;
 
 retry:
 	spin_lock(&sb_lock);
 	if (test) {
-		list_for_each_entry(old, &type->fs_supers, s_instances) {
+		hlist_for_each_entry(old, node, &type->fs_supers, s_instances) {
 			if (!test(old, data))
 				continue;
 			if (!grab_super(old))
@@ -361,9 +338,10 @@ retry:
 	s->s_type = type;
 	strlcpy(s->s_id, type->name, sizeof(s->s_id));
 	list_add_tail(&s->s_list, &super_blocks);
-	list_add(&s->s_instances, &type->fs_supers);
+	hlist_add_head(&s->s_instances, &type->fs_supers);
 	spin_unlock(&sb_lock);
 	get_filesystem(type);
+	register_shrinker(&s->s_shrink);
 	return s;
 }
 
@@ -377,32 +355,20 @@ void drop_super(struct super_block *sb)
 
 EXPORT_SYMBOL(drop_super);
 
-/**
- * sync_supers - helper for periodic superblock writeback
- *
- * Call the write_super method if present on all dirty superblocks in
- * the system.  This is for the periodic writeback used by most older
- * filesystems.  For data integrity superblock writeback use
- * sync_filesystems() instead.
- *
- * Note: check the dirty flag before waiting, so we don't
- * hold up the sync while mounting a device. (The newly
- * mounted device won't need syncing.)
- */
 void sync_supers(void)
 {
 	struct super_block *sb, *p = NULL;
 
 	spin_lock(&sb_lock);
 	list_for_each_entry(sb, &super_blocks, s_list) {
-		if (list_empty(&sb->s_instances))
+		if (hlist_unhashed(&sb->s_instances))
 			continue;
 		if (sb->s_op->write_super && sb->s_dirt) {
 			sb->s_count++;
 			spin_unlock(&sb_lock);
 
 			down_read(&sb->s_umount);
-			if (sb->s_root && sb->s_dirt)
+			if (sb->s_root && sb->s_dirt && (sb->s_flags & MS_BORN))
 				sb->s_op->write_super(sb);
 			up_read(&sb->s_umount);
 
@@ -417,27 +383,19 @@ void sync_supers(void)
 	spin_unlock(&sb_lock);
 }
 
-/**
- *	iterate_supers - call function for all active superblocks
- *	@f: function to call
- *	@arg: argument to pass to it
- *
- *	Scans the superblock list and calls given function, passing it
- *	locked superblock and given argument.
- */
 void iterate_supers(void (*f)(struct super_block *, void *), void *arg)
 {
 	struct super_block *sb, *p = NULL;
 
 	spin_lock(&sb_lock);
 	list_for_each_entry(sb, &super_blocks, s_list) {
-		if (list_empty(&sb->s_instances))
+		if (hlist_unhashed(&sb->s_instances))
 			continue;
 		sb->s_count++;
 		spin_unlock(&sb_lock);
 
 		down_read(&sb->s_umount);
-		if (sb->s_root)
+		if (sb->s_root && (sb->s_flags & MS_BORN))
 			f(sb, arg);
 		up_read(&sb->s_umount);
 
@@ -451,13 +409,34 @@ void iterate_supers(void (*f)(struct super_block *, void *), void *arg)
 	spin_unlock(&sb_lock);
 }
 
-/**
- *	get_super - get the superblock of a device
- *	@bdev: device to get the superblock for
- *	
- *	Scans the superblock list and finds the superblock of the file system
- *	mounted on the device given. %NULL is returned if no match is found.
- */
+void iterate_supers_type(struct file_system_type *type,
+	void (*f)(struct super_block *, void *), void *arg)
+{
+	struct super_block *sb, *p = NULL;
+	struct hlist_node *node;
+
+	spin_lock(&sb_lock);
+	hlist_for_each_entry(sb, node, &type->fs_supers, s_instances) {
+		sb->s_count++;
+		spin_unlock(&sb_lock);
+
+		down_read(&sb->s_umount);
+		if (sb->s_root && (sb->s_flags & MS_BORN))
+			f(sb, arg);
+		up_read(&sb->s_umount);
+
+		spin_lock(&sb_lock);
+		if (p)
+			__put_super(p);
+		p = sb;
+	}
+	if (p)
+		__put_super(p);
+	spin_unlock(&sb_lock);
+}
+
+EXPORT_SYMBOL(iterate_supers_type);
+
 
 struct super_block *get_super(struct block_device *bdev)
 {
@@ -469,17 +448,17 @@ struct super_block *get_super(struct block_device *bdev)
 	spin_lock(&sb_lock);
 rescan:
 	list_for_each_entry(sb, &super_blocks, s_list) {
-		if (list_empty(&sb->s_instances))
+		if (hlist_unhashed(&sb->s_instances))
 			continue;
 		if (sb->s_bdev == bdev) {
 			sb->s_count++;
 			spin_unlock(&sb_lock);
 			down_read(&sb->s_umount);
-			/* still alive? */
-			if (sb->s_root)
+			
+			if (sb->s_root && (sb->s_flags & MS_BORN))
 				return sb;
 			up_read(&sb->s_umount);
-			/* nope, got unmounted */
+			
 			spin_lock(&sb_lock);
 			__put_super(sb);
 			goto rescan;
@@ -491,14 +470,19 @@ rescan:
 
 EXPORT_SYMBOL(get_super);
 
-/**
- * get_active_super - get an active reference to the superblock of a device
- * @bdev: device to get the superblock for
- *
- * Scans the superblock list and finds the superblock of the file system
- * mounted on the device given.  Returns the superblock with an active
- * reference or %NULL if none was found.
- */
+struct super_block *get_super_thawed(struct block_device *bdev)
+{
+	while (1) {
+		struct super_block *s = get_super(bdev);
+		if (!s || s->s_frozen == SB_UNFROZEN)
+			return s;
+		up_read(&s->s_umount);
+		vfs_check_frozen(s, SB_FREEZE_WRITE);
+		put_super(s);
+	}
+}
+EXPORT_SYMBOL(get_super_thawed);
+
 struct super_block *get_active_super(struct block_device *bdev)
 {
 	struct super_block *sb;
@@ -509,10 +493,10 @@ struct super_block *get_active_super(struct block_device *bdev)
 restart:
 	spin_lock(&sb_lock);
 	list_for_each_entry(sb, &super_blocks, s_list) {
-		if (list_empty(&sb->s_instances))
+		if (hlist_unhashed(&sb->s_instances))
 			continue;
 		if (sb->s_bdev == bdev) {
-			if (grab_super(sb)) /* drops sb_lock */
+			if (grab_super(sb)) 
 				return sb;
 			else
 				goto restart;
@@ -529,17 +513,17 @@ struct super_block *user_get_super(dev_t dev)
 	spin_lock(&sb_lock);
 rescan:
 	list_for_each_entry(sb, &super_blocks, s_list) {
-		if (list_empty(&sb->s_instances))
+		if (hlist_unhashed(&sb->s_instances))
 			continue;
 		if (sb->s_dev ==  dev) {
 			sb->s_count++;
 			spin_unlock(&sb_lock);
 			down_read(&sb->s_umount);
-			/* still alive? */
-			if (sb->s_root)
+			
+			if (sb->s_root && (sb->s_flags & MS_BORN))
 				return sb;
 			up_read(&sb->s_umount);
-			/* nope, got unmounted */
+			
 			spin_lock(&sb_lock);
 			__put_super(sb);
 			goto rescan;
@@ -549,15 +533,6 @@ rescan:
 	return NULL;
 }
 
-/**
- *	do_remount_sb - asks filesystem to change mount options.
- *	@sb:	superblock in question
- *	@flags:	numeric part of options
- *	@data:	the rest of options
- *      @force: whether or not to force the change
- *
- *	Alters the mount options of a mounted file system.
- */
 int do_remount_sb(struct super_block *sb, int flags, void *data, int force)
 {
 	int retval;
@@ -578,50 +553,54 @@ int do_remount_sb(struct super_block *sb, int flags, void *data, int force)
 
 	remount_ro = (flags & MS_RDONLY) && !(sb->s_flags & MS_RDONLY);
 
-	/* If we are remounting RDONLY and current sb is read/write,
-	   make sure there are no rw files opened */
 	if (remount_ro) {
-		if (force)
+		if (force) {
 			mark_files_ro(sb);
-		else if (!fs_may_remount_ro(sb))
-			return -EBUSY;
+		} else {
+			retval = sb_prepare_remount_readonly(sb);
+			if (retval)
+				return retval;
+		}
 	}
 
 	if (sb->s_op->remount_fs) {
 		retval = sb->s_op->remount_fs(sb, &flags, data);
-		if (retval)
-			return retval;
+		if (retval) {
+			if (!force)
+				goto cancel_readonly;
+			
+			WARN(1, "forced remount of a %s fs returned %i\n",
+			     sb->s_type->name, retval);
+		}
 	}
 	sb->s_flags = (sb->s_flags & ~MS_RMT_MASK) | (flags & MS_RMT_MASK);
+	
+	smp_wmb();
+	sb->s_readonly_remount = 0;
 
-	/*
-	 * Some filesystems modify their metadata via some other path than the
-	 * bdev buffer cache (eg. use a private mapping, or directories in
-	 * pagecache, etc). Also file data modifications go via their own
-	 * mappings. So If we try to mount readonly then copy the filesystem
-	 * from bdev, we could get stale data, so invalidate it to give a best
-	 * effort at coherency.
-	 */
 	if (remount_ro && sb->s_bdev)
 		invalidate_bdev(sb->s_bdev);
 	return 0;
+
+cancel_readonly:
+	sb->s_readonly_remount = 0;
+	return retval;
 }
 
 static void do_emergency_remount(struct work_struct *work)
 {
 	struct super_block *sb, *p = NULL;
 
+	atomic_set(&vfs_emergency_remount, 1);
 	spin_lock(&sb_lock);
 	list_for_each_entry(sb, &super_blocks, s_list) {
-		if (list_empty(&sb->s_instances))
+		if (hlist_unhashed(&sb->s_instances))
 			continue;
 		sb->s_count++;
 		spin_unlock(&sb_lock);
 		down_write(&sb->s_umount);
-		if (sb->s_root && sb->s_bdev && !(sb->s_flags & MS_RDONLY)) {
-			/*
-			 * What lock protects sb->s_flags??
-			 */
+		if (sb->s_root && sb->s_bdev && (sb->s_flags & MS_BORN) &&
+		    !(sb->s_flags & MS_RDONLY)) {
 			do_remount_sb(sb, MS_RDONLY, NULL, 1);
 		}
 		up_write(&sb->s_umount);
@@ -634,6 +613,9 @@ static void do_emergency_remount(struct work_struct *work)
 		__put_super(p);
 	spin_unlock(&sb_lock);
 	kfree(work);
+	atomic_set(&emmc_reboot, 1);
+	atomic_set(&vfs_emergency_remount, 0);
+	printk("Lock eMMC\n");
 	printk("Emergency Remount complete\n");
 }
 
@@ -648,16 +630,12 @@ void emergency_remount(void)
 	}
 }
 
-/*
- * Unnamed block devices are dummy devices used by virtual
- * filesystems which don't use real block-devices.  -- jrs
- */
 
 static DEFINE_IDA(unnamed_dev_ida);
-static DEFINE_SPINLOCK(unnamed_dev_lock);/* protects the above */
-static int unnamed_dev_start = 0; /* don't bother trying below it */
+static DEFINE_SPINLOCK(unnamed_dev_lock);
+static int unnamed_dev_start = 0; 
 
-int set_anon_super(struct super_block *s, void *data)
+int get_anon_bdev(dev_t *p)
 {
 	int dev;
 	int error;
@@ -671,7 +649,7 @@ int set_anon_super(struct super_block *s, void *data)
 		unnamed_dev_start = dev + 1;
 	spin_unlock(&unnamed_dev_lock);
 	if (error == -EAGAIN)
-		/* We raced and lost with another CPU. */
+		
 		goto retry;
 	else if (error)
 		return -EAGAIN;
@@ -684,23 +662,37 @@ int set_anon_super(struct super_block *s, void *data)
 		spin_unlock(&unnamed_dev_lock);
 		return -EMFILE;
 	}
-	s->s_dev = MKDEV(0, dev & MINORMASK);
-	s->s_bdi = &noop_backing_dev_info;
+	*p = MKDEV(0, dev & MINORMASK);
 	return 0;
+}
+EXPORT_SYMBOL(get_anon_bdev);
+
+void free_anon_bdev(dev_t dev)
+{
+	int slot = MINOR(dev);
+	spin_lock(&unnamed_dev_lock);
+	ida_remove(&unnamed_dev_ida, slot);
+	if (slot < unnamed_dev_start)
+		unnamed_dev_start = slot;
+	spin_unlock(&unnamed_dev_lock);
+}
+EXPORT_SYMBOL(free_anon_bdev);
+
+int set_anon_super(struct super_block *s, void *data)
+{
+	int error = get_anon_bdev(&s->s_dev);
+	if (!error)
+		s->s_bdi = &noop_backing_dev_info;
+	return error;
 }
 
 EXPORT_SYMBOL(set_anon_super);
 
 void kill_anon_super(struct super_block *sb)
 {
-	int slot = MINOR(sb->s_dev);
-
+	dev_t dev = sb->s_dev;
 	generic_shutdown_super(sb);
-	spin_lock(&unnamed_dev_lock);
-	ida_remove(&unnamed_dev_ida, slot);
-	if (slot < unnamed_dev_start)
-		unnamed_dev_start = slot;
-	spin_unlock(&unnamed_dev_lock);
+	free_anon_bdev(dev);
 }
 
 EXPORT_SYMBOL(kill_anon_super);
@@ -757,10 +749,6 @@ static int set_bdev_super(struct super_block *s, void *data)
 	s->s_bdev = data;
 	s->s_dev = s->s_bdev->bd_dev;
 
-	/*
-	 * We set the bdi here to the queue backing, file systems can
-	 * overwrite this in ->fill_super()
-	 */
 	s->s_bdi = &bdev_get_queue(s->s_bdev)->backing_dev_info;
 	return 0;
 }
@@ -786,11 +774,6 @@ struct dentry *mount_bdev(struct file_system_type *fs_type,
 	if (IS_ERR(bdev))
 		return ERR_CAST(bdev);
 
-	/*
-	 * once the super is inserted into the list by sget, s_umount
-	 * will protect the lockfs code from trying to start a snapshot
-	 * while we are mounting
-	 */
 	mutex_lock(&bdev->bd_fsfreeze_mutex);
 	if (bdev->bd_fsfreeze_count > 0) {
 		mutex_unlock(&bdev->bd_fsfreeze_mutex);
@@ -809,13 +792,6 @@ struct dentry *mount_bdev(struct file_system_type *fs_type,
 			goto error_bdev;
 		}
 
-		/*
-		 * s_umount nests inside bd_mutex during
-		 * __invalidate_device().  blkdev_put() acquires
-		 * bd_mutex and can't be called under s_umount.  Drop
-		 * s_umount temporarily.  This is safe as we're
-		 * holding an active reference.
-		 */
 		up_write(&s->s_umount);
 		blkdev_put(bdev, mode);
 		down_write(&s->s_umount);
@@ -947,12 +923,6 @@ mount_fs(struct file_system_type *type, int flags, const char *name, void *data)
 	if (error)
 		goto out_sb;
 
-	/*
-	 * filesystems should never set s_maxbytes larger than MAX_LFS_FILESIZE
-	 * but s_maxbytes was an unsigned long long for many releases. Throw
-	 * this warning for a little while to try and catch filesystems that
-	 * violate this rule.
-	 */
 	WARN((sb->s_maxbytes < 0), "%s set sb->s_maxbytes to "
 		"negative value (%lld)\n", type->name, sb->s_maxbytes);
 
@@ -968,14 +938,6 @@ out:
 	return ERR_PTR(error);
 }
 
-/**
- * freeze_super - lock the filesystem and force it into a consistent state
- * @sb: the super to lock
- *
- * Syncs the super to make sure the filesystem is consistent and calls the fs's
- * freeze_fs.  Subsequent calls to this without first thawing the fs will return
- * -EBUSY.
- */
 int freeze_super(struct super_block *sb)
 {
 	int ret;
@@ -985,6 +947,11 @@ int freeze_super(struct super_block *sb)
 	if (sb->s_frozen) {
 		deactivate_locked_super(sb);
 		return -EBUSY;
+	}
+
+	if (!(sb->s_flags & MS_BORN)) {
+		up_write(&sb->s_umount);
+		return 0;	
 	}
 
 	if (sb->s_flags & MS_RDONLY) {
@@ -1020,12 +987,6 @@ int freeze_super(struct super_block *sb)
 }
 EXPORT_SYMBOL(freeze_super);
 
-/**
- * thaw_super -- unlock filesystem
- * @sb: the super to thaw
- *
- * Unlocks the filesystem and marks it writeable again after freeze_super().
- */
 int thaw_super(struct super_block *sb)
 {
 	int error;

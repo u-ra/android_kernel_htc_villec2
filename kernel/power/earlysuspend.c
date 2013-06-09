@@ -19,18 +19,24 @@
 #include <linux/rtc.h>
 #include <linux/wakelock.h>
 #include <linux/workqueue.h>
+#include <linux/cpu.h>
+#include <linux/cpufreq.h>
 
 #include "power.h"
+#ifdef CONFIG_TRACING_IRQ_PWR
+#include "../drivers/gpio/gpio-msm-common.h"
+#define PWR_KEY_MSMz           26
+#endif
 
 enum {
 	DEBUG_USER_STATE = 1U << 0,
 	DEBUG_SUSPEND = 1U << 2,
-	DEBUG_NO_SUSPEND = 1U << 3,
 	DEBUG_VERBOSE = 1U << 3,
+	DEBUG_NO_SUSPEND = 1U << 4,
 };
 
 #ifdef CONFIG_NO_SUSPEND
-static int debug_mask = DEBUG_USER_STATE | DEBUG_NO_SUSPEND;
+static int debug_mask = DEBUG_USER_STATE;
 #else
 static int debug_mask = DEBUG_USER_STATE;
 #endif
@@ -59,6 +65,54 @@ static DECLARE_WORK(onchg_suspend_work, onchg_suspend);
 static DECLARE_WORK(onchg_resume_work, onchg_resume);
 
 static int state_onchg;
+#endif
+
+#ifdef CONFIG_EARLYSUSPEND_BOOST_CPU_SPEED
+
+extern int skip_cpu_offline;
+int has_boost_cpu_func = 0;
+
+static void __ref boost_cpu_speed(int boost)
+{
+	unsigned long max_wait;
+	unsigned int cpu = 0, isfound = 0;
+
+	if (!has_boost_cpu_func)
+		return;
+
+	if (boost) {
+		skip_cpu_offline = 1;
+
+		for(cpu = 1; cpu < NR_CPUS; cpu++) {
+			if (cpu_online(cpu)) {
+				isfound = 1;
+				break;
+			}
+		}
+		cpu = isfound ? cpu : 1;
+
+		if (!isfound) {
+			max_wait = jiffies + msecs_to_jiffies(50);
+			cpu_hotplug_driver_lock();
+			cpu_up(cpu);
+			cpu_hotplug_driver_unlock();
+			while (!cpu_active(cpu) && jiffies < max_wait)
+				;
+		}
+#ifdef CONFIG_CPU_FREQ_DEFAULT_GOV_ONDEMAND
+		ondemand_boost_cpu(1);
+#endif
+
+	} else {
+
+#ifdef CONFIG_CPU_FREQ_DEFAULT_GOV_ONDEMAND
+		ondemand_boost_cpu(0);
+#endif
+		skip_cpu_offline = 0;
+	}
+}
+#else
+static void boost_cpu_speed(int boost) { return; }
 #endif
 
 void register_early_suspend(struct early_suspend *handler)
@@ -113,6 +167,8 @@ static void early_suspend(struct work_struct *work)
 		goto abort;
 	}
 
+	boost_cpu_speed(1);
+
 	if (debug_mask & DEBUG_SUSPEND)
 		pr_info("early_suspend: call handlers\n");
 	list_for_each_entry(pos, &early_suspend_handlers, link) {
@@ -122,7 +178,11 @@ static void early_suspend(struct work_struct *work)
 			pos->suspend(pos);
 		}
 	}
+	boost_cpu_speed(0);
 	mutex_unlock(&early_suspend_lock);
+
+	if (debug_mask & DEBUG_SUSPEND)
+		pr_info("early_suspend: sync\n");
 
 	suspend_sys_sync_queue();
 
@@ -163,6 +223,9 @@ static void late_resume(struct work_struct *work)
 			pr_info("late_resume: abort, state %d\n", state);
 		goto abort;
 	}
+
+	boost_cpu_speed(1);
+
 	if (debug_mask & DEBUG_SUSPEND)
 		pr_info("late_resume: call handlers\n");
 	list_for_each_entry_reverse(pos, &early_suspend_handlers, link) {
@@ -173,6 +236,9 @@ static void late_resume(struct work_struct *work)
 			pos->resume(pos);
 		}
 	}
+
+	boost_cpu_speed(0);
+
 	if (debug_mask & DEBUG_SUSPEND)
 		pr_info("late_resume: done\n");
 
@@ -183,7 +249,6 @@ abort:
 	mutex_unlock(&early_suspend_lock);
 	pr_info("[R] late_resume end\n");
 }
-
 #ifdef CONFIG_HTC_ONMODE_CHARGING
 void register_onchg_suspend(struct early_suspend *handler)
 {
@@ -341,7 +406,11 @@ void request_suspend_state(suspend_state_t new_state)
 	} else if (old_sleep && new_state == PM_SUSPEND_ON) {
 		state &= ~SUSPEND_REQUESTED;
 		wake_lock(&main_wake_lock);
-		queue_work(suspend_work_queue, &late_resume_work);
+#ifdef CONFIG_TRACING_IRQ_PWR
+		pr_info("%s : PWR KEY INT ENABLE : %d\n", __func__,  (__msm_gpio_get_intr_config(PWR_KEY_MSMz)&0x1));
+#endif
+		if (!queue_work(suspend_work_queue, &late_resume_work))
+			WARN(1, "late_resume_work already in queue!!!");
 	}
 	requested_suspend_state = new_state;
 	spin_unlock_irqrestore(&state_lock, irqflags);

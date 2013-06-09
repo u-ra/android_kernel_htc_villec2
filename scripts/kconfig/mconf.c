@@ -15,10 +15,10 @@
 #include <stdarg.h>
 #include <stdlib.h>
 #include <string.h>
+#include <signal.h>
 #include <unistd.h>
 #include <locale.h>
 
-#define LKC_DIRECT_LINK
 #include "lkc.h"
 #include "lxdialog/dialog.h"
 
@@ -273,6 +273,7 @@ static struct menu *current_menu;
 static int child_count;
 static int single_menu_mode;
 static int show_all_options;
+static int saved_x, saved_y;
 
 static void conf(struct menu *menu);
 static void conf_choice(struct menu *menu);
@@ -323,7 +324,7 @@ again:
 		return;
 	}
 
-	/* strip the prefix if necessary */
+	
 	dialog_input = dialog_input_result;
 	if (strncasecmp(dialog_input_result, CONFIG_, strlen(CONFIG_)) == 0)
 		dialog_input += strlen(CONFIG_);
@@ -345,10 +346,6 @@ static void build_conf(struct menu *menu)
 	char ch;
 	bool visible;
 
-	/*
-	 * note: menu_is_visible() has side effect that it will
-	 * recalc the value of the symbol.
-	 */
 	visible = menu_is_visible(menu);
 	if (show_all_options && !menu_has_prompt(menu))
 		return;
@@ -484,7 +481,7 @@ static void build_conf(struct menu *menu)
 				item_set_data(menu);
 				break;
 			default:
-				tmp = 2 + strlen(sym_get_string_value(sym)); /* () = 2 */
+				tmp = 2 + strlen(sym_get_string_value(sym)); 
 				item_make("(%s)", sym_get_string_value(sym));
 				tmp = indent - tmp + 4;
 				if (tmp < 0)
@@ -793,15 +790,64 @@ static void conf_save(void)
 	}
 }
 
+static int handle_exit(void)
+{
+	int res;
+
+	dialog_clear();
+	if (conf_get_changed())
+		res = dialog_yesno(NULL,
+				   _("Do you wish to save your new configuration ?\n"
+				     "<ESC><ESC> to continue."),
+				   6, 60);
+	else
+		res = -1;
+
+	end_dialog(saved_x, saved_y);
+
+	switch (res) {
+	case 0:
+		if (conf_write(filename)) {
+			fprintf(stderr, _("\n\n"
+					  "Error while writing of the configuration.\n"
+					  "Your configuration changes were NOT saved."
+					  "\n\n"));
+			return 1;
+		}
+		
+	case -1:
+		printf(_("\n\n"
+			 "*** End of the configuration.\n"
+			 "*** Execute 'make' to start the build or try 'make help'."
+			 "\n\n"));
+		res = 0;
+		break;
+	default:
+		fprintf(stderr, _("\n\n"
+				  "Your configuration changes were NOT saved."
+				  "\n\n"));
+		if (res != KEY_ESC)
+			res = 0;
+	}
+
+	return res;
+}
+
+static void sig_handler(int signo)
+{
+	exit(handle_exit());
+}
+
 int main(int ac, char **av)
 {
-	int saved_x, saved_y;
 	char *mode;
 	int res;
 
 	setlocale(LC_ALL, "");
 	bindtextdomain(PACKAGE, LOCALEDIR);
 	textdomain(PACKAGE);
+
+	signal(SIGINT, sig_handler);
 
 	conf_parse(av[1]);
 	conf_read(NULL);
@@ -824,39 +870,9 @@ int main(int ac, char **av)
 	set_config_filename(conf_get_configname());
 	do {
 		conf(&rootmenu);
-		dialog_clear();
-		if (conf_get_changed())
-			res = dialog_yesno(NULL,
-					   _("Do you wish to save your "
-					     "new configuration?\n"
-					     "<ESC><ESC> to continue."),
-					   6, 60);
-		else
-			res = -1;
+		res = handle_exit();
 	} while (res == KEY_ESC);
-	end_dialog(saved_x, saved_y);
 
-	switch (res) {
-	case 0:
-		if (conf_write(filename)) {
-			fprintf(stderr, _("\n\n"
-				"Error while writing of the configuration.\n"
-				"Your configuration changes were NOT saved."
-				"\n\n"));
-			return 1;
-		}
-	case -1:
-		printf(_("\n\n"
-			"*** End of the configuration.\n"
-			"*** Execute 'make' to start the build or try 'make help'."
-			"\n\n"));
-		break;
-	default:
-		fprintf(stderr, _("\n\n"
-			"Your configuration changes were NOT saved."
-			"\n\n"));
-	}
-
-	return 0;
+	return res;
 }
 

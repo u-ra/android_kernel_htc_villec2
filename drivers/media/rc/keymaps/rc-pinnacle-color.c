@@ -11,6 +11,7 @@
  */
 
 #include <media/rc-map.h>
+#include <linux/module.h>
 
 static struct rc_map_table pinnacle_color[] = {
 	{ 0x59, KEY_MUTE },
@@ -72,7 +73,7 @@ static struct rc_map_list pinnacle_color_map = {
 	.map = {
 		.scan    = pinnacle_color,
 		.size    = ARRAY_SIZE(pinnacle_color),
-		.rc_type = RC_TYPE_UNKNOWN,	/* Legacy IR type */
+		.rc_type = RC_TYPE_UNKNOWN,	
 		.name    = RC_MAP_PINNACLE_COLOR,
 	}
 };

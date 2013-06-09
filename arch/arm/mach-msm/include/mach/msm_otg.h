@@ -17,11 +17,6 @@
 #include <linux/workqueue.h>
 #include <linux/wakelock.h>
 
-/*
- * The otg driver needs to interact with both device side and host side
- * usb controllers.  it decides which controller is active at a given
- * moment, using the transceiver, ID signal.
- */
 
 struct msm_otg_transceiver {
 	struct device		*dev;
@@ -34,16 +29,16 @@ struct msm_otg_transceiver {
 	int			flags;
 	int			state;
 	int			active;
-	void __iomem		*regs;		/* device memory/io */
+	void __iomem		*regs;		
 	struct work_struct	work;
 	spinlock_t		lock;
 	struct wake_lock	wlock;
 
-	/* bind/unbind the host controller */
+	
 	int	(*set_host)(struct msm_otg_transceiver *otg,
 				struct msm_otg_ops *hcd_ops);
 
-	/* bind/unbind the peripheral controller */
+	
 	int	(*set_peripheral)(struct msm_otg_transceiver *otg,
 				struct msm_otg_ops *dcd_ops);
 	int	(*set_suspend)(struct msm_otg_transceiver *otg,
@@ -56,7 +51,6 @@ struct msm_otg_ops {
 	void		*handle;
 };
 
-/* for usb host and peripheral controller drivers */
 #ifdef CONFIG_USB_MSM_OTG
 
 extern struct msm_otg_transceiver *msm_otg_get_transceiver(void);
@@ -73,6 +67,6 @@ static inline void msm_otg_put_transceiver(struct msm_otg_transceiver *xceiv)
 {
 }
 
-#endif /*CONFIG_USB_MSM_OTG*/
+#endif 
 
 #endif

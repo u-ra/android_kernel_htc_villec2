@@ -79,7 +79,7 @@ static void wiphy_dev_release(struct device *dev)
 #ifdef CONFIG_HOTPLUG
 static int wiphy_uevent(struct device *dev, struct kobj_uevent_env *env)
 {
-	/* TODO, we probably need stuff here */
+	
 	return 0;
 }
 #endif
@@ -93,7 +93,8 @@ static int wiphy_suspend(struct device *dev, pm_message_t state)
 
 	if (rdev->ops->suspend) {
 		rtnl_lock();
-		ret = rdev->ops->suspend(&rdev->wiphy, rdev->wowlan);
+		if (rdev->wiphy.registered)
+			ret = rdev->ops->suspend(&rdev->wiphy, rdev->wowlan);
 		rtnl_unlock();
 	}
 
@@ -105,14 +106,15 @@ static int wiphy_resume(struct device *dev)
 	struct cfg80211_registered_device *rdev = dev_to_rdev(dev);
 	int ret = 0;
 
-	/* Age scan results with time spent in suspend */
+	
 	spin_lock_bh(&rdev->bss_lock);
 	cfg80211_bss_age(rdev, get_seconds() - rdev->suspend_at);
 	spin_unlock_bh(&rdev->bss_lock);
 
 	if (rdev->ops->resume) {
 		rtnl_lock();
-		ret = rdev->ops->resume(&rdev->wiphy);
+		if (rdev->wiphy.registered)
+			ret = rdev->ops->resume(&rdev->wiphy);
 		rtnl_unlock();
 	}
 

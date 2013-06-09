@@ -20,6 +20,7 @@
 #include <linux/err.h>
 #include <linux/debugfs.h>
 #include <linux/gpio.h>
+#include <linux/module.h>
 
 #include <asm/gpio.h>
 #include <asm/io.h>
@@ -34,10 +35,10 @@
 
 #include "devices.h"
 #include "board-villec2.h"
-#include "proc_comm.h"
+#include <mach/proc_comm.h>
 #include "board-common-wimax.h"
 #include "board-villec2-mmc.h"
-#include "mpm.h"
+#include <mach/mpm.h>
 
 #ifdef CONFIG_WIMAX_SERIAL_MSM
 #include <mach/msm_serial_wimax.h>
@@ -48,19 +49,17 @@
 #define INT_UART3_IRQ		GSBI3_UARTDM_IRQ
 #endif
 
-#include "mpm.h"
 #include <linux/irq.h>
 #include "board-villec2-mmc.h"
 
 #include <mach/rpm.h>
 #include <mach/rpm-regulator.h>
 
-#include "mpm.h"
 #include "rpm_resources.h"
 
 int msm_proc_comm(unsigned cmd, unsigned *data1, unsigned *data2);
 
-/* ---- PM QOS ---- */
+#if 0
 static struct msm_rpmrs_level msm_rpmrs_levels[] = {
 	{
 		MSM_PM_SLEEP_MODE_WAIT_FOR_INTERRUPT,
@@ -130,21 +129,19 @@ static uint32_t msm_rpm_get_swfi_latency(void)
 
 	return 0;
 }
+#endif
 
-/* Macros assume PMIC GPIOs start at 0 */
 #define PM8058_GPIO_BASE			NR_MSM_GPIOS
 #define PM8058_GPIO_PM_TO_SYS(pm_gpio)		(pm_gpio + PM8058_GPIO_BASE)
 #define PM8058_GPIO_SYS_TO_PM(sys_gpio)		(sys_gpio - PM8058_GPIO_BASE)
 
-/* ---- SDCARD ---- */
-/* ---- WIFI ---- */
 
 static uint32_t wifi_on_gpio_table[] = {
-	GPIO_CFG(VILLEC2_GPIO_WIFI_IRQ, 0, GPIO_CFG_INPUT, GPIO_CFG_NO_PULL, GPIO_CFG_4MA), /* WLAN IRQ */
+	GPIO_CFG(VILLEC2_GPIO_WIFI_IRQ, 0, GPIO_CFG_INPUT, GPIO_CFG_NO_PULL, GPIO_CFG_4MA), 
 };
 
 static uint32_t wifi_off_gpio_table[] = {
-	GPIO_CFG(VILLEC2_GPIO_WIFI_IRQ, 0, GPIO_CFG_INPUT, GPIO_CFG_PULL_DOWN, GPIO_CFG_4MA), /* WLAN IRQ */
+	GPIO_CFG(VILLEC2_GPIO_WIFI_IRQ, 0, GPIO_CFG_INPUT, GPIO_CFG_PULL_DOWN, GPIO_CFG_4MA), 
 };
 
 static void config_gpio_table(uint32_t *table, int len)
@@ -159,9 +156,6 @@ static void config_gpio_table(uint32_t *table, int len)
 	}
 }
 
-/* BCM4329 returns wrong sdio_vsn(1) when we read cccr,
- * we use predefined value (sdio_vsn=2) here to initial sdio driver well
- */
 static struct embedded_sdio_data villec2_wifi_emb_data = {
 	.cccr	= {
 		.sdio_vsn	= 2,
@@ -188,7 +182,7 @@ villec2_wifi_status_register(void (*callback)(int card_present, void *dev_id),
 	return 0;
 }
 
-static int villec2_wifi_cd;	/* WiFi virtual 'card detect' status */
+static int villec2_wifi_cd;	
 
 static unsigned int villec2_wifi_status(struct device *dev)
 {
@@ -207,9 +201,7 @@ static struct mmc_platform_data villec2_wifi_data = {
 	.msmsdcc_fmid   = 24000000,
 	.msmsdcc_fmax   = 48000000,
 	.nonremovable   = 0,
-	.pclk_src_dfab	= 1,
 };
-
 
 int villec2_wifi_set_carddetect(int val)
 {
@@ -222,6 +214,7 @@ int villec2_wifi_set_carddetect(int val)
 	return 0;
 }
 EXPORT_SYMBOL(villec2_wifi_set_carddetect);
+
 
 int villec2_wifi_power(int on)
 {
@@ -238,9 +231,9 @@ int villec2_wifi_power(int on)
 		config_gpio_table(wifi_off_gpio_table,
 				  ARRAY_SIZE(wifi_off_gpio_table));
 	}
-	/* htc_wifi_bt_sleep_clk_ctl(on, ID_WIFI); */
-	mdelay(1);/*Delay 1 ms, Recommand by Hardware*/
-	gpio_set_value(VILLEC2_GPIO_WIFI_SHUTDOWN_N, on); /* WIFI_SHUTDOWN */
+	
+	mdelay(1);
+	gpio_set_value(VILLEC2_GPIO_WIFI_SHUTDOWN_N, on); 
 
 	mdelay(120);
 	return 0;
@@ -253,45 +246,44 @@ int villec2_wifi_reset(int on)
 	return 0;
 }
 
-/* ---- WIMAX ---- */
 static uint32_t wimax_on_gpio_table[] = {
-	GPIO_CFG(VILLEC2_GPIO_WIMAX_SDIO_D0,  2, GPIO_CFG_OUTPUT, GPIO_CFG_PULL_UP, GPIO_CFG_2MA), /* DAT0 */
-	GPIO_CFG(VILLEC2_GPIO_WIMAX_SDIO_D1,  2, GPIO_CFG_OUTPUT, GPIO_CFG_PULL_UP, GPIO_CFG_2MA), /* DAT1 */
-	GPIO_CFG(VILLEC2_GPIO_WIMAX_SDIO_D2,  2, GPIO_CFG_OUTPUT, GPIO_CFG_PULL_UP, GPIO_CFG_2MA), /* DAT2 */
-	GPIO_CFG(VILLEC2_GPIO_WIMAX_SDIO_D3,  2, GPIO_CFG_OUTPUT, GPIO_CFG_PULL_UP, GPIO_CFG_2MA), /* DAT3 */
-    GPIO_CFG(VILLEC2_GPIO_WIMAX_SDIO_CMD, 2, GPIO_CFG_OUTPUT, GPIO_CFG_PULL_UP, GPIO_CFG_2MA), /* CMD */
-    GPIO_CFG(VILLEC2_GPIO_WIMAX_SDIO_CLK_CPU, 2, GPIO_CFG_OUTPUT, GPIO_CFG_PULL_UP, GPIO_CFG_2MA), /* CLK */
-    GPIO_CFG(VILLEC2_GPIO_V_WIMAX_1V2_RF_EN, 0, GPIO_CFG_OUTPUT, GPIO_CFG_PULL_UP, GPIO_CFG_2MA),  /* 1v2RF */
-    GPIO_CFG(VILLEC2_GPIO_V_WIMAX_DVDD_EN, 0, GPIO_CFG_OUTPUT, GPIO_CFG_PULL_UP, GPIO_CFG_2MA),    /* DVDD */
-    GPIO_CFG(VILLEC2_GPIO_V_WIMAX_PVDD_EN, 0, GPIO_CFG_OUTPUT, GPIO_CFG_PULL_UP, GPIO_CFG_2MA),    /* PVDD */
-    GPIO_CFG(VILLEC2_GPIO_WIMAX_EXT_RST,   0, GPIO_CFG_OUTPUT, GPIO_CFG_PULL_UP, GPIO_CFG_2MA),    /* EXT_RST */
+	GPIO_CFG(VILLEC2_GPIO_WIMAX_SDIO_D0,  2, GPIO_CFG_OUTPUT, GPIO_CFG_PULL_UP, GPIO_CFG_2MA), 
+	GPIO_CFG(VILLEC2_GPIO_WIMAX_SDIO_D1,  2, GPIO_CFG_OUTPUT, GPIO_CFG_PULL_UP, GPIO_CFG_2MA), 
+	GPIO_CFG(VILLEC2_GPIO_WIMAX_SDIO_D2,  2, GPIO_CFG_OUTPUT, GPIO_CFG_PULL_UP, GPIO_CFG_2MA), 
+	GPIO_CFG(VILLEC2_GPIO_WIMAX_SDIO_D3,  2, GPIO_CFG_OUTPUT, GPIO_CFG_PULL_UP, GPIO_CFG_2MA), 
+    GPIO_CFG(VILLEC2_GPIO_WIMAX_SDIO_CMD, 2, GPIO_CFG_OUTPUT, GPIO_CFG_PULL_UP, GPIO_CFG_2MA), 
+    GPIO_CFG(VILLEC2_GPIO_WIMAX_SDIO_CLK_CPU, 2, GPIO_CFG_OUTPUT, GPIO_CFG_PULL_UP, GPIO_CFG_2MA), 
+    GPIO_CFG(VILLEC2_GPIO_V_WIMAX_1V2_RF_EN, 0, GPIO_CFG_OUTPUT, GPIO_CFG_PULL_UP, GPIO_CFG_2MA),  
+    GPIO_CFG(VILLEC2_GPIO_V_WIMAX_DVDD_EN, 0, GPIO_CFG_OUTPUT, GPIO_CFG_PULL_UP, GPIO_CFG_2MA),    
+    GPIO_CFG(VILLEC2_GPIO_V_WIMAX_PVDD_EN, 0, GPIO_CFG_OUTPUT, GPIO_CFG_PULL_UP, GPIO_CFG_2MA),    
+    GPIO_CFG(VILLEC2_GPIO_WIMAX_EXT_RST,   0, GPIO_CFG_OUTPUT, GPIO_CFG_PULL_UP, GPIO_CFG_2MA),    
 
 };
 
 static uint32_t wimax_off_gpio_table[] = {
-	GPIO_CFG(VILLEC2_GPIO_WIMAX_SDIO_D0,  0, GPIO_CFG_OUTPUT, GPIO_CFG_PULL_UP, GPIO_CFG_2MA), /* DAT0 */
-	GPIO_CFG(VILLEC2_GPIO_WIMAX_SDIO_D1,  0, GPIO_CFG_OUTPUT, GPIO_CFG_PULL_UP, GPIO_CFG_2MA), /* DAT1 */
-	GPIO_CFG(VILLEC2_GPIO_WIMAX_SDIO_D2,  0, GPIO_CFG_OUTPUT, GPIO_CFG_PULL_UP, GPIO_CFG_2MA), /* DAT2 */
-	GPIO_CFG(VILLEC2_GPIO_WIMAX_SDIO_D3,  0, GPIO_CFG_OUTPUT, GPIO_CFG_PULL_UP, GPIO_CFG_2MA), /* DAT3 */
-    GPIO_CFG(VILLEC2_GPIO_WIMAX_SDIO_CMD, 0, GPIO_CFG_OUTPUT, GPIO_CFG_PULL_UP, GPIO_CFG_2MA), /* CMD */
-    GPIO_CFG(VILLEC2_GPIO_WIMAX_SDIO_CLK_CPU, 0, GPIO_CFG_OUTPUT, GPIO_CFG_PULL_UP, GPIO_CFG_2MA), /* CLK */
-    GPIO_CFG(VILLEC2_GPIO_V_WIMAX_1V2_RF_EN, 0, GPIO_CFG_OUTPUT, GPIO_CFG_PULL_UP, GPIO_CFG_2MA),  /* 1v2RF */
-    GPIO_CFG(VILLEC2_GPIO_V_WIMAX_DVDD_EN, 0, GPIO_CFG_OUTPUT, GPIO_CFG_PULL_UP, GPIO_CFG_2MA),    /* DVDD */
-    GPIO_CFG(VILLEC2_GPIO_V_WIMAX_PVDD_EN, 0, GPIO_CFG_OUTPUT, GPIO_CFG_PULL_UP, GPIO_CFG_2MA),    /* PVDD */
-    GPIO_CFG(VILLEC2_GPIO_WIMAX_EXT_RST,   0, GPIO_CFG_OUTPUT, GPIO_CFG_PULL_UP, GPIO_CFG_2MA),    /* EXT_RST */
+	GPIO_CFG(VILLEC2_GPIO_WIMAX_SDIO_D0,  0, GPIO_CFG_OUTPUT, GPIO_CFG_PULL_UP, GPIO_CFG_2MA), 
+	GPIO_CFG(VILLEC2_GPIO_WIMAX_SDIO_D1,  0, GPIO_CFG_OUTPUT, GPIO_CFG_PULL_UP, GPIO_CFG_2MA), 
+	GPIO_CFG(VILLEC2_GPIO_WIMAX_SDIO_D2,  0, GPIO_CFG_OUTPUT, GPIO_CFG_PULL_UP, GPIO_CFG_2MA), 
+	GPIO_CFG(VILLEC2_GPIO_WIMAX_SDIO_D3,  0, GPIO_CFG_OUTPUT, GPIO_CFG_PULL_UP, GPIO_CFG_2MA), 
+    GPIO_CFG(VILLEC2_GPIO_WIMAX_SDIO_CMD, 0, GPIO_CFG_OUTPUT, GPIO_CFG_PULL_UP, GPIO_CFG_2MA), 
+    GPIO_CFG(VILLEC2_GPIO_WIMAX_SDIO_CLK_CPU, 0, GPIO_CFG_OUTPUT, GPIO_CFG_PULL_UP, GPIO_CFG_2MA), 
+    GPIO_CFG(VILLEC2_GPIO_V_WIMAX_1V2_RF_EN, 0, GPIO_CFG_OUTPUT, GPIO_CFG_PULL_UP, GPIO_CFG_2MA),  
+    GPIO_CFG(VILLEC2_GPIO_V_WIMAX_DVDD_EN, 0, GPIO_CFG_OUTPUT, GPIO_CFG_PULL_UP, GPIO_CFG_2MA),    
+    GPIO_CFG(VILLEC2_GPIO_V_WIMAX_PVDD_EN, 0, GPIO_CFG_OUTPUT, GPIO_CFG_PULL_UP, GPIO_CFG_2MA),    
+    GPIO_CFG(VILLEC2_GPIO_WIMAX_EXT_RST,   0, GPIO_CFG_OUTPUT, GPIO_CFG_PULL_UP, GPIO_CFG_2MA),    
 };
 
 static uint32_t wimax_uart_on_gpio_table[] = {
-	/* UART3 TX */
+	
 	GPIO_CFG(VILLEC2_GPIO_WIMAX_UART_SIN, 1, GPIO_CFG_OUTPUT, GPIO_CFG_PULL_UP, GPIO_CFG_2MA),
-	/* UART3 RX , setting PULL_UP , NO_PULL is all ok. */
+	
 	GPIO_CFG(VILLEC2_GPIO_WIMAX_UART_SOUT, 1, GPIO_CFG_INPUT, GPIO_CFG_PULL_UP, GPIO_CFG_2MA),
 };
 
 static uint32_t wimax_uart_off_gpio_table[] = {
-	/* UART3 TX */
+	
 	GPIO_CFG(VILLEC2_GPIO_WIMAX_UART_SIN, 1, GPIO_CFG_OUTPUT, GPIO_CFG_PULL_UP, GPIO_CFG_2MA),
-	/* UART3 RX */
+	
 	GPIO_CFG(VILLEC2_GPIO_WIMAX_UART_SOUT, 0, GPIO_CFG_INPUT, GPIO_CFG_PULL_UP, GPIO_CFG_2MA),
 };
 
@@ -300,6 +292,7 @@ static void *wimax_status_cb_devid;
 static int mmc_wimax_cd = 0;
 static int mmc_wimax_hostwakeup_gpio = PM8058_GPIO_PM_TO_SYS(VILLEC2_WIMAX_HOST_WAKEUP);
 
+#if 0
 static int mmc_wimax_status_register(void (*callback)(int card_present, void *dev_id), void *dev_id)
 {
 	if (wimax_status_cb)
@@ -315,6 +308,7 @@ static unsigned int mmc_wimax_status(struct device *dev)
 	printk(KERN_INFO "%s\n", __func__);
 	return mmc_wimax_cd;
 }
+#endif
 
 void mmc_wimax_set_carddetect(int val)
 {
@@ -327,6 +321,7 @@ void mmc_wimax_set_carddetect(int val)
 }
 EXPORT_SYMBOL(mmc_wimax_set_carddetect);
 
+#if 0
 static unsigned int mmc_wimax_type = MMC_TYPE_SDIO_WIMAX;
 
 static struct mmc_platform_data mmc_wimax_data = {
@@ -340,9 +335,8 @@ static struct mmc_platform_data mmc_wimax_data = {
 	.msmsdcc_fmax   = 50000000,
 	.nonremovable   = 0,
 	.slot_type		= &mmc_wimax_type,
-	.pclk_src_dfab	= 1,
-	.dummy52_required = 1,
 };
+#endif
 
 struct _vreg {
 	const char *name;
@@ -354,28 +348,28 @@ int mmc_wimax_power(int on)
 	printk(KERN_INFO "%s\n", __func__);
 
 	if (on) {
-		/*Power ON sequence*/
-		/* Configure UART3 TX/RX */
+		
+		
 		config_gpio_table(wimax_uart_on_gpio_table,
 			  ARRAY_SIZE(wimax_uart_on_gpio_table));
 		config_gpio_table(wimax_on_gpio_table,
 			  ARRAY_SIZE(wimax_on_gpio_table));
-		gpio_set_value(VILLEC2_GPIO_V_WIMAX_PVDD_EN, 1);  /* V_WIMAX_PVDD_EN */
+		gpio_set_value(VILLEC2_GPIO_V_WIMAX_PVDD_EN, 1);  
 		mdelay(2);
-		gpio_set_value(VILLEC2_GPIO_V_WIMAX_DVDD_EN, 1);   /* V_WIMAX_DVDD_EN */
-		gpio_set_value(VILLEC2_GPIO_V_WIMAX_1V2_RF_EN, 1); /* V_WIMAX_1V2_RF_EN */
+		gpio_set_value(VILLEC2_GPIO_V_WIMAX_DVDD_EN, 1);   
+		gpio_set_value(VILLEC2_GPIO_V_WIMAX_1V2_RF_EN, 1); 
 		mdelay(10);
-		gpio_set_value(VILLEC2_GPIO_WIMAX_EXT_RST, 1);	 /* WIMAX_EXT_RSTz */
+		gpio_set_value(VILLEC2_GPIO_WIMAX_EXT_RST, 1);	 
 		mdelay(2);
 	} else {
-		/*Power OFF sequence*/
-		gpio_set_value(VILLEC2_GPIO_WIMAX_EXT_RST, 0);	 /* WIMAX_EXT_RSTz */
+		
+		gpio_set_value(VILLEC2_GPIO_WIMAX_EXT_RST, 0);	 
 		config_gpio_table(wimax_off_gpio_table,
 			  ARRAY_SIZE(wimax_off_gpio_table));
-		gpio_set_value(VILLEC2_GPIO_V_WIMAX_1V2_RF_EN, 0); /* V_WIMAX_1V2_RF_EN */
-		gpio_set_value(VILLEC2_GPIO_V_WIMAX_DVDD_EN, 0);   /* V_WIMAX_DVDD_EN */
-		gpio_set_value(VILLEC2_GPIO_V_WIMAX_PVDD_EN, 0);  /* V_WIMAX_PVDD_EN */
-		/* Configure UART3 TX/RX */
+		gpio_set_value(VILLEC2_GPIO_V_WIMAX_1V2_RF_EN, 0); 
+		gpio_set_value(VILLEC2_GPIO_V_WIMAX_DVDD_EN, 0);   
+		gpio_set_value(VILLEC2_GPIO_V_WIMAX_PVDD_EN, 0);  
+		
 		config_gpio_table(wimax_uart_off_gpio_table,
 			  ARRAY_SIZE(wimax_uart_off_gpio_table));
 
@@ -394,39 +388,39 @@ int mmc_wimax_uart_switch(int uart)
 	printk(KERN_INFO "%s uart:%d\n", __func__, uart);
 	wimax_uart_switch = uart;
 
-	if (wimax_uart_switch == 0) { /* initialize */
+	if (wimax_uart_switch == 0) { 
 		gpio_set_value(VILLEC2_GPIO_CPU_WIMAX_UART_EN, 0);
 		gpio_set_value(VILLEC2_GPIO_CPU_WIMAX_SW, 0);
 		gpio_set_value(VILLEC2_GPIO_MHL_USB_EN, 1);
 
-	} else if (wimax_uart_switch == 1) { /* enable WIMAX UART to USB */
+	} else if (wimax_uart_switch == 1) { 
 		config_gpio_table(wimax_uart_off_gpio_table,
-			  ARRAY_SIZE(wimax_uart_off_gpio_table)); /* Disable UART3 to GPIO */
+			  ARRAY_SIZE(wimax_uart_off_gpio_table)); 
 
 		gpio_set_value(VILLEC2_GPIO_CPU_WIMAX_UART_EN, 0);
 		gpio_set_value(VILLEC2_GPIO_CPU_WIMAX_SW, 1);
 		gpio_set_value(VILLEC2_GPIO_MHL_USB_EN, 1);
-	} else if (wimax_uart_switch == 2) { /* enable WIMAX_UART to MSM */
+	} else if (wimax_uart_switch == 2) { 
 		config_gpio_table(wimax_uart_on_gpio_table,
-			  ARRAY_SIZE(wimax_uart_on_gpio_table)); /* Enable UART3 to ALT1 */
+			  ARRAY_SIZE(wimax_uart_on_gpio_table)); 
 
 		gpio_set_value(VILLEC2_GPIO_CPU_WIMAX_UART_EN, 1);
 		gpio_set_value(VILLEC2_GPIO_CPU_WIMAX_SW, 0);
 		gpio_set_value(VILLEC2_GPIO_MHL_USB_EN, 0);
 	}
 #ifdef CONFIG_WIMAX_SERIAL_MSM
-	else if (wimax_uart_switch == 10) { /* WIMAX UART debug thread. */
+	else if (wimax_uart_switch == 10) { 
 		printk(KERN_INFO "%s : wimax_uart_switch %d\n", __func__, wimax_uart_switch);
 		msm_serial_wimax_init(MSM_UART3_PHYS, MSM_GSBI3_PHYS, GSBI3_UARTDM_IRQ,
 			&msm_device_uart3.dev, 23, MSM_GPIO_TO_INT(VILLEC2_GPIO_WIMAX_UART_SOUT));
-	} else if (wimax_uart_switch > 10 && wimax_uart_switch <= 99) { /* WIMAX UART debug thread. */
+	} else if (wimax_uart_switch > 10 && wimax_uart_switch <= 99) { 
 		printk(KERN_INFO "%s : wimax_uart_switch %d\n", __func__, wimax_uart_switch);
 		ret = msm_serial_wimax_thread(wimax_uart_switch);
 		if (ret != 0)
 			printk(KERN_INFO "%s : wimax_uart_switch ret=%d\n", __func__, ret);
 	}
 #endif
-	else { /* others, USB to USB */
+	else { 
 		gpio_set_value(VILLEC2_GPIO_CPU_WIMAX_UART_EN, 1);
 		gpio_set_value(VILLEC2_GPIO_CPU_WIMAX_SW, 0);
 		gpio_set_value(VILLEC2_GPIO_MHL_USB_EN, 0);
@@ -443,14 +437,12 @@ int mmc_wimax_get_uart_switch(void)
 }
 EXPORT_SYMBOL(mmc_wimax_get_uart_switch);
 
-/*non-8X60 PROJECT need to use GPIO mapping to decode the IRQ number(id) for PMIC GPIO*/
 int mmc_wimax_get_hostwakeup_gpio(void)
 {
 	return mmc_wimax_hostwakeup_gpio;
 }
 EXPORT_SYMBOL(mmc_wimax_get_hostwakeup_gpio);
 
-/*8X60 PROJECT need to use Marco PM8058_GPIO_IRQ to decode the IRQ number(id) for PMIC GPIO*/
 int mmc_wimax_get_hostwakeup_IRQ_ID(void)
 {
 	return PM8058_GPIO_IRQ(PM8058_IRQ_BASE, VILLEC2_WIMAX_HOST_WAKEUP);
@@ -482,7 +474,6 @@ void mmc_wimax_enable_host_wakeup(int on)
 EXPORT_SYMBOL(mmc_wimax_enable_host_wakeup);
 #endif
 
-/* ---- MMC ---- */
 int __init villec2_init_mmc()
 {
 	uint32_t id;
@@ -490,28 +481,30 @@ int __init villec2_init_mmc()
 
 	printk(KERN_INFO "villec2: %s\n", __func__);
 
-	/* SDC2: WiMax */
-	/* PM QoS for wimax */
-    mmc_wimax_data.swfi_latency = msm_rpm_get_swfi_latency();
-	msm_add_sdcc(2, &mmc_wimax_data);
+	
+	
+	
+  
+	
 
-	/* re-initialize wimax GPIO */
+	
 	config_gpio_table(wimax_off_gpio_table,
 			  ARRAY_SIZE(wimax_off_gpio_table));
 
-	/* Configure UART3 TX/RX */
+	
    config_gpio_table(wimax_uart_off_gpio_table,
 			  ARRAY_SIZE(wimax_uart_off_gpio_table));
 
-	/* SDC4: WiFi */
-	/* initial WIFI_SHUTDOWN# */
+	
+	
 	id = GPIO_CFG(VILLEC2_GPIO_WIFI_SHUTDOWN_N, 0, GPIO_CFG_OUTPUT,
 		GPIO_CFG_NO_PULL, GPIO_CFG_2MA);
 	gpio_tlmm_config(id, 0);
 	gpio_set_value(VILLEC2_GPIO_WIFI_SHUTDOWN_N, 0);
 
-	/* PM QoS for wifi*/
-    villec2_wifi_data.swfi_latency = msm_rpm_get_swfi_latency();
+	
+	
+  
 	msm_add_sdcc(4, &villec2_wifi_data);
 
 	return 0;

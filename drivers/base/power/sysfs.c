@@ -1,11 +1,10 @@
-/*
- * drivers/base/power/sysfs.c - sysfs entries for device PM
- */
 
 #include <linux/device.h>
 #include <linux/string.h>
+#include <linux/export.h>
+#include <linux/pm_qos.h>
 #include <linux/pm_runtime.h>
-#include <asm/atomic.h>
+#include <linux/atomic.h>
 #include <linux/jiffies.h>
 #include "power.h"
 
@@ -116,12 +115,14 @@ static ssize_t control_store(struct device * dev, struct device_attribute *attr,
 	cp = memchr(buf, '\n', n);
 	if (cp)
 		len = cp - buf;
+	device_lock(dev);
 	if (len == sizeof ctrl_auto - 1 && strncmp(buf, ctrl_auto, len) == 0)
 		pm_runtime_allow(dev);
 	else if (len == sizeof ctrl_on - 1 && strncmp(buf, ctrl_on, len) == 0)
 		pm_runtime_forbid(dev);
 	else
-		return -EINVAL;
+		n = -EINVAL;
+	device_unlock(dev);
 	return n;
 }
 
@@ -205,14 +206,41 @@ static ssize_t autosuspend_delay_ms_store(struct device *dev,
 	if (strict_strtol(buf, 10, &delay) != 0 || delay != (int) delay)
 		return -EINVAL;
 
+	device_lock(dev);
 	pm_runtime_set_autosuspend_delay(dev, delay);
+	device_unlock(dev);
 	return n;
 }
 
 static DEVICE_ATTR(autosuspend_delay_ms, 0644, autosuspend_delay_ms_show,
 		autosuspend_delay_ms_store);
 
-#endif /* CONFIG_PM_RUNTIME */
+static ssize_t pm_qos_latency_show(struct device *dev,
+				   struct device_attribute *attr, char *buf)
+{
+	return sprintf(buf, "%d\n", dev->power.pq_req->node.prio);
+}
+
+static ssize_t pm_qos_latency_store(struct device *dev,
+				    struct device_attribute *attr,
+				    const char *buf, size_t n)
+{
+	s32 value;
+	int ret;
+
+	if (kstrtos32(buf, 0, &value))
+		return -EINVAL;
+
+	if (value < 0)
+		return -EINVAL;
+
+	ret = dev_pm_qos_update_request(dev->power.pq_req, value);
+	return ret < 0 ? ret : n;
+}
+
+static DEVICE_ATTR(pm_qos_resume_latency_us, 0644,
+		   pm_qos_latency_show, pm_qos_latency_store);
+#endif 
 
 #ifdef CONFIG_PM_SLEEP
 static ssize_t
@@ -367,7 +395,7 @@ static ssize_t wakeup_last_time_show(struct device *dev,
 }
 
 static DEVICE_ATTR(wakeup_last_time_ms, 0444, wakeup_last_time_show, NULL);
-#endif /* CONFIG_PM_SLEEP */
+#endif 
 
 #ifdef CONFIG_PM_ADVANCED_DEBUG
 #ifdef CONFIG_PM_RUNTIME
@@ -429,7 +457,7 @@ static ssize_t async_store(struct device *dev, struct device_attribute *attr,
 }
 
 static DEVICE_ATTR(async, 0644, async_show, async_store);
-#endif /* CONFIG_PM_ADVANCED_DEBUG */
+#endif 
 
 static struct attribute *power_attrs[] = {
 #ifdef CONFIG_PM_ADVANCED_DEBUG
@@ -442,7 +470,7 @@ static struct attribute *power_attrs[] = {
 	&dev_attr_runtime_active_kids.attr,
 	&dev_attr_runtime_enabled.attr,
 #endif
-#endif /* CONFIG_PM_ADVANCED_DEBUG */
+#endif 
 	NULL,
 };
 static struct attribute_group pm_attr_group = {
@@ -477,12 +505,23 @@ static struct attribute *runtime_attrs[] = {
 	&dev_attr_runtime_suspended_time.attr,
 	&dev_attr_runtime_active_time.attr,
 	&dev_attr_autosuspend_delay_ms.attr,
-#endif /* CONFIG_PM_RUNTIME */
+#endif 
 	NULL,
 };
 static struct attribute_group pm_runtime_attr_group = {
 	.name	= power_group_name,
 	.attrs	= runtime_attrs,
+};
+
+static struct attribute *pm_qos_attrs[] = {
+#ifdef CONFIG_PM_RUNTIME
+	&dev_attr_pm_qos_resume_latency_us.attr,
+#endif 
+	NULL,
+};
+static struct attribute_group pm_qos_attr_group = {
+	.name	= power_group_name,
+	.attrs	= pm_qos_attrs,
 };
 
 int dpm_sysfs_add(struct device *dev)
@@ -523,6 +562,16 @@ int wakeup_sysfs_add(struct device *dev)
 void wakeup_sysfs_remove(struct device *dev)
 {
 	sysfs_unmerge_group(&dev->kobj, &pm_wakeup_attr_group);
+}
+
+int pm_qos_sysfs_add(struct device *dev)
+{
+	return sysfs_merge_group(&dev->kobj, &pm_qos_attr_group);
+}
+
+void pm_qos_sysfs_remove(struct device *dev)
+{
+	sysfs_unmerge_group(&dev->kobj, &pm_qos_attr_group);
 }
 
 void rpm_sysfs_remove(struct device *dev)

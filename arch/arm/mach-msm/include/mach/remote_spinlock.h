@@ -11,10 +11,6 @@
  *
  */
 
-/*
- * Part of this this code is based on the standard ARM spinlock
- * implementation (asm/spinlock.h) found in the 2.6.29 kernel.
- */
 
 #ifndef __ASM__ARCH_QC_REMOTE_SPINLOCK_H
 #define __ASM__ARCH_QC_REMOTE_SPINLOCK_H
@@ -22,7 +18,6 @@
 #include <linux/io.h>
 #include <linux/types.h>
 
-/* Remote spinlock definitions. */
 
 struct dek_spinlock {
 	volatile uint8_t self_lock;
@@ -200,15 +195,6 @@ static inline void __raw_remote_sfpb_spin_unlock(raw_remote_spinlock_t *lock)
 	smp_mb();
 }
 
-/**
- * Release spinlock if it is owned by @pid.
- *
- * This is only to be used for situations where the processor owning
- * the spinlock has crashed and the spinlock must be released.
- *
- * @lock - lock structure
- * @pid - processor ID of processor to release
- */
 static inline int __raw_remote_gen_spin_release(raw_remote_spinlock_t *lock,
 		uint32_t pid)
 {
@@ -235,29 +221,24 @@ static inline void _remote_spin_release_all(uint32_t pid) {}
 #endif
 
 #if defined(CONFIG_MSM_REMOTE_SPINLOCK_DEKKERS)
-/* Use Dekker's algorithm when LDREX/STREX and SWP are unavailable for
- * shared memory */
 #define _remote_spin_lock(lock)		__raw_remote_dek_spin_lock(*lock)
 #define _remote_spin_unlock(lock)	__raw_remote_dek_spin_unlock(*lock)
 #define _remote_spin_trylock(lock)	__raw_remote_dek_spin_trylock(*lock)
 #define _remote_spin_release(lock, pid)	__raw_remote_dek_spin_release(*lock,\
 		pid)
 #elif defined(CONFIG_MSM_REMOTE_SPINLOCK_SWP)
-/* Use SWP-based locks when LDREX/STREX are unavailable for shared memory. */
 #define _remote_spin_lock(lock)		__raw_remote_swp_spin_lock(*lock)
 #define _remote_spin_unlock(lock)	__raw_remote_swp_spin_unlock(*lock)
 #define _remote_spin_trylock(lock)	__raw_remote_swp_spin_trylock(*lock)
 #define _remote_spin_release(lock, pid)	__raw_remote_gen_spin_release(*lock,\
 		pid)
 #elif defined(CONFIG_MSM_REMOTE_SPINLOCK_SFPB)
-/* Use SFPB Hardware Mutex Registers */
 #define _remote_spin_lock(lock)		__raw_remote_sfpb_spin_lock(*lock)
 #define _remote_spin_unlock(lock)	__raw_remote_sfpb_spin_unlock(*lock)
 #define _remote_spin_trylock(lock)	__raw_remote_sfpb_spin_trylock(*lock)
 #define _remote_spin_release(lock, pid)	__raw_remote_gen_spin_release(*lock,\
 		pid)
 #else
-/* Use LDREX/STREX for shared memory locking, when available */
 #define _remote_spin_lock(lock)		__raw_remote_ex_spin_lock(*lock)
 #define _remote_spin_unlock(lock)	__raw_remote_ex_spin_unlock(*lock)
 #define _remote_spin_trylock(lock)	__raw_remote_ex_spin_trylock(*lock)
@@ -265,7 +246,6 @@ static inline void _remote_spin_release_all(uint32_t pid) {}
 		pid)
 #endif
 
-/* Remote mutex definitions. */
 
 typedef struct {
 	_remote_spinlock_t	r_spinlock;
@@ -296,4 +276,4 @@ static inline int _remote_mutex_trylock(_remote_mutex_t *lock)
 }
 #endif
 
-#endif /* __ASM__ARCH_QC_REMOTE_SPINLOCK_H */
+#endif 

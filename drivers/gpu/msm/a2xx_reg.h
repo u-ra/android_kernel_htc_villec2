@@ -140,24 +140,9 @@ union reg_rb_edram_info {
 	struct rb_edram_info_t f;
 };
 
-#define RBBM_READ_ERROR_UNUSED0_SIZE		2
-#define RBBM_READ_ERROR_READ_ADDRESS_SIZE	15
-#define RBBM_READ_ERROR_UNUSED1_SIZE		13
-#define RBBM_READ_ERROR_READ_REQUESTER_SIZE	1
-#define RBBM_READ_ERROR_READ_ERROR_SIZE		1
-
-struct rbbm_read_error_t {
-	unsigned int unused0:RBBM_READ_ERROR_UNUSED0_SIZE;
-	unsigned int read_address:RBBM_READ_ERROR_READ_ADDRESS_SIZE;
-	unsigned int unused1:RBBM_READ_ERROR_UNUSED1_SIZE;
-	unsigned int read_requester:RBBM_READ_ERROR_READ_REQUESTER_SIZE;
-	unsigned int read_error:RBBM_READ_ERROR_READ_ERROR_SIZE;
-};
-
-union rbbm_read_error_u {
-	unsigned int val:32;
-	struct rbbm_read_error_t f;
-};
+#define RBBM_READ_ERROR_ADDRESS_MASK	0x0001fffc
+#define RBBM_READ_ERROR_REQUESTER	(1<<30)
+#define RBBM_READ_ERROR_ERROR		(1<<31)
 
 #define CP_RB_CNTL_RB_BUFSZ_SIZE                           6
 #define CP_RB_CNTL_UNUSED0_SIZE                            2
@@ -278,6 +263,7 @@ union reg_cp_rb_cntl {
 #define REG_CP_ME_CNTL                   0x01F6
 #define REG_CP_ME_RAM_DATA               0x01FA
 #define REG_CP_ME_RAM_WADDR              0x01F8
+#define REG_CP_ME_RAM_RADDR              0x01F9
 #define REG_CP_ME_STATUS                 0x01F7
 #define REG_CP_PFP_UCODE_ADDR            0x00C0
 #define REG_CP_PFP_UCODE_DATA            0x00C1
@@ -400,7 +386,6 @@ union reg_cp_rb_cntl {
 #define REG_COHER_STATUS_PM4             0xA2B
 #define REG_COHER_SIZE_PM4               0xA29
 
-/*registers added in adreno220*/
 #define REG_A220_PC_INDX_OFFSET          REG_VGT_INDX_OFFSET
 #define REG_A220_PC_VERTEX_REUSE_BLOCK_CNTL REG_VGT_VERTEX_REUSE_BLOCK_CNTL
 #define REG_A220_PC_MAX_VTX_INDX         REG_VGT_MAX_VTX_INDX
@@ -409,14 +394,12 @@ union reg_cp_rb_cntl {
 #define REG_A220_VSC_BIN_SIZE            0x0C01
 #define REG_A220_VSC_PIPE_DATA_LENGTH_7  0x0C1D
 
-/*registers added in adreno225*/
 #define REG_A225_RB_COLOR_INFO3          0x2005
 #define REG_A225_PC_MULTI_PRIM_IB_RESET_INDX 0x2103
 #define REG_A225_GRAS_UCP0X              0x2340
 #define REG_A225_GRAS_UCP5W              0x2357
 #define REG_A225_GRAS_UCP_ENABLED        0x2360
 
-/* Debug registers used by snapshot */
 #define REG_PA_SU_DEBUG_CNTL            0x0C80
 #define REG_PA_SU_DEBUG_DATA            0x0C81
 #define REG_RB_DEBUG_CNTL               0x0F26
@@ -449,4 +432,4 @@ union reg_cp_rb_cntl {
 #define REG_SQ_DEBUG_MISC_0             0x2309
 #define REG_SQ_DEBUG_MISC_1             0x230A
 
-#endif /* __A200_REG_H */
+#endif 

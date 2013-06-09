@@ -9,6 +9,7 @@
 #ifndef _LINUX_SUNRPC_CLNT_H
 #define _LINUX_SUNRPC_CLNT_H
 
+#include <linux/types.h>
 #include <linux/socket.h>
 #include <linux/in.h>
 #include <linux/in6.h>
@@ -26,77 +27,66 @@
 
 struct rpc_inode;
 
-/*
- * The high-level client handle
- */
 struct rpc_clnt {
-	atomic_t		cl_count;	/* Number of references */
-	struct list_head	cl_clients;	/* Global list of clients */
-	struct list_head	cl_tasks;	/* List of tasks */
-	spinlock_t		cl_lock;	/* spinlock */
-	struct rpc_xprt *	cl_xprt;	/* transport */
-	struct rpc_procinfo *	cl_procinfo;	/* procedure info */
-	u32			cl_prog,	/* RPC program number */
-				cl_vers,	/* RPC version number */
-				cl_maxproc;	/* max procedure number */
+	atomic_t		cl_count;	
+	struct list_head	cl_clients;	
+	struct list_head	cl_tasks;	
+	spinlock_t		cl_lock;	
+	struct rpc_xprt __rcu *	cl_xprt;	
+	struct rpc_procinfo *	cl_procinfo;	
+	u32			cl_prog,	
+				cl_vers,	
+				cl_maxproc;	
 
-	char *			cl_server;	/* server machine name */
-	char *			cl_protname;	/* protocol name */
-	struct rpc_auth *	cl_auth;	/* authenticator */
-	struct rpc_stat *	cl_stats;	/* per-program statistics */
-	struct rpc_iostats *	cl_metrics;	/* per-client statistics */
+	const char *		cl_protname;	
+	struct rpc_auth *	cl_auth;	
+	struct rpc_stat *	cl_stats;	
+	struct rpc_iostats *	cl_metrics;	
 
-	unsigned int		cl_softrtry : 1,/* soft timeouts */
-				cl_discrtry : 1,/* disconnect before retry */
-				cl_autobind : 1,/* use getport() */
-				cl_chatty   : 1;/* be verbose */
+	unsigned int		cl_softrtry : 1,
+				cl_discrtry : 1,
+				cl_autobind : 1,
+				cl_chatty   : 1;
 
-	struct rpc_rtt *	cl_rtt;		/* RTO estimator data */
-	const struct rpc_timeout *cl_timeout;	/* Timeout strategy */
+	struct rpc_rtt *	cl_rtt;		
+	const struct rpc_timeout *cl_timeout;	
 
-	int			cl_nodelen;	/* nodename length */
+	int			cl_nodelen;	
 	char 			cl_nodename[UNX_MAXNODENAME];
-	struct path		cl_path;
-	struct rpc_clnt *	cl_parent;	/* Points to parent of clones */
+	struct dentry *		cl_dentry;
+	struct rpc_clnt *	cl_parent;	
 	struct rpc_rtt		cl_rtt_default;
 	struct rpc_timeout	cl_timeout_default;
-	struct rpc_program *	cl_program;
-	char			cl_inline_name[32];
-	char			*cl_principal;	/* target to authenticate to */
+	const struct rpc_program *cl_program;
+	char			*cl_principal;	
 };
 
-/*
- * General RPC program info
- */
 #define RPC_MAXVERSION		4
 struct rpc_program {
-	char *			name;		/* protocol name */
-	u32			number;		/* program number */
-	unsigned int		nrvers;		/* number of versions */
-	struct rpc_version **	version;	/* version array */
-	struct rpc_stat *	stats;		/* statistics */
-	char *			pipe_dir_name;	/* path to rpc_pipefs dir */
+	const char *		name;		
+	u32			number;		
+	unsigned int		nrvers;		
+	const struct rpc_version **	version;	
+	struct rpc_stat *	stats;		
+	const char *		pipe_dir_name;	
 };
 
 struct rpc_version {
-	u32			number;		/* version number */
-	unsigned int		nrprocs;	/* number of procs */
-	struct rpc_procinfo *	procs;		/* procedure array */
+	u32			number;		
+	unsigned int		nrprocs;	
+	struct rpc_procinfo *	procs;		
 };
 
-/*
- * Procedure information
- */
 struct rpc_procinfo {
-	u32			p_proc;		/* RPC procedure number */
-	kxdreproc_t		p_encode;	/* XDR encode function */
-	kxdrdproc_t		p_decode;	/* XDR decode function */
-	unsigned int		p_arglen;	/* argument hdr length (u32) */
-	unsigned int		p_replen;	/* reply hdr length (u32) */
-	unsigned int		p_count;	/* call count */
-	unsigned int		p_timer;	/* Which RTT timer to use */
-	u32			p_statidx;	/* Which procedure to account */
-	char *			p_name;		/* name of procedure */
+	u32			p_proc;		
+	kxdreproc_t		p_encode;	
+	kxdrdproc_t		p_decode;	
+	unsigned int		p_arglen;	
+	unsigned int		p_replen;	
+	unsigned int		p_count;	
+	unsigned int		p_timer;	
+	u32			p_statidx;	
+	const char *		p_name;		
 };
 
 #ifdef __KERNEL__
@@ -108,17 +98,16 @@ struct rpc_create_args {
 	size_t			addrsize;
 	struct sockaddr		*saddress;
 	const struct rpc_timeout *timeout;
-	char			*servername;
-	struct rpc_program	*program;
-	u32			prognumber;	/* overrides program->number */
+	const char		*servername;
+	const struct rpc_program *program;
+	u32			prognumber;	
 	u32			version;
 	rpc_authflavor_t	authflavor;
 	unsigned long		flags;
 	char			*client_name;
-	struct svc_xprt		*bc_xprt;	/* NFSv4.1 backchannel */
+	struct svc_xprt		*bc_xprt;	
 };
 
-/* Values for "flags" field */
 #define RPC_CLNT_CREATE_HARDRTRY	(1UL << 0)
 #define RPC_CLNT_CREATE_AUTOBIND	(1UL << 2)
 #define RPC_CLNT_CREATE_NONPRIVPORT	(1UL << 3)
@@ -128,15 +117,18 @@ struct rpc_create_args {
 
 struct rpc_clnt *rpc_create(struct rpc_create_args *args);
 struct rpc_clnt	*rpc_bind_new_program(struct rpc_clnt *,
-				struct rpc_program *, u32);
+				const struct rpc_program *, u32);
 void rpc_task_reset_client(struct rpc_task *task, struct rpc_clnt *clnt);
 struct rpc_clnt *rpc_clone_client(struct rpc_clnt *);
 void		rpc_shutdown_client(struct rpc_clnt *);
 void		rpc_release_client(struct rpc_clnt *);
 void		rpc_task_release_client(struct rpc_task *);
 
-int		rpcb_register(u32, u32, int, unsigned short);
-int		rpcb_v4_register(const u32 program, const u32 version,
+int		rpcb_create_local(struct net *);
+void		rpcb_put_local(struct net *);
+int		rpcb_register(struct net *, u32, u32, int, unsigned short);
+int		rpcb_v4_register(struct net *net, const u32 program,
+				 const u32 version,
 				 const struct sockaddr *address,
 				 const char *netid);
 void		rpcb_getport_async(struct rpc_task *);
@@ -153,16 +145,19 @@ struct rpc_task *rpc_call_null(struct rpc_clnt *clnt, struct rpc_cred *cred,
 int		rpc_restart_call_prepare(struct rpc_task *);
 int		rpc_restart_call(struct rpc_task *);
 void		rpc_setbufsize(struct rpc_clnt *, unsigned int, unsigned int);
+int		rpc_protocol(struct rpc_clnt *);
+struct net *	rpc_net_ns(struct rpc_clnt *);
 size_t		rpc_max_payload(struct rpc_clnt *);
 void		rpc_force_rebind(struct rpc_clnt *);
 size_t		rpc_peeraddr(struct rpc_clnt *, struct sockaddr *, size_t);
 const char	*rpc_peeraddr2str(struct rpc_clnt *, enum rpc_display_format_t);
+int		rpc_localaddr(struct rpc_clnt *, struct sockaddr *, size_t);
 
 size_t		rpc_ntop(const struct sockaddr *, char *, const size_t);
-size_t		rpc_pton(const char *, const size_t,
+size_t		rpc_pton(struct net *, const char *, const size_t,
 			 struct sockaddr *, const size_t);
-char *		rpc_sockaddr2uaddr(const struct sockaddr *);
-size_t		rpc_uaddr2sockaddr(const char *, const size_t,
+char *		rpc_sockaddr2uaddr(const struct sockaddr *, gfp_t);
+size_t		rpc_uaddr2sockaddr(struct net *, const char *, const size_t,
 				   struct sockaddr *, const size_t);
 
 static inline unsigned short rpc_get_port(const struct sockaddr *sap)
@@ -212,13 +207,19 @@ static inline bool __rpc_copy_addr4(struct sockaddr *dst,
 	return true;
 }
 
-#if defined(CONFIG_IPV6) || defined(CONFIG_IPV6_MODULE)
+#if IS_ENABLED(CONFIG_IPV6)
 static inline bool __rpc_cmp_addr6(const struct sockaddr *sap1,
 				   const struct sockaddr *sap2)
 {
 	const struct sockaddr_in6 *sin1 = (const struct sockaddr_in6 *)sap1;
 	const struct sockaddr_in6 *sin2 = (const struct sockaddr_in6 *)sap2;
-	return ipv6_addr_equal(&sin1->sin6_addr, &sin2->sin6_addr);
+
+	if (!ipv6_addr_equal(&sin1->sin6_addr, &sin2->sin6_addr))
+		return false;
+	else if (ipv6_addr_type(&sin1->sin6_addr) & IPV6_ADDR_LINKLOCAL)
+		return sin1->sin6_scope_id == sin2->sin6_scope_id;
+
+	return true;
 }
 
 static inline bool __rpc_copy_addr6(struct sockaddr *dst,
@@ -228,10 +229,10 @@ static inline bool __rpc_copy_addr6(struct sockaddr *dst,
 	struct sockaddr_in6 *dsin6 = (struct sockaddr_in6 *) dst;
 
 	dsin6->sin6_family = ssin6->sin6_family;
-	ipv6_addr_copy(&dsin6->sin6_addr, &ssin6->sin6_addr);
+	dsin6->sin6_addr = ssin6->sin6_addr;
 	return true;
 }
-#else	/* !(CONFIG_IPV6 || CONFIG_IPV6_MODULE) */
+#else	
 static inline bool __rpc_cmp_addr6(const struct sockaddr *sap1,
 				   const struct sockaddr *sap2)
 {
@@ -243,16 +244,8 @@ static inline bool __rpc_copy_addr6(struct sockaddr *dst,
 {
 	return false;
 }
-#endif	/* !(CONFIG_IPV6 || CONFIG_IPV6_MODULE) */
+#endif	
 
-/**
- * rpc_cmp_addr - compare the address portion of two sockaddrs.
- * @sap1: first sockaddr
- * @sap2: second sockaddr
- *
- * Just compares the family and address portion. Ignores port, scope, etc.
- * Returns true if the addrs are equal, false if they aren't.
- */
 static inline bool rpc_cmp_addr(const struct sockaddr *sap1,
 				const struct sockaddr *sap2)
 {
@@ -267,16 +260,6 @@ static inline bool rpc_cmp_addr(const struct sockaddr *sap1,
 	return false;
 }
 
-/**
- * rpc_copy_addr - copy the address portion of one sockaddr to another
- * @dst: destination sockaddr
- * @src: source sockaddr
- *
- * Just copies the address portion and family. Ignores port, scope, etc.
- * Caller is responsible for making certain that dst is large enough to hold
- * the address in src. Returns true if address family is supported. Returns
- * false otherwise.
- */
 static inline bool rpc_copy_addr(struct sockaddr *dst,
 				 const struct sockaddr *src)
 {
@@ -289,13 +272,6 @@ static inline bool rpc_copy_addr(struct sockaddr *dst,
 	return false;
 }
 
-/**
- * rpc_get_scope_id - return scopeid for a given sockaddr
- * @sa: sockaddr to get scopeid from
- *
- * Returns the value of the sin6_scope_id for AF_INET6 addrs, or 0 if
- * not an AF_INET6 address.
- */
 static inline u32 rpc_get_scope_id(const struct sockaddr *sa)
 {
 	if (sa->sa_family != AF_INET6)
@@ -304,5 +280,5 @@ static inline u32 rpc_get_scope_id(const struct sockaddr *sa)
 	return ((struct sockaddr_in6 *) sa)->sin6_scope_id;
 }
 
-#endif /* __KERNEL__ */
-#endif /* _LINUX_SUNRPC_CLNT_H */
+#endif 
+#endif 

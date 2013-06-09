@@ -731,7 +731,7 @@ static int parse_badblocks(struct nandsim *ns, struct mtd_info *mtd)
 			return -EINVAL;
 		}
 		offset = erase_block_no * ns->geom.secsz;
-		if (mtd->block_markbad(mtd, offset)) {
+		if (mtd_block_markbad(mtd, offset)) {
 			NS_ERR("invalid badblocks.\n");
 			return -EINVAL;
 		}
@@ -2267,9 +2267,9 @@ static int __init ns_init_module(void)
 
 	switch (bbt) {
 	case 2:
-		 chip->options |= NAND_USE_FLASH_BBT_NO_OOB;
+		 chip->bbt_options |= NAND_BBT_NO_OOB;
 	case 1:
-		 chip->options |= NAND_USE_FLASH_BBT;
+		 chip->bbt_options |= NAND_BBT_USE_FLASH;
 	case 0:
 		break;
 	default:
@@ -2355,7 +2355,6 @@ static int __init ns_init_module(void)
 		uint64_t new_size = (uint64_t)nsmtd->erasesize << overridesize;
 		if (new_size >> overridesize != nsmtd->erasesize) {
 			NS_ERR("overridesize is too big\n");
-			retval = -EINVAL;
 			goto err_exit;
 		}
 		/* N.B. This relies on nand_scan not doing anything with the size before we change it */

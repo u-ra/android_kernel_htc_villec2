@@ -36,7 +36,6 @@
 #define SDIO_TX_QUEUE_SIZE		8
 #define SDIO_TX_BUF_SIZE		2048
 
-/* 1 - DUN, 2-NMEA/GPS */
 #define SDIO_N_PORTS	2
 static struct sdio_portmaster {
 	struct mutex lock;
@@ -46,11 +45,11 @@ static struct sdio_portmaster {
 static unsigned n_sdio_ports;
 
 struct sdio_port_info {
-	/* data channel info */
+	
 	char *data_ch_name;
 	struct sdio_channel *ch;
 
-	/* control channel info */
+	
 	int ctrl_ch_id;
 };
 
@@ -98,11 +97,11 @@ struct gsdio_port {
 #define SDIO_ACM_CTRL_DCD		(1 << 0)
 	int				cbits_to_laptop;
 
-#define SDIO_ACM_CTRL_RTS	(1 << 1)	/* unused with full duplex */
-#define SDIO_ACM_CTRL_DTR	(1 << 0)	/* host is ready for data r/w */
+#define SDIO_ACM_CTRL_RTS	(1 << 1)	
+#define SDIO_ACM_CTRL_DTR	(1 << 0)	
 	int				cbits_to_modem;
 
-	/* pkt logging */
+	
 	unsigned long			nbytes_tolaptop;
 	unsigned long			nbytes_tomodem;
 };
@@ -217,7 +216,7 @@ void gsdio_start_rx(struct gsdio_port *port)
 			break;
 		}
 
-		/* usb could have disconnected while we released spin lock */
+		
 		if (!port->port_usb) {
 			pr_debug("%s: usb is disconnected\n", __func__);
 			goto start_rx_end;
@@ -232,7 +231,7 @@ int gsdio_write(struct gsdio_port *port, struct usb_request *req)
 {
 	unsigned	avail;
 	char		*packet;
-	unsigned	size;
+	unsigned	size = req->actual;
 	unsigned	n;
 	int		ret = 0;
 
@@ -248,8 +247,6 @@ int gsdio_write(struct gsdio_port *port, struct usb_request *req)
 		return -ENODEV;
 	}
 
-	size = req->actual;
-	packet = req->buf;
 	pr_debug("%s: port:%p port#%d req:%p actual:%d n_read:%d\n",
 			__func__, port, port->port_num, req,
 			req->actual, port->n_read);
@@ -289,7 +286,7 @@ int gsdio_write(struct gsdio_port *port, struct usb_request *req)
 	if (ret) {
 		pr_err("%s: port#%d sdio write failed err:%d",
 				__func__, port->port_num, ret);
-		/* try again later */
+		
 		return ret;
 	}
 
@@ -337,9 +334,9 @@ void gsdio_rx_push(struct work_struct *w)
 			pr_warning("%s: port:%p port#%d"
 					" Unexpected Rx Status:%d\n", __func__,
 					port, port->port_num, req->status);
-			/* FALL THROUGH */
+			
 		case 0:
-			/* normal completion */
+			
 			break;
 		}
 
@@ -356,9 +353,6 @@ void gsdio_rx_push(struct work_struct *w)
 		port->rq_len--;
 
 		ret = gsdio_write(port, req);
-		/* as gsdio_write drops spin_lock while writing data
-		 * to sdio usb cable may have been disconnected
-		 */
 		if (!port->port_usb) {
 			port->n_read = 0;
 			gsdio_free_req(out, req);
@@ -383,7 +377,7 @@ void gsdio_rx_push(struct work_struct *w)
 rx_push_end:
 	spin_unlock_irq(&port->port_lock);
 
-	/* start queuing out requests again to host */
+	
 	gsdio_start_rx(port);
 }
 
@@ -429,13 +423,13 @@ void gsdio_write_complete(struct usb_ep *ep, struct usb_request *req)
 		pr_warning("%s: port:%p port#%d unexpected %s status %d\n",
 				__func__, port, port->port_num,
 				ep->name, req->status);
-		/* FALL THROUGH */
+		
 	case 0:
 		queue_work(gsdio_wq, &port->pull);
 		break;
 
 	case -ESHUTDOWN:
-		/* disconnect */
+		
 		pr_debug("%s: %s shutdown\n", __func__, ep->name);
 		break;
 	}
@@ -481,7 +475,7 @@ void gsdio_tx_pull(struct work_struct *w)
 	if (!port->port_usb) {
 		pr_err("%s: usb disconnected\n", __func__);
 
-		/* take out all the pending data from sdio */
+		
 		gsdio_read_pending(port);
 
 		return;
@@ -507,7 +501,7 @@ void gsdio_tx_pull(struct work_struct *w)
 
 		avail = sdio_read_avail(ch);
 		if (!avail) {
-			/* REVISIT: for ZLP */
+			
 			pr_debug("%s: read_avail:%d port:%p port#%d\n",
 					__func__, avail, port, port->port_num);
 			goto tx_pull_end;
@@ -526,7 +520,7 @@ void gsdio_tx_pull(struct work_struct *w)
 			pr_err("%s: port:%p port#%d sdio read failed err:%d",
 					__func__, port, port->port_num, ret);
 
-			/* check if usb is still active */
+			
 			if (!port->port_usb) {
 				gsdio_free_req(in, req);
 			} else {
@@ -535,20 +529,6 @@ void gsdio_tx_pull(struct work_struct *w)
 			}
 			goto tx_pull_end;
 		}
-
-		/* Do not send data if DTR is not set */
-		if (!(port->cbits_to_modem & TIOCM_DTR)) {
-			pr_info("%s: DTR low. flush %d bytes.", __func__, avail);
-			/* check if usb is still active */
-			if (!port->port_usb) {
-				gsdio_free_req(in, req);
-			} else {
-				list_add(&req->list, pool);
-				port->wp_len++;
-			}
-			goto tx_pull_end;
-		}
-
 
 		req->length = avail;
 
@@ -560,7 +540,7 @@ void gsdio_tx_pull(struct work_struct *w)
 					"port:%p, port#%d err:%d\n",
 					__func__, port, port->port_num, ret);
 
-			/* could be usb disconnected */
+			
 			if (!port->port_usb) {
 				gsdio_free_req(in, req);
 			} else {
@@ -590,7 +570,7 @@ int gsdio_start_io(struct gsdio_port *port)
 		return -ENODEV;
 	}
 
-	/* start usb out queue */
+	
 	ret = gsdio_alloc_requests(port->port_usb->out,
 				&port->read_pool,
 				SDIO_RX_QUEUE_SIZE, SDIO_RX_BUF_SIZE,
@@ -655,10 +635,11 @@ void gsdio_ctrl_wq(struct work_struct *w)
 			port->cbits_to_modem, ~(port->cbits_to_modem));
 }
 
-void gsdio_ctrl_notify_modem(struct gserial *gser, u8 portno, int ctrl_bits)
+void gsdio_ctrl_notify_modem(void *gptr, u8 portno, int ctrl_bits)
 {
 	struct gsdio_port *port;
 	int temp;
+	struct gserial *gser = gptr;
 
 	if (portno >= n_sdio_ports) {
 		pr_err("%s: invalid portno#%d\n", __func__, portno);
@@ -679,7 +660,7 @@ void gsdio_ctrl_notify_modem(struct gserial *gser, u8 portno, int ctrl_bits)
 
 	 port->cbits_to_modem = temp;
 
-	/* TIOCM_DTR - 0x002 - bit(1) */
+	
 	pr_debug("%s: port:%p port#%d ctrl_bits:%08x\n", __func__,
 		port, port->port_num, ctrl_bits);
 
@@ -689,7 +670,7 @@ void gsdio_ctrl_notify_modem(struct gserial *gser, u8 portno, int ctrl_bits)
 		return;
 	}
 
-	/* whenever DTR is high let laptop know that modem status */
+	
 	if (port->cbits_to_modem && gser->send_modem_ctrl_bits)
 		gser->send_modem_ctrl_bits(gser, port->cbits_to_laptop);
 
@@ -700,10 +681,6 @@ void gsdio_ctrl_modem_status(int ctrl_bits, void *_dev)
 {
 	struct gsdio_port *port = _dev;
 
-	/* TIOCM_CD - 0x040 - bit(6)
-	 * TIOCM_RI - 0x080 - bit(7)
-	 * TIOCM_DSR- 0x100 - bit(8)
-	 */
 	pr_debug("%s: port:%p port#%d event:%08x\n", __func__,
 		port, port->port_num, ctrl_bits);
 
@@ -762,7 +739,7 @@ static void gsdio_open_work(struct work_struct *w)
 		port->ctrl_ch_err = 1;
 	}
 
-	/* check for latest status update from modem */
+	
 	if (!port->ctrl_ch_err) {
 		ctrl_bits = sdio_cmux_tiocmget(pi->ctrl_ch_id);
 		gsdio_ctrl_modem_status(ctrl_bits, port);
@@ -774,7 +751,7 @@ static void gsdio_open_work(struct work_struct *w)
 
 	port->sdio_open = 1;
 
-	/* start tx if usb is open already */
+	
 	spin_lock_irq(&port->port_lock);
 	startio = port->port_usb ? 1 : 0;
 	gser = port->port_usb;
@@ -811,11 +788,11 @@ static int gsdio_ch_remove(struct platform_device *dev)
 			port->sdio_probe = 0;
 			port->ctrl_ch_err = 1;
 
-			/* check if usb cable is connected */
+			
 			if (!gser)
 				continue;
 
-			/* indicated call status to usb host */
+			
 			gsdio_ctrl_modem_status(0, port);
 
 			usb_ep_fifo_flush(gser->in);
@@ -856,10 +833,6 @@ static int gsdio_ch_probe(struct platform_device *dev)
 		pr_debug("%s: sdio_ch_name:%s dev_name:%s\n", __func__,
 				pi->data_ch_name, dev->name);
 
-		/* unfortunately cmux channle might not be ready even if
-		 * sdio channel is ready. as we dont have good notification
-		 * mechanism schedule a delayed work
-		 */
 		if (!strncmp(pi->data_ch_name, dev->name,
 					SDIO_CH_NAME_MAX_LEN)) {
 			port->sdio_probe = 1;
@@ -891,7 +864,7 @@ int gsdio_port_alloc(unsigned portno,
 	spin_lock_init(&port->port_lock);
 	port->line_coding = *coding;
 
-	/* READ: read from usb and write into sdio */
+	
 	INIT_LIST_HEAD(&port->read_pool);
 	INIT_LIST_HEAD(&port->read_queue);
 	INIT_WORK(&port->push, gsdio_rx_push);
@@ -946,7 +919,7 @@ int gsdio_connect(struct gserial *gser, u8 portno)
 	gser->notify_modem = gsdio_ctrl_notify_modem;
 	spin_unlock_irqrestore(&port->port_lock, flags);
 
-	ret = usb_ep_enable(gser->in, gser->in_desc);
+	ret = usb_ep_enable(gser->in);
 	if (ret) {
 		pr_err("%s: failed to enable in ep w/ err:%d\n",
 					__func__, ret);
@@ -955,7 +928,7 @@ int gsdio_connect(struct gserial *gser, u8 portno)
 	}
 	gser->in->driver_data = port;
 
-	ret = usb_ep_enable(gser->out, gser->out_desc);
+	ret = usb_ep_enable(gser->out);
 	if (ret) {
 		pr_err("%s: failed to enable in ep w/ err:%d\n",
 					__func__, ret);
@@ -993,7 +966,7 @@ void gsdio_disconnect(struct gserial *gser, u8 portno)
 
 	port = sdio_ports[portno].port;
 
-	/* send dtr zero to modem to notify disconnect */
+	
 	port->cbits_to_modem = 0;
 	queue_work(gsdio_wq, &port->notify_modem);
 
@@ -1003,7 +976,7 @@ void gsdio_disconnect(struct gserial *gser, u8 portno)
 	port->nbytes_tolaptop = 0;
 	spin_unlock_irqrestore(&port->port_lock, flags);
 
-	/* disable endpoints, aborting down any active I/O */
+	
 	usb_ep_disable(gser->out);
 
 	usb_ep_disable(gser->in);
@@ -1117,7 +1090,6 @@ static void gsdio_debugfs_init(void)
 }
 #endif
 
-/* connect, disconnect, alloc_requests, free_requests */
 int gsdio_setup(struct usb_gadget *g, unsigned count)
 {
 	struct usb_cdc_line_coding	coding;
@@ -1146,26 +1118,14 @@ int gsdio_setup(struct usb_gadget *g, unsigned count)
 
 	for (i = 0; i < count; i++) {
 		mutex_init(&sdio_ports[i].lock);
-		n_sdio_ports++;
 		ret = gsdio_port_alloc(i, &coding, sport_info + i);
+		n_sdio_ports++;
 		if (ret) {
 			n_sdio_ports--;
 			pr_err("%s: sdio logical port allocation failed\n",
 					__func__);
 			goto free_sdio_ports;
 		}
-
-#ifdef DEBUG
-		/* REVISIT: create one file per port
-		 * or do not create any file
-		 */
-		if (i == 0) {
-			ret = device_create_file(&g->dev, &dev_attr_input);
-			if (ret)
-				pr_err("%s: unable to create device file\n",
-						__func__);
-		}
-#endif
 
 	}
 
@@ -1181,4 +1141,3 @@ free_sdio_ports:
 	return ret;
 }
 
-/* TODO: Add gserial_cleanup */

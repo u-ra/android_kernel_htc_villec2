@@ -17,15 +17,6 @@
   $
  */
 
-/**
- *  @defgroup
- *  @brief
- *
- *  @{
- *      @file   mpu-i2c.c
- *      @brief
- *
- */
 
 #include <linux/delay.h>
 #include <linux/i2c.h>
@@ -46,7 +37,7 @@ int sensor_i2c_write(struct i2c_adapter *i2c_adap,
 		return -EINVAL;
 
 	msgs[0].addr = address;
-	msgs[0].flags = 0;	/* write */
+	msgs[0].flags = 0;	
 	msgs[0].buf = (unsigned char *) data;
 	msgs[0].len = len;
 
@@ -96,7 +87,7 @@ int sensor_i2c_read(struct i2c_adapter *i2c_adap,
 		return -EINVAL;
 
 	msgs[0].addr = address;
-	msgs[0].flags = 0;	/* write */
+	msgs[0].flags = 0;	
 	msgs[0].buf = &reg;
 	msgs[0].len = 1;
 
@@ -151,7 +142,7 @@ int mpu_memory_read(struct i2c_adapter *i2c_adap,
 
 	buf = MPUREG_MEM_R_W;
 
-	/* Write Message */
+	
 	msgs[0].addr = mpu_addr;
 	msgs[0].flags = 0;
 	msgs[0].buf = bank;
@@ -221,7 +212,7 @@ int mpu_memory_write(struct i2c_adapter *i2c_adap,
 	buf[0] = MPUREG_MEM_R_W;
 	memcpy(buf + 1, data, len);
 
-	/* Write Message */
+	
 	msgs[0].addr = mpu_addr;
 	msgs[0].flags = 0;
 	msgs[0].buf = bank;
@@ -259,6 +250,3 @@ int mpu_memory_write(struct i2c_adapter *i2c_adap,
 #endif
 }
 
-/**
- *  @}
- */

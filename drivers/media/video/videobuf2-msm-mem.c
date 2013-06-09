@@ -27,11 +27,10 @@
 #include <linux/android_pmem.h>
 #include <linux/memory_alloc.h>
 #include <media/videobuf2-msm-mem.h>
-//HTC_START:Use V4L2 header file
-#include <media/msm_camera_v4l2.h>
-//HTC_END
+#include <media/msm_camera.h>
 #include <mach/memory.h>
 #include <mach/msm_subsystem_map.h>
+
 #include <media/videobuf2-core.h>
 
 #define MAGIC_PMEM 0x0733ac64
@@ -162,16 +161,6 @@ int videobuf2_pmem_contig_mmap_get(struct videobuf2_contig_pmem *mem,
 }
 EXPORT_SYMBOL_GPL(videobuf2_pmem_contig_mmap_get);
 
-/**
- * videobuf_pmem_contig_user_get() - setup user space memory pointer
- * @mem: per-buffer private videobuf-contig-pmem data
- * @vb: video buffer to map
- *
- * This function validates and sets up a pointer to user space memory.
- * Only physically contiguous pfn-mapped memory is accepted.
- *
- * Returns 0 if successful.
- */
 int videobuf2_pmem_contig_user_get(struct videobuf2_contig_pmem *mem,
 					struct videobuf2_msm_offset *offset,
 					enum videobuf2_buffer_type buffer_type,
@@ -187,7 +176,7 @@ int videobuf2_pmem_contig_user_get(struct videobuf2_contig_pmem *mem,
 	if (mem->phyaddr != 0)
 		return 0;
 #ifdef CONFIG_MSM_MULTIMEDIA_USE_ION
-	mem->ion_handle = ion_import_fd(client, (int)mem->vaddr);
+	mem->ion_handle = ion_import_dma_buf(client, (int)mem->vaddr);
 	if (IS_ERR_OR_NULL(mem->ion_handle)) {
 		pr_err("%s ION import failed\n", __func__);
 		return PTR_ERR(mem->ion_handle);
@@ -196,9 +185,6 @@ int videobuf2_pmem_contig_user_get(struct videobuf2_contig_pmem *mem,
 		SZ_4K, 0, (unsigned long *)&mem->phyaddr, &len, UNCACHED, 0);
 	if (rc < 0)
 		ion_free(client, mem->ion_handle);
-	rc = ion_handle_get_flags(client, mem->ion_handle, &mem->ion_flags);
-	mem->kernel_vaddr = ion_map_kernel(client,
-		mem->ion_handle, mem->ion_flags);
 #elif CONFIG_ANDROID_PMEM
 	rc = get_pmem_file((int)mem->vaddr, (unsigned long *)&mem->phyaddr,
 					&kvstart, &len, &mem->file);
@@ -229,7 +215,6 @@ void videobuf2_pmem_contig_user_put(struct videobuf2_contig_pmem *mem,
 {
 	if (mem->is_userptr) {
 #ifdef CONFIG_MSM_MULTIMEDIA_USE_ION
-		ion_unmap_kernel(client, mem->ion_handle);
 		ion_unmap_iommu(client, mem->ion_handle,
 				CAMERA_DOMAIN, GEN_POOL);
 		ion_free(client, mem->ion_handle);
@@ -288,7 +273,7 @@ static int msm_vb2_mem_ops_mmap(void *buf_priv, struct vm_area_struct *vma)
 	D("mem = 0x%x\n", (u32)mem);
 	BUG_ON(!mem);
 	MAGIC_CHECK(mem->magic, MAGIC_PMEM);
-	/* Try to remap memory */
+	
 	size = vma->vm_end - vma->vm_start;
 	size = (size < mem->size) ? size : mem->size;
 	vma->vm_page_prot = pgprot_noncached(vma->vm_page_prot);

@@ -2,7 +2,7 @@
  * Copyright (C) 2011 Google, Inc.
  *
  * Author:
- *	Colin Cross <ccross <at> android.com>
+ *	Colin Cross <ccross@android.com>
  *
  * This software is licensed under the terms of the GNU General Public
  * License version 2, as published by the Free Software Foundation, and
@@ -20,9 +20,20 @@
 #include <linux/module.h>
 #include <linux/notifier.h>
 #include <linux/spinlock.h>
+#include <linux/syscore_ops.h>
 
 static DEFINE_RWLOCK(cpu_pm_notifier_lock);
 static RAW_NOTIFIER_HEAD(cpu_pm_notifier_chain);
+
+static int cpu_pm_notify(enum cpu_pm_event event, int nr_to_call, int *nr_calls)
+{
+	int ret;
+
+	ret = __raw_notifier_call_chain(&cpu_pm_notifier_chain, event, NULL,
+		nr_to_call, nr_calls);
+
+	return notifier_to_errno(ret);
+}
 
 int cpu_pm_register_notifier(struct notifier_block *nb)
 {
@@ -49,16 +60,6 @@ int cpu_pm_unregister_notifier(struct notifier_block *nb)
 	return ret;
 }
 EXPORT_SYMBOL_GPL(cpu_pm_unregister_notifier);
-
-static int cpu_pm_notify(enum cpu_pm_event event, int nr_to_call, int *nr_calls)
-{
-	int ret;
-
-	ret = __raw_notifier_call_chain(&cpu_pm_notifier_chain, event, NULL,
-		nr_to_call, nr_calls);
-
-	return notifier_to_errno(ret);
-}
 
 int cpu_pm_enter(void)
 {
@@ -113,3 +114,35 @@ int cpu_cluster_pm_exit(void)
 	return ret;
 }
 EXPORT_SYMBOL_GPL(cpu_cluster_pm_exit);
+
+#ifdef CONFIG_PM
+static int cpu_pm_suspend(void)
+{
+	int ret;
+
+	ret = cpu_pm_enter();
+	if (ret)
+		return ret;
+
+	ret = cpu_cluster_pm_enter();
+	return ret;
+}
+
+static void cpu_pm_resume(void)
+{
+	cpu_cluster_pm_exit();
+	cpu_pm_exit();
+}
+
+static struct syscore_ops cpu_pm_syscore_ops = {
+	.suspend = cpu_pm_suspend,
+	.resume = cpu_pm_resume,
+};
+
+static int cpu_pm_init(void)
+{
+	register_syscore_ops(&cpu_pm_syscore_ops);
+	return 0;
+}
+core_initcall(cpu_pm_init);
+#endif

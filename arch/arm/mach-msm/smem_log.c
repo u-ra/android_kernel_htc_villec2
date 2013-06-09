@@ -1,4 +1,4 @@
-/* Copyright (c) 2008-2011, Code Aurora Forum. All rights reserved.
+/* Copyright (c) 2008-2012, Code Aurora Forum. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -9,9 +9,6 @@
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  * GNU General Public License for more details.
  *
- */
-/*
- * Shared memory logging implementation.
  */
 
 #include <linux/slab.h>
@@ -44,7 +41,7 @@
 #define D_DUMP_BUFFER(prestr, cnt, buf) \
 do { \
 	int i; \
-	printk(KERN_ERR "[K] %s", prestr); \
+	printk(KERN_ERR "%s", prestr); \
 	for (i = 0; i < cnt; i++) \
 		printk(KERN_ERR "%.2x", buf[i]); \
 	printk(KERN_ERR "\n"); \
@@ -62,7 +59,10 @@ do { \
 #if defined(CONFIG_ARCH_MSM7X30) || defined(CONFIG_ARCH_MSM8X60) \
 	|| defined(CONFIG_ARCH_FSM9XXX)
 #define TIMESTAMP_ADDR (MSM_TMR_BASE + 0x08)
-#else
+#elif defined(CONFIG_ARCH_APQ8064) || defined(CONFIG_ARCH_MSM7X01A) || \
+	defined(CONFIG_ARCH_MSM7x25) || defined(CONFIG_ARCH_MSM7X27) || \
+	defined(CONFIG_ARCH_MSM7X27A) || defined(CONFIG_ARCH_MSM8960) || \
+	defined(CONFIG_ARCH_MSM9615) || defined(CONFIG_ARCH_QSD8X50)
 #define TIMESTAMP_ADDR (MSM_TMR_BASE + 0x04)
 #endif
 
@@ -88,7 +88,6 @@ struct smem_log_item {
 
 #define SMEM_SPINLOCK_SMEM_LOG		"S:2"
 #define SMEM_SPINLOCK_STATIC_LOG	"S:5"
-/* POWER shares with SMEM_SPINLOCK_SMEM_LOG */
 
 static remote_spinlock_t remote_spinlock;
 static remote_spinlock_t remote_spinlock_static;
@@ -133,6 +132,7 @@ struct sym id_syms[] = {
 	{ SMEM_LOG_PROC_ID_MODEM, "MODM" },
 	{ SMEM_LOG_PROC_ID_Q6, "QDSP" },
 	{ SMEM_LOG_PROC_ID_APPS, "APPS" },
+	{ SMEM_LOG_PROC_ID_WCNSS, "WCNSS" },
 };
 
 struct sym base_syms[] = {
@@ -381,7 +381,6 @@ struct sym smsm_syms[] = {
 	{ 0x00000001, "I" },
 };
 
-/* never reorder */
 struct sym voter_d2_syms[] = {
 	{ 0x00000001, NULL },
 	{ 0x00000002, NULL },
@@ -417,7 +416,6 @@ struct sym voter_d2_syms[] = {
 	{ 0x80000000, NULL },
 };
 
-/* never reorder */
 struct sym voter_d3_syms[] = {
 	{ 0x00000001, NULL },
 	{ 0x00000002, NULL },
@@ -622,20 +620,29 @@ static char *find_sym(uint32_t id, uint32_t val)
 static void init_syms(void) {}
 #endif
 
+#ifdef TIMESTAMP_ADDR
 static inline unsigned int read_timestamp(void)
 {
 	unsigned int tick = 0;
 
-	/* no barriers necessary as the read value is a dependency for the
-	 * comparison operation so the processor shouldn't be able to
-	 * reorder things
-	 */
 	do {
 		tick = __raw_readl(TIMESTAMP_ADDR);
 	} while (tick != __raw_readl(TIMESTAMP_ADDR));
 
 	return tick;
 }
+#else
+static inline unsigned int read_timestamp(void)
+{
+	unsigned long long val;
+
+	
+	val = sched_clock() * 32768U;
+	do_div(val, 1000000000U);
+
+	return (unsigned int)val;
+}
+#endif
 
 static void smem_log_event_from_user(struct smem_log_inst *inst,
 				     const char __user *buf, int size, int num)
@@ -648,6 +655,11 @@ static void smem_log_event_from_user(struct smem_log_inst *inst,
 	int first = 1;
 	int ret;
 
+	if (!inst->idx) {
+		pr_err("%s: invalid write index\n", __func__);
+		return;
+	}
+
 	remote_spin_lock_irqsave(inst->remote_spinlock, flags);
 
 	while (num--) {
@@ -657,7 +669,7 @@ static void smem_log_event_from_user(struct smem_log_inst *inst,
 			ret = copy_from_user(&inst->events[idx],
 					     buf, size);
 			if (ret) {
-				printk("[K] ERROR %s:%i tried to write "
+				printk("ERROR %s:%i tried to write "
 				       "%i got ret %i",
 				       __func__, __LINE__,
 				       size, size - ret);
@@ -757,7 +769,7 @@ static void _smem_log_event6(
 
 	idx = *_idx;
 
-	/* FIXME: Wrap around */
+	
 	if (idx < (num-1)) {
 		memcpy(&events[idx],
 			&item, sizeof(item));
@@ -820,9 +832,9 @@ static int _smem_log_init(void)
 
 	inst[GEN].which_log = GEN;
 	inst[GEN].events =
-		(struct smem_log_item *)smem_alloc(SMEM_SMEM_LOG_EVENTS,
+		(struct smem_log_item *)smem_alloc2(SMEM_SMEM_LOG_EVENTS,
 						  SMEM_LOG_EVENTS_SIZE);
-	inst[GEN].idx = (uint32_t *)smem_alloc(SMEM_SMEM_LOG_IDX,
+	inst[GEN].idx = (uint32_t *)smem_alloc2(SMEM_SMEM_LOG_IDX,
 					     sizeof(uint32_t));
 	if (!inst[GEN].events || !inst[GEN].idx)
 		pr_info("%s: no log or log_idx allocated\n", __func__);
@@ -836,9 +848,9 @@ static int _smem_log_init(void)
 	inst[STA].which_log = STA;
 	inst[STA].events =
 		(struct smem_log_item *)
-		smem_alloc(SMEM_SMEM_STATIC_LOG_EVENTS,
+		smem_alloc2(SMEM_SMEM_STATIC_LOG_EVENTS,
 			   SMEM_STATIC_LOG_EVENTS_SIZE);
-	inst[STA].idx = (uint32_t *)smem_alloc(SMEM_SMEM_STATIC_LOG_IDX,
+	inst[STA].idx = (uint32_t *)smem_alloc2(SMEM_SMEM_STATIC_LOG_IDX,
 						     sizeof(uint32_t));
 	if (!inst[STA].events || !inst[STA].idx)
 		pr_info("%s: no static log or log_idx allocated\n", __func__);
@@ -852,9 +864,9 @@ static int _smem_log_init(void)
 	inst[POW].which_log = POW;
 	inst[POW].events =
 		(struct smem_log_item *)
-		smem_alloc(SMEM_SMEM_LOG_POWER_EVENTS,
+		smem_alloc2(SMEM_SMEM_LOG_POWER_EVENTS,
 			   SMEM_POWER_LOG_EVENTS_SIZE);
-	inst[POW].idx = (uint32_t *)smem_alloc(SMEM_SMEM_LOG_POWER_IDX,
+	inst[POW].idx = (uint32_t *)smem_alloc2(SMEM_SMEM_LOG_POWER_IDX,
 						     sizeof(uint32_t));
 	if (!inst[POW].events || !inst[POW].idx)
 		pr_info("%s: no power log or log_idx allocated\n", __func__);
@@ -896,6 +908,9 @@ static ssize_t smem_log_read_bin(struct file *fp, char __user *buf,
 	struct smem_log_inst *local_inst;
 
 	local_inst = fp->private_data;
+
+	if (!local_inst->idx)
+		return -ENODEV;
 
 	remote_spin_lock_irqsave(local_inst->remote_spinlock, flags);
 
@@ -946,6 +961,8 @@ static ssize_t smem_log_read(struct file *fp, char __user *buf,
 	struct smem_log_inst *inst;
 
 	inst = fp->private_data;
+	if (!inst->idx)
+		return -ENODEV;
 
 	remote_spin_lock_irqsave(inst->remote_spinlock, flags);
 
@@ -1031,7 +1048,7 @@ static ssize_t smem_log_write(struct file *fp, const char __user *buf,
 
 	ret = copy_from_user(locbuf, buf, count);
 	if (ret != 0) {
-		printk(KERN_ERR "[K] ERROR: %s could not copy %i bytes\n",
+		printk(KERN_ERR "ERROR: %s could not copy %i bytes\n",
 		       __func__, ret);
 		return -EINVAL;
 	}
@@ -1048,7 +1065,7 @@ static ssize_t smem_log_write(struct file *fp, const char __user *buf,
 			D_DUMP_BUFFER("", strlen(token), token);
 			ret = strict_strtoul(token, 0, &res);
 			if (ret) {
-				printk(KERN_ERR "[K] ERROR: %s:%i got bad char "
+				printk(KERN_ERR "ERROR: %s:%i got bad char "
 				       "at strict_strtoul\n",
 				       __func__, __LINE__-4);
 				return -EINVAL;
@@ -1184,8 +1201,10 @@ static int update_read_avail(struct smem_log_inst *inst)
 	int curr_read_avail;
 	unsigned long flags = 0;
 
-	remote_spin_lock_irqsave(inst->remote_spinlock, flags);
+	if (!inst->idx)
+		return 0;
 
+	remote_spin_lock_irqsave(inst->remote_spinlock, flags);
 	curr_read_avail = (*inst->idx - inst->read_idx);
 	if (curr_read_avail < 0)
 		curr_read_avail = inst->num - inst->read_idx + *inst->idx;
@@ -1693,6 +1712,10 @@ static int _debug_dump_sym(int log, char *buf, int max, uint32_t cont)
 static int debug_dump(char *buf, int max, uint32_t cont)
 {
 	int r;
+
+	if (!inst[GEN].idx || !inst[GEN].events)
+		return -ENODEV;
+
 	while (cont) {
 		update_read_avail(&inst[GEN]);
 		r = wait_event_interruptible_timeout(inst[GEN].read_wait,
@@ -1713,6 +1736,10 @@ static int debug_dump(char *buf, int max, uint32_t cont)
 static int debug_dump_sym(char *buf, int max, uint32_t cont)
 {
 	int r;
+
+	if (!inst[GEN].idx || !inst[GEN].events)
+		return -ENODEV;
+
 	while (cont) {
 		update_read_avail(&inst[GEN]);
 		r = wait_event_interruptible_timeout(inst[GEN].read_wait,
@@ -1733,6 +1760,10 @@ static int debug_dump_sym(char *buf, int max, uint32_t cont)
 static int debug_dump_static(char *buf, int max, uint32_t cont)
 {
 	int r;
+
+	if (!inst[STA].idx || !inst[STA].events)
+		return -ENODEV;
+
 	while (cont) {
 		update_read_avail(&inst[STA]);
 		r = wait_event_interruptible_timeout(inst[STA].read_wait,
@@ -1753,6 +1784,10 @@ static int debug_dump_static(char *buf, int max, uint32_t cont)
 static int debug_dump_static_sym(char *buf, int max, uint32_t cont)
 {
 	int r;
+
+	if (!inst[STA].idx || !inst[STA].events)
+		return -ENODEV;
+
 	while (cont) {
 		update_read_avail(&inst[STA]);
 		r = wait_event_interruptible_timeout(inst[STA].read_wait,
@@ -1773,6 +1808,10 @@ static int debug_dump_static_sym(char *buf, int max, uint32_t cont)
 static int debug_dump_power(char *buf, int max, uint32_t cont)
 {
 	int r;
+
+	if (!inst[POW].idx || !inst[POW].events)
+		return -ENODEV;
+
 	while (cont) {
 		update_read_avail(&inst[POW]);
 		r = wait_event_interruptible_timeout(inst[POW].read_wait,
@@ -1793,6 +1832,10 @@ static int debug_dump_power(char *buf, int max, uint32_t cont)
 static int debug_dump_power_sym(char *buf, int max, uint32_t cont)
 {
 	int r;
+
+	if (!inst[POW].idx || !inst[POW].events)
+		return -ENODEV;
+
 	while (cont) {
 		update_read_avail(&inst[POW]);
 		r = wait_event_interruptible_timeout(inst[POW].read_wait,
@@ -1821,10 +1864,15 @@ static ssize_t debug_read(struct file *file, char __user *buf,
 			  size_t count, loff_t *ppos)
 {
 	int r;
-	static int bsize;
+	int bsize = 0;
 	int (*fill)(char *, int, uint32_t) = file->private_data;
-	if (!(*ppos))
+	if (!(*ppos)) {
 		bsize = fill(debug_buffer, EVENTS_PRINT_SIZE, 0);
+
+		if (bsize < 0)
+			bsize = scnprintf(debug_buffer,
+				EVENTS_PRINT_SIZE, "Log not available\n");
+	}
 	DBG("%s: count %d ppos %d\n", __func__, count, (unsigned int)*ppos);
 	r =  simple_read_from_buffer(buf, count, ppos, debug_buffer,
 				     bsize);
@@ -1839,12 +1887,21 @@ static ssize_t debug_read_cont(struct file *file, char __user *buf,
 	int bsize;
 	if (!buffer)
 		return -ENOMEM;
+
 	bsize = fill(buffer, count, 1);
+	if (bsize < 0) {
+		if (*ppos == 0)
+			bsize = scnprintf(buffer, count, "Log not available\n");
+		else
+			bsize = 0;
+	}
+
 	DBG("%s: count %d bsize %d\n", __func__, count, bsize);
 	if (copy_to_user(buf, buffer, bsize)) {
 		kfree(buffer);
 		return -EFAULT;
 	}
+	*ppos += bsize;
 	kfree(buffer);
 	return bsize;
 }
@@ -1933,28 +1990,25 @@ static int smem_log_initialize(void)
 	return ret;
 }
 
-static int modem_notifier(struct notifier_block *this,
-			  unsigned long code,
-			  void *_cmd)
+static int smsm_driver_state_notifier(struct notifier_block *this,
+				      unsigned long code,
+				      void *_cmd)
 {
-	switch (code) {
-	case MODEM_NOTIFIER_SMSM_INIT:
+	int ret = 0;
+	if (code & SMSM_INIT) {
 		if (!smem_log_initialized)
-			smem_log_initialize();
-		break;
-	default:
-		break;
+			ret = smem_log_initialize();
 	}
-	return NOTIFY_DONE;
+	return ret;
 }
 
 static struct notifier_block nb = {
-	.notifier_call = modem_notifier,
+	.notifier_call = smsm_driver_state_notifier,
 };
 
 static int __init smem_log_init(void)
 {
-	return modem_register_notifier(&nb);
+	return smsm_driver_state_notifier_register(&nb);
 }
 
 

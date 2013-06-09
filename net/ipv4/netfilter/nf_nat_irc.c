@@ -38,12 +38,12 @@ static unsigned int help(struct sk_buff *skb,
 	u_int16_t port;
 	unsigned int ret;
 
-	/* Reply comes from server. */
+	
 	exp->saved_proto.tcp.port = exp->tuple.dst.u.tcp.port;
 	exp->dir = IP_CT_DIR_REPLY;
 	exp->expectfn = nf_nat_follow_master;
 
-	/* Try to get same port: if not, try to change it. */
+	
 	for (port = ntohs(exp->saved_proto.tcp.port); port != 0; port++) {
 		int ret;
 
@@ -75,18 +75,17 @@ static unsigned int help(struct sk_buff *skb,
 
 static void __exit nf_nat_irc_fini(void)
 {
-	rcu_assign_pointer(nf_nat_irc_hook, NULL);
+	RCU_INIT_POINTER(nf_nat_irc_hook, NULL);
 	synchronize_rcu();
 }
 
 static int __init nf_nat_irc_init(void)
 {
 	BUG_ON(nf_nat_irc_hook != NULL);
-	rcu_assign_pointer(nf_nat_irc_hook, help);
+	RCU_INIT_POINTER(nf_nat_irc_hook, help);
 	return 0;
 }
 
-/* Prior to 2.6.11, we had a ports param.  No longer, but don't break users. */
 static int warn_set(const char *val, struct kernel_param *kp)
 {
 	printk(KERN_INFO KBUILD_MODNAME

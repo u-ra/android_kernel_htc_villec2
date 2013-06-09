@@ -10,6 +10,10 @@
  *  You may use this code as per GPL version 2
  */
 
+struct device;
+struct device_type;
+struct power_supply;
+
 #ifdef CONFIG_SYSFS
 
 extern void power_supply_init_attrs(struct device_type *dev_type);
@@ -20,7 +24,7 @@ extern int power_supply_uevent(struct device *dev, struct kobj_uevent_env *env);
 static inline void power_supply_init_attrs(struct device_type *dev_type) {}
 #define power_supply_uevent NULL
 
-#endif /* CONFIG_SYSFS */
+#endif 
 
 #ifdef CONFIG_LEDS_TRIGGERS
 
@@ -35,4 +39,4 @@ static inline int power_supply_create_triggers(struct power_supply *psy)
 { return 0; }
 static inline void power_supply_remove_triggers(struct power_supply *psy) {}
 
-#endif /* CONFIG_LEDS_TRIGGERS */
+#endif 

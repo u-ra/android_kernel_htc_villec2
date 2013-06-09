@@ -14,39 +14,10 @@ menuconfig THERMAL
 	  If you want this support, you should say Y or M here.
 
 config THERMAL_HWMON
-	bool "Hardware monitoring support"
+	bool
 	depends on THERMAL
 	depends on HWMON=y || HWMON=THERMAL
-	help
-	  The generic thermal sysfs driver's hardware monitoring support
-	  requires a 2.10.7/3.0.2 or later lm-sensors userspace.
-
-	  Say Y if your user-space is new enough.
-
-config THERMAL_PM8901
-	tristate "Qualcomm PM8901 Temperature Alarm"
-	depends on PMIC8901
-	depends on THERMAL
-	default n
-	help
-	  This enables a thermal Sysfs driver for the PMIC 8901 device. It
-	  shows up in Sysfs as a thermal zone with multiple trip points.
-	  Enabling the thermal zone device via the mode file results in
-	  shifting over temperature shutdown control of the PMIC from hardware
-	  to software.
-
-config THERMAL_PM8058
-	tristate "Qualcomm PM8058 Temperature Alarm"
-	depends on PMIC8058
-	depends on THERMAL
-	depends on SENSORS_MSM_ADC
-	default n
-	help
-	  This enables a thermal Sysfs driver for the PMIC 8058 device. It
-	  shows up in Sysfs as a thermal zone with multiple trip points.
-	  Enabling the thermal zone device via the mode file results in
-	  shifting over temperature shutdown control of the PMIC from hardware
-	  to software.
+	default y
 
 config THERMAL_MSM_POPMEM
 	tristate "Qualcomm MSM POP memory temperature sensor"
@@ -91,3 +62,40 @@ config THERMAL_PM8XXX
 	  Enabling the thermal zone device via the mode file results in
 	  shifting over temperature shutdown control of the PMIC from hardware
 	  to software.
+
+config THERMAL_MONITOR
+	bool "Monitor thermal state and limit CPU Frequency"
+	depends on THERMAL_TSENS8960
+	depends on CPU_FREQ_MSM
+	default n
+	help
+	  This enables thermal monitoring capability in the kernel in the
+	  absence of a system wide thermal monitoring entity or until such an
+	  entity starts running in the userspace. Monitors TSENS temperature
+	  and limits the max frequency of the cores.
+
+config SPEAR_THERMAL
+	bool "SPEAr thermal sensor driver"
+	depends on THERMAL
+	depends on PLAT_SPEAR
+	help
+	  Enable this to plug the SPEAr thermal sensor driver into the Linux
+	  thermal framework
+
+config THERMAL_MAX_TEMP_PROTECT
+       bool "Max temperature protection support"
+       depends on THERMAL
+       default y
+       help
+         This enable the protection under critical high temperature enviroment.
+         Device would auto shutdown when thermal sensor senses the temperature
+         is higher than the critical high temperature.
+
+config THERMAL_MIN_TEMP_PROTECT
+       bool "Min temperature protection support"
+       depends on THERMAL
+       default y
+       help
+         This enable the protection under critical low temperature enviroment.
+         Device would auto shutdown when thermal sensor senses the temperature
+         is lower than the critical low temperature.

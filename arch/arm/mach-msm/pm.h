@@ -1,7 +1,7 @@
 /* arch/arm/mach-msm/pm.h
  *
  * Copyright (C) 2007 Google, Inc.
- * Copyright (c) 2009-2011, Code Aurora Forum. All rights reserved.
+ * Copyright (c) 2009-2012, Code Aurora Forum. All rights reserved.
  * Author: San Mehat <san@android.com>
  *
  * This software is licensed under the terms of the GNU General Public
@@ -21,73 +21,128 @@
 #include <linux/types.h>
 #include <linux/cpuidle.h>
 
-/* This constant is used in bootloader to decide actions. */
-#define RESTART_REASON_BOOT_BASE	0x77665500
-#define RESTART_REASON_BOOTLOADER	(RESTART_REASON_BOOT_BASE | 0x00)
-#define RESTART_REASON_REBOOT		(RESTART_REASON_BOOT_BASE | 0x01)
-#define RESTART_REASON_RECOVERY		(RESTART_REASON_BOOT_BASE | 0x02)
-#define RESTART_REASON_ERASE_EFS		(RESTART_REASON_BOOT_BASE | 0x03)
-#define RESTART_REASON_RAMDUMP		(RESTART_REASON_BOOT_BASE | 0xAA)
-#define RESTART_REASON_POWEROFF		(RESTART_REASON_BOOT_BASE | 0xBB)
-#define RESTART_REASON_ERASE_FLASH	(RESTART_REASON_BOOT_BASE | 0xEF)
-
-/*
-   This restart constant is used for oem commands.
-   The actual value is parsed from reboot commands.
-   RIL FATAL will use oem-99 to restart a device.
-*/
-#define RESTART_REASON_OEM_BASE		0x6f656d00
-#define RESTART_REASON_RIL_FATAL	(RESTART_REASON_OEM_BASE | 0x99)
-
 #ifdef CONFIG_SMP
-extern int pen_release;
 extern void msm_secondary_startup(void);
 #else
 #define msm_secondary_startup NULL
 #endif
 
+extern int power_collapsed;
+
+struct msm_pm_irq_calls {
+	unsigned int (*irq_pending)(void);
+	int (*idle_sleep_allowed)(void);
+	void (*enter_sleep1)(bool modem_wake, int from_idle, uint32_t
+								*irq_mask);
+	int (*enter_sleep2)(bool modem_wake, int from_idle);
+	void (*exit_sleep1)(uint32_t irq_mask, uint32_t wakeup_reason,
+							uint32_t pending_irqs);
+	void (*exit_sleep2)(uint32_t irq_mask, uint32_t wakeup_reason,
+							uint32_t pending_irqs);
+	void (*exit_sleep3)(uint32_t irq_mask, uint32_t wakeup_reason,
+							uint32_t pending_irqs);
+};
+
 enum msm_pm_sleep_mode {
-	MSM_PM_SLEEP_MODE_POWER_COLLAPSE_SUSPEND,
-	MSM_PM_SLEEP_MODE_POWER_COLLAPSE,
-	MSM_PM_SLEEP_MODE_APPS_SLEEP,
-	MSM_PM_SLEEP_MODE_RAMP_DOWN_AND_WAIT_FOR_INTERRUPT,
-	MSM_PM_SLEEP_MODE_WAIT_FOR_INTERRUPT,
-	MSM_PM_SLEEP_MODE_POWER_COLLAPSE_NO_XO_SHUTDOWN,
-	MSM_PM_SLEEP_MODE_POWER_COLLAPSE_STANDALONE,
+	MSM_PM_SLEEP_MODE_WAIT_FOR_INTERRUPT = 0,
+	MSM_PM_SLEEP_MODE_RAMP_DOWN_AND_WAIT_FOR_INTERRUPT = 1,
+	MSM_PM_SLEEP_MODE_POWER_COLLAPSE_STANDALONE = 2,
+	MSM_PM_SLEEP_MODE_POWER_COLLAPSE = 3,
+	MSM_PM_SLEEP_MODE_APPS_SLEEP = 4,
+	MSM_PM_SLEEP_MODE_RETENTION = MSM_PM_SLEEP_MODE_APPS_SLEEP,
+	MSM_PM_SLEEP_MODE_POWER_COLLAPSE_SUSPEND = 5,
+	MSM_PM_SLEEP_MODE_POWER_COLLAPSE_NO_XO_SHUTDOWN = 6,
 	MSM_PM_SLEEP_MODE_NR
 };
 
 #define MSM_PM_MODE(cpu, mode_nr)  ((cpu) * MSM_PM_SLEEP_MODE_NR + (mode_nr))
 
 struct msm_pm_platform_data {
-	u8 idle_supported;   /* Allow device to enter mode during idle */
-	u8 suspend_supported; /* Allow device to enter mode during suspend */
-	u8 suspend_enabled;  /* enabled for suspend */
-	u8 idle_enabled;     /* enabled for idle low power */
-	u32 latency;         /* interrupt latency in microseconds when entering
-				and exiting the low power mode */
-	u32 residency;       /* time threshold in microseconds beyond which
-				staying in the low power mode saves power */
+	u8 idle_supported;   
+	u8 suspend_supported; 
+	u8 suspend_enabled;  
+	u8 idle_enabled;     
+	u32 latency;         
+	u32 residency;       
 };
 
+extern struct msm_pm_platform_data msm_pm_sleep_modes[];
+
+struct msm_pm_sleep_status_data {
+	void *base_addr;
+	uint32_t cpu_offset;
+	uint32_t mask;
+};
+
+struct msm_pm_sleep_ops {
+	void *(*lowest_limits)(bool from_idle,
+			enum msm_pm_sleep_mode sleep_mode, uint32_t latency_us,
+			uint32_t sleep_us, uint32_t *power);
+	int (*enter_sleep)(uint32_t sclk_count, void *limits,
+			bool from_idle, bool notify_rpm);
+	void (*exit_sleep)(void *limits, bool from_idle,
+			bool notify_rpm, bool collapsed);
+};
 
 void msm_pm_set_platform_data(struct msm_pm_platform_data *data, int count);
-int msm_pm_idle_prepare(struct cpuidle_device *dev);
+int msm_pm_idle_prepare(struct cpuidle_device *dev,
+			struct cpuidle_driver *drv, int index);
+void msm_pm_set_irq_extns(struct msm_pm_irq_calls *irq_calls);
 int msm_pm_idle_enter(enum msm_pm_sleep_mode sleep_mode);
+void msm_pm_cpu_enter_lowpower(unsigned int cpu);
 
-#ifdef CONFIG_PM
+void __init msm_pm_init_sleep_status_data(
+		struct msm_pm_sleep_status_data *sleep_data);
+
+
+#ifdef CONFIG_MSM_PM8X60
 void msm_pm_set_rpm_wakeup_irq(unsigned int irq);
-int msm_pm_platform_secondary_init(unsigned int cpu);
+int msm_pm_wait_cpu_shutdown(unsigned int cpu);
+bool msm_pm_verify_cpu_pc(unsigned int cpu);
+void msm_pm_set_sleep_ops(struct msm_pm_sleep_ops *ops);
+void msm_pm_radio_info_init(unsigned int *addr);
 #else
 static inline void msm_pm_set_rpm_wakeup_irq(unsigned int irq) {}
-static inline int msm_pm_platform_secondary_init(unsigned int cpu)
-{ return -ENOSYS; }
+static inline int msm_pm_wait_cpu_shutdown(unsigned int cpu) { return 0; }
+static inline bool msm_pm_verify_cpu_pc(unsigned int cpu) { return true; }
+static inline void msm_pm_set_sleep_ops(struct msm_pm_sleep_ops *ops) {}
+static inline void msm_pm_radio_info_init(unsigned int *addr) {}
 #endif
+#ifdef CONFIG_HOTPLUG_CPU
+int msm_platform_secondary_init(unsigned int cpu);
+#else
+static inline int msm_platform_secondary_init(unsigned int cpu) { return 0; }
+#endif
+
+enum msm_pm_time_stats_id {
+	MSM_PM_STAT_REQUESTED_IDLE = 0,
+	MSM_PM_STAT_IDLE_SPIN,
+	MSM_PM_STAT_IDLE_WFI,
+	MSM_PM_STAT_RETENTION,
+	MSM_PM_STAT_IDLE_STANDALONE_POWER_COLLAPSE,
+	MSM_PM_STAT_IDLE_FAILED_STANDALONE_POWER_COLLAPSE,
+	MSM_PM_STAT_IDLE_POWER_COLLAPSE,
+	MSM_PM_STAT_IDLE_POWER_COLLAPSE_XO_SHUTDOWN,
+	MSM_PM_STAT_IDLE_POWER_COLLAPSE_VDD_MIN,
+	MSM_PM_STAT_IDLE_FAILED_POWER_COLLAPSE,
+	MSM_PM_STAT_SUSPEND,
+	MSM_PM_STAT_SUSPEND_XO_SHUTDOWN,
+	MSM_PM_STAT_SUSPEND_VDD_MIN,
+	MSM_PM_STAT_FAILED_SUSPEND,
+	MSM_PM_STAT_NOT_IDLE,
+	MSM_PM_STAT_COUNT
+};
+
+#ifdef CONFIG_MSM_IDLE_STATS
+void msm_pm_add_stats(enum msm_pm_time_stats_id *enable_stats, int size);
+void msm_pm_add_stat(enum msm_pm_time_stats_id id, int64_t t);
+#else
+static inline void msm_pm_add_stats(enum msm_pm_time_stats_id *enable_stats,
+		int size) {}
+static inline void msm_pm_add_stat(enum msm_pm_time_stats_id id, int64_t t) {}
+#endif
+
 int print_gpio_buffer(struct seq_file *m);
 int free_gpio_buffer(void);
 
-extern int board_mfg_mode(void);
-extern char *board_get_mfg_sleep_gpio_table(void);
-extern void gpio_set_diag_gpio_table(unsigned long *dwMFG_gpio_table);
-
-#endif  /* __ARCH_ARM_MACH_MSM_PM_H */
+#endif  

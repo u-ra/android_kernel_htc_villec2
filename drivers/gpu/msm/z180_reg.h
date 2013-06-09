@@ -46,4 +46,4 @@
 #define ADDR_VGV3_NEXTCMD                0x0076
 #define ADDR_VGV3_WRITEADDR              0x0072
 
-#endif /* __Z180_REG_H */
+#endif 

@@ -28,18 +28,6 @@
 #include <net/request_sock.h>
 #include <net/netns/hash.h>
 
-/** struct ip_options - IP Options
- *
- * @faddr - Saved first hop address
- * @nexthop - Saved nexthop address in LSRR and SSRR
- * @is_data - Options in __data, rather than skb
- * @is_strictroute - Strict source route
- * @srr_is_hit - Packet destination addr was our one
- * @is_changed - IP checksum more not valid
- * @rr_needaddr - Need to record addr of outgoing dev
- * @ts_needtime - Need to record timestamp
- * @ts_needaddr - Need to record addr of outgoing dev
- */
 struct ip_options {
 	__be32		faddr;
 	__be32		nexthop;
@@ -71,7 +59,7 @@ struct ip_options_data {
 
 struct inet_request_sock {
 	struct request_sock	req;
-#if defined(CONFIG_IPV6) || defined(CONFIG_IPV6_MODULE)
+#if IS_ENABLED(CONFIG_IPV6)
 	u16			inet6_rsk_offset;
 #endif
 	__be16			loc_port;
@@ -102,7 +90,7 @@ struct inet_cork {
 	struct ip_options	*opt;
 	unsigned int		fragsize;
 	struct dst_entry	*dst;
-	int			length; /* Total length of all frames */
+	int			length; 
 	struct page		*page;
 	u32			off;
 	u8			tx_flags;
@@ -117,32 +105,13 @@ struct ip_mc_socklist;
 struct ipv6_pinfo;
 struct rtable;
 
-/** struct inet_sock - representation of INET sockets
- *
- * @sk - ancestor class
- * @pinet6 - pointer to IPv6 control block
- * @inet_daddr - Foreign IPv4 addr
- * @inet_rcv_saddr - Bound local IPv4 addr
- * @inet_dport - Destination port
- * @inet_num - Local port
- * @inet_saddr - Sending source
- * @uc_ttl - Unicast TTL
- * @inet_sport - Source port
- * @inet_id - ID counter for DF pkts
- * @tos - TOS
- * @mc_ttl - Multicasting TTL
- * @is_icsk - is this an inet_connection_sock?
- * @mc_index - Multicast device index
- * @mc_list - Group array
- * @cork - info to build ip hdr on each ip frag while socket is corked
- */
 struct inet_sock {
-	/* sk and pinet6 has to be the first two members of inet_sock */
+	
 	struct sock		sk;
-#if defined(CONFIG_IPV6) || defined(CONFIG_IPV6_MODULE)
+#if IS_ENABLED(CONFIG_IPV6)
 	struct ipv6_pinfo	*pinet6;
 #endif
-	/* Socket demultiplex comparisons on incoming packets. */
+	
 #define inet_daddr		sk.__sk_common.skc_daddr
 #define inet_rcv_saddr		sk.__sk_common.skc_rcv_saddr
 
@@ -167,14 +136,16 @@ struct inet_sock {
 				transparent:1,
 				mc_all:1,
 				nodefrag:1;
+	__u8			rcv_tos;
+	int			uc_index;
 	int			mc_index;
 	__be32			mc_addr;
 	struct ip_mc_socklist __rcu	*mc_list;
 	struct inet_cork_full	cork;
 };
 
-#define IPCORK_OPT	1	/* ip-options has been held in ipcork.opt */
-#define IPCORK_ALLFRAG	2	/* always fragment (for ipv6 for now) */
+#define IPCORK_OPT	1	
+#define IPCORK_ALLFRAG	2	
 
 static inline struct inet_sock *inet_sk(const struct sock *sk)
 {
@@ -188,7 +159,7 @@ static inline void __inet_sk_copy_descendant(struct sock *sk_to,
 	memcpy(inet_sk(sk_to) + 1, inet_sk(sk_from) + 1,
 	       sk_from->sk_prot->obj_size - ancestor_size);
 }
-#if !(defined(CONFIG_IPV6) || defined(CONFIG_IPV6_MODULE))
+#if !(IS_ENABLED(CONFIG_IPV6))
 static inline void inet_sk_copy_descendant(struct sock *sk_to,
 					   const struct sock *sk_from)
 {
@@ -199,7 +170,6 @@ static inline void inet_sk_copy_descendant(struct sock *sk_to,
 extern int inet_sk_rebuild_header(struct sock *sk);
 
 extern u32 inet_ehash_secret;
-extern u32 ipv6_hash_secret;
 extern void build_ehash_secret(void);
 
 static inline unsigned int inet_ehashfn(struct net *net,
@@ -241,11 +211,11 @@ static inline __u8 inet_sk_flowi_flags(const struct sock *sk)
 {
 	__u8 flags = 0;
 
-	if (inet_sk(sk)->transparent)
+	if (inet_sk(sk)->transparent || inet_sk(sk)->hdrincl)
 		flags |= FLOWI_FLAG_ANYSRC;
 	if (sk->sk_protocol == IPPROTO_TCP)
 		flags |= FLOWI_FLAG_PRECOW_METRICS;
 	return flags;
 }
 
-#endif	/* _INET_SOCK_H */
+#endif	

@@ -27,9 +27,6 @@
 #include <linux/usb_usual.h>
 
 
-/*
- * The table of devices
- */
 #define UNUSUAL_DEV(id_vendor, id_product, bcdDeviceMin, bcdDeviceMax, \
 		    vendorName, productName, useProtocol, useTransport, \
 		    initFunction, flags) \
@@ -46,23 +43,9 @@
 { USB_INTERFACE_INFO(USB_CLASS_MASS_STORAGE, useProto, useTrans), \
   .driver_info = ((useType)<<24) }
 
-/* Define the device is matched with Vendor ID and interface descriptors */
-#define UNUSUAL_VENDOR_INTF(id_vendor, cl, sc, pr, \
-			vendorName, productName, useProtocol, useTransport, \
-			initFunction, flags) \
-{ \
-	.match_flags = USB_DEVICE_ID_MATCH_INT_INFO \
-				| USB_DEVICE_ID_MATCH_VENDOR, \
-	.idVendor    = (id_vendor), \
-	.bInterfaceClass = (cl), \
-	.bInterfaceSubClass = (sc), \
-	.bInterfaceProtocol = (pr), \
-	.driver_info = (flags) \
-}
-
 struct usb_device_id usb_storage_usb_ids[] = {
 #	include "unusual_devs.h"
-	{ }		/* Terminating entry */
+	{ }		
 };
 EXPORT_SYMBOL_GPL(usb_storage_usb_ids);
 
@@ -71,12 +54,8 @@ MODULE_DEVICE_TABLE(usb, usb_storage_usb_ids);
 #undef UNUSUAL_DEV
 #undef COMPLIANT_DEV
 #undef USUAL_DEV
-#undef UNUSUAL_VENDOR_INTF
 
 
-/*
- * The table of devices to ignore
- */
 struct ignore_entry {
 	u16	vid, pid, bcdmin, bcdmax;
 };
@@ -105,13 +84,12 @@ static struct ignore_entry ignore_ids[] = {
 #	include "unusual_sddr09.h"
 #	include "unusual_sddr55.h"
 #	include "unusual_usbat.h"
-	{ }		/* Terminating entry */
+	{ }		
 };
 
 #undef UNUSUAL_DEV
 
 
-/* Return an error if a device is in the ignore_ids list */
 int usb_usual_ignore_device(struct usb_interface *intf)
 {
 	struct usb_device *udev;

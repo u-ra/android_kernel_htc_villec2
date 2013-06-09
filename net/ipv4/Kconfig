@@ -163,8 +163,6 @@ config IP_PNP_RARP
 	  operating on your network. Read
 	  <file:Documentation/filesystems/nfs/nfsroot.txt> for details.
 
-# not yet ready..
-#   bool '    IP: ARP support' CONFIG_IP_PNP_ARP
 config NET_IPIP
 	tristate "IP: tunneling"
 	select INET_TUNNEL
@@ -223,12 +221,6 @@ config IP_MROUTE
 	  capabilities of the various network cards is contained in
 	  <file:Documentation/networking/multicast.txt>. If you haven't heard
 	  about it, you don't need it.
-
-config LARGE_TCP_INITIAL_BUFFER
-	bool "TCP: initial TCP buffer size 5K:64K"
-	default y
-	help
-	 yes means TCP buffer size 5K
 
 config IP_MROUTE_MULTIPLE_TABLES
 	bool "IP: multicast policy routing"
@@ -406,7 +398,7 @@ config INET_DIAG
 	  Support for INET (TCP, DCCP, etc) socket monitoring interface used by
 	  native Linux tools such as ss. ss is included in iproute2, currently
 	  downloadable at:
-	  
+
 	    http://www.linuxfoundation.org/collaborate/workgroups/networking/iproute2
 
 	  If unsure, say Y.
@@ -414,6 +406,14 @@ config INET_DIAG
 config INET_TCP_DIAG
 	depends on INET_DIAG
 	def_tristate INET_DIAG
+
+config INET_UDP_DIAG
+	tristate "UDP: socket monitoring interface"
+	depends on INET_DIAG && (IPV6 || IPV6=n)
+	default n
+	---help---
+	  Support for UDP socket monitoring interface used by the ss tool.
+	  If unsure, say Y.
 
 menuconfig TCP_CONG_ADVANCED
 	bool "TCP: advanced congestion control"
@@ -537,7 +537,7 @@ config TCP_CONG_VENO
 	distinguishing to circumvent the difficult judgment of the packet loss
 	type. TCP Veno cuts down less congestion window in response to random
 	loss packets.
-	See <http://ieeexplore.ieee.org/xpl/freeabs_all.jsp?arnumber=1177186> 
+	See <http://ieeexplore.ieee.org/xpl/freeabs_all.jsp?arnumber=1177186>
 
 config TCP_CONG_YEAH
 	tristate "YeAH TCP"
@@ -632,7 +632,19 @@ config TCP_MD5SIG
 	  If unsure, say N.
 
 config HTC_NETWORK_MODIFY
-	tristate
+    tristate "HTC_NETWORK_MODIFY"
 	---help---
-	  HTC NET MODIFY
+	HTC_NETWORK_MODIFY
 
+config HTC_NETWORK_DEBUG
+	tristate "HTC_NETWORK_DEBUG"
+	default n
+	---help---
+	HTC_NETWORK_DEBUG
+
+config HTC_MONITOR
+	tristate "HTC_MONITOR"
+	default n
+	---help---
+	  Come up with a way to add information of data usage in attribute file
+	  for identifying the process that requested for data transmission.

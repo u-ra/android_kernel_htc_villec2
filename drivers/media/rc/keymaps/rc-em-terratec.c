@@ -11,6 +11,7 @@
  */
 
 #include <media/rc-map.h>
+#include <linux/module.h>
 
 static struct rc_map_table em_terratec[] = {
 	{ 0x01, KEY_CHANNEL },
@@ -47,7 +48,7 @@ static struct rc_map_list em_terratec_map = {
 	.map = {
 		.scan    = em_terratec,
 		.size    = ARRAY_SIZE(em_terratec),
-		.rc_type = RC_TYPE_UNKNOWN,	/* Legacy IR type */
+		.rc_type = RC_TYPE_UNKNOWN,	
 		.name    = RC_MAP_EM_TERRATEC,
 	}
 };

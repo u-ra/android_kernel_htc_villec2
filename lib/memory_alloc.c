@@ -27,7 +27,6 @@
 
 struct mem_pool mpools[MAX_MEMPOOLS];
 
-/* The tree contains all allocations over all memory pools */
 static struct rb_root alloc_root;
 static struct mutex alloc_mutex;
 
@@ -310,13 +309,6 @@ unsigned long _allocate_contiguous_memory_nomap(unsigned long size,
 
 	node->paddr = paddr;
 
-	/* We search the tree using node->vaddr, so set
-	 * it to something unique even though we don't
-	 * use it for physical allocation nodes.
-	 * The virtual and physical address ranges
-	 * are disjoint, so there won't be any chance of
-	 * a duplicate node->vaddr value.
-	 */
 	node->vaddr = (void *)paddr;
 	node->len = aligned_size;
 	node->mpool = mpool;

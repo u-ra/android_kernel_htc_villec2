@@ -42,6 +42,7 @@ static int load_em86(struct linux_binprm *bprm,struct pt_regs *regs)
 			return -ENOEXEC;
 	}
 
+	bprm->recursion_depth++; /* Well, the bang-shell is implicit... */
 	allow_write_access(bprm->file);
 	fput(bprm->file);
 	bprm->file = NULL;
@@ -99,7 +100,8 @@ static struct linux_binfmt em86_format = {
 
 static int __init init_em86_binfmt(void)
 {
-	return register_binfmt(&em86_format);
+	register_binfmt(&em86_format);
+	return 0;
 }
 
 static void __exit exit_em86_binfmt(void)

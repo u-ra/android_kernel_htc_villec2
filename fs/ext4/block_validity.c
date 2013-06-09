@@ -13,7 +13,6 @@
 #include <linux/namei.h>
 #include <linux/quotaops.h>
 #include <linux/buffer_head.h>
-#include <linux/module.h>
 #include <linux/swap.h>
 #include <linux/pagemap.h>
 #include <linux/blkdev.h>
@@ -50,11 +49,6 @@ static inline int can_merge(struct ext4_system_zone *entry1,
 	return 0;
 }
 
-/*
- * Mark a range of blocks as belonging to the "system zone" --- that
- * is, filesystem metadata blocks which should never be used by
- * inodes.
- */
 static int add_system_zone(struct ext4_sb_info *sbi,
 			   ext4_fsblk_t start_blk,
 			   unsigned int count)
@@ -95,7 +89,7 @@ static int add_system_zone(struct ext4_sb_info *sbi,
 		rb_insert_color(new_node, &sbi->system_blks);
 	}
 
-	/* Can we merge to the left? */
+	
 	node = rb_prev(new_node);
 	if (node) {
 		entry = rb_entry(node, struct ext4_system_zone, node);
@@ -107,7 +101,7 @@ static int add_system_zone(struct ext4_sb_info *sbi,
 		}
 	}
 
-	/* Can we merge to the right? */
+	
 	node = rb_next(new_node);
 	if (node) {
 		entry = rb_entry(node, struct ext4_system_zone, node);
@@ -178,7 +172,6 @@ int ext4_setup_system_zone(struct super_block *sb)
 	return 0;
 }
 
-/* Called when the filesystem is unmounted */
 void ext4_release_system_zone(struct super_block *sb)
 {
 	struct rb_node	*n = EXT4_SB(sb)->system_blks.rb_node;
@@ -186,7 +179,7 @@ void ext4_release_system_zone(struct super_block *sb)
 	struct ext4_system_zone	*entry;
 
 	while (n) {
-		/* Do the node's children first */
+		
 		if (n->rb_left) {
 			n = n->rb_left;
 			continue;
@@ -195,12 +188,6 @@ void ext4_release_system_zone(struct super_block *sb)
 			n = n->rb_right;
 			continue;
 		}
-		/*
-		 * The node has no children; free it, and then zero
-		 * out parent's link to it.  Finally go to the
-		 * beginning of the loop and try to free the parent
-		 * node.
-		 */
 		parent = rb_parent(n);
 		entry = rb_entry(n, struct ext4_system_zone, node);
 		kmem_cache_free(ext4_system_zone_cachep, entry);
@@ -215,11 +202,6 @@ void ext4_release_system_zone(struct super_block *sb)
 	EXT4_SB(sb)->system_blks = RB_ROOT;
 }
 
-/*
- * Returns 1 if the passed-in block region (start_blk,
- * start_blk+count) is valid; 0 if some part of the block region
- * overlaps with filesystem metadata blocks.
- */
 int ext4_data_block_valid(struct ext4_sb_info *sbi, ext4_fsblk_t start_blk,
 			  unsigned int count)
 {
@@ -244,5 +226,26 @@ int ext4_data_block_valid(struct ext4_sb_info *sbi, ext4_fsblk_t start_blk,
 		}
 	}
 	return 1;
+}
+
+int ext4_check_blockref(const char *function, unsigned int line,
+			struct inode *inode, __le32 *p, unsigned int max)
+{
+	struct ext4_super_block *es = EXT4_SB(inode->i_sb)->s_es;
+	__le32 *bref = p;
+	unsigned int blk;
+
+	while (bref < p+max) {
+		blk = le32_to_cpu(*bref++);
+		if (blk &&
+		    unlikely(!ext4_data_block_valid(EXT4_SB(inode->i_sb),
+						    blk, 1))) {
+			es->s_last_error_block = cpu_to_le64(blk);
+			ext4_error_inode(inode, function, line, blk,
+					 "invalid block");
+			return -EIO;
+		}
+	}
+	return 0;
 }
 

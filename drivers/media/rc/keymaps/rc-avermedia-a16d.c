@@ -11,6 +11,7 @@
  */
 
 #include <media/rc-map.h>
+#include <linux/module.h>
 
 static struct rc_map_table avermedia_a16d[] = {
 	{ 0x20, KEY_LIST},
@@ -53,7 +54,7 @@ static struct rc_map_list avermedia_a16d_map = {
 	.map = {
 		.scan    = avermedia_a16d,
 		.size    = ARRAY_SIZE(avermedia_a16d),
-		.rc_type = RC_TYPE_UNKNOWN,	/* Legacy IR type */
+		.rc_type = RC_TYPE_UNKNOWN,	
 		.name    = RC_MAP_AVERMEDIA_A16D,
 	}
 };

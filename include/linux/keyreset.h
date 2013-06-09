@@ -22,12 +22,7 @@
 struct keyreset_platform_data {
 	int (*reset_fn)(void);
 	int *keys_up;
-	int keys_down[]; /* 0 terminated */
+	int keys_down[]; 
 };
 
-#ifdef CONFIG_MSM_WATCHDOG
-extern int msm_watchdog_suspend(struct device *dev);
-extern int msm_watchdog_resume(struct device *dev);
-#endif
-
-#endif /* _LINUX_KEYRESET_H */
+#endif 

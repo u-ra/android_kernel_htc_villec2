@@ -1,48 +1,37 @@
-/*
- * Convert integer string representation to an integer.
- * If an integer doesn't fit into specified type, -E is returned.
- *
- * Integer starts with optional sign.
- * kstrtou*() functions do not accept sign "-".
- *
- * Radix 0 means autodetection: leading "0x" implies radix 16,
- * leading "0" implies radix 8, otherwise radix is 10.
- * Autodetection hints work after optional sign, but not before.
- *
- * If -E is returned, result is not touched.
- */
 #include <linux/ctype.h>
 #include <linux/errno.h>
 #include <linux/kernel.h>
 #include <linux/math64.h>
-#include <linux/module.h>
+#include <linux/export.h>
 #include <linux/types.h>
 #include <asm/uaccess.h>
+#include "kstrtox.h"
 
-static inline char _tolower(const char c)
+const char *_parse_integer_fixup_radix(const char *s, unsigned int *base)
 {
-	return c | 0x20;
-}
-
-static int _kstrtoull(const char *s, unsigned int base, unsigned long long *res)
-{
-	unsigned long long acc;
-	int ok;
-
-	if (base == 0) {
+	if (*base == 0) {
 		if (s[0] == '0') {
 			if (_tolower(s[1]) == 'x' && isxdigit(s[2]))
-				base = 16;
+				*base = 16;
 			else
-				base = 8;
+				*base = 8;
 		} else
-			base = 10;
+			*base = 10;
 	}
-	if (base == 16 && s[0] == '0' && _tolower(s[1]) == 'x')
+	if (*base == 16 && s[0] == '0' && _tolower(s[1]) == 'x')
 		s += 2;
+	return s;
+}
 
-	acc = 0;
-	ok = 0;
+unsigned int _parse_integer(const char *s, unsigned int base, unsigned long long *p)
+{
+	unsigned long long res;
+	unsigned int rv;
+	int overflow;
+
+	res = 0;
+	rv = 0;
+	overflow = 0;
 	while (*s) {
 		unsigned int val;
 
@@ -50,23 +39,43 @@ static int _kstrtoull(const char *s, unsigned int base, unsigned long long *res)
 			val = *s - '0';
 		else if ('a' <= _tolower(*s) && _tolower(*s) <= 'f')
 			val = _tolower(*s) - 'a' + 10;
-		else if (*s == '\n' && *(s + 1) == '\0')
-			break;
 		else
-			return -EINVAL;
+			break;
 
 		if (val >= base)
-			return -EINVAL;
-		if (acc > div_u64(ULLONG_MAX - val, base))
-			return -ERANGE;
-		acc = acc * base + val;
-		ok = 1;
-
+			break;
+		if (unlikely(res & (~0ull << 60))) {
+			if (res > div_u64(ULLONG_MAX - val, base))
+				overflow = 1;
+		}
+		res = res * base + val;
+		rv++;
 		s++;
 	}
-	if (!ok)
+	*p = res;
+	if (overflow)
+		rv |= KSTRTOX_OVERFLOW;
+	return rv;
+}
+
+static int _kstrtoull(const char *s, unsigned int base, unsigned long long *res)
+{
+	unsigned long long _res;
+	unsigned int rv;
+
+	s = _parse_integer_fixup_radix(s, &base);
+	rv = _parse_integer(s, base, &_res);
+	if (rv & KSTRTOX_OVERFLOW)
+		return -ERANGE;
+	rv &= ~KSTRTOX_OVERFLOW;
+	if (rv == 0)
 		return -EINVAL;
-	*res = acc;
+	s += rv;
+	if (*s == '\n')
+		s++;
+	if (*s)
+		return -EINVAL;
+	*res = _res;
 	return 0;
 }
 
@@ -102,7 +111,6 @@ int kstrtoll(const char *s, unsigned int base, long long *res)
 }
 EXPORT_SYMBOL(kstrtoll);
 
-/* Internal, do not use. */
 int _kstrtoul(const char *s, unsigned int base, unsigned long *res)
 {
 	unsigned long long tmp;
@@ -118,7 +126,6 @@ int _kstrtoul(const char *s, unsigned int base, unsigned long *res)
 }
 EXPORT_SYMBOL(_kstrtoul);
 
-/* Internal, do not use. */
 int _kstrtol(const char *s, unsigned int base, long *res)
 {
 	long long tmp;
@@ -227,7 +234,7 @@ EXPORT_SYMBOL(kstrtos8);
 #define kstrto_from_user(f, g, type)					\
 int f(const char __user *s, size_t count, unsigned int base, type *res)	\
 {									\
-	/* sign, base 2 representation, newline, terminator */		\
+			\
 	char buf[1 + sizeof(type) * 8 + 1 + 1];				\
 									\
 	count = min(count, sizeof(buf) - 1);				\

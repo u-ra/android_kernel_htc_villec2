@@ -1,7 +1,7 @@
 /* arch/arm/mach-msm/smd_debug.c
  *
  * Copyright (C) 2007 Google, Inc.
- * Copyright (c) 2009-2011, Code Aurora Forum. All rights reserved.
+ * Copyright (c) 2009-2012, Code Aurora Forum. All rights reserved.
  * Author: Brian Swetland <swetland@google.com>
  *
  * This software is licensed under the terms of the GNU General Public
@@ -18,6 +18,7 @@
 #include <linux/debugfs.h>
 #include <linux/list.h>
 #include <linux/ctype.h>
+#include <linux/jiffies.h>
 
 #include <mach/msm_iomap.h>
 
@@ -92,6 +93,61 @@ static int debug_f3(char *buf, int max)
 	}
 
 	return max;
+}
+
+static int debug_int_stats(char *buf, int max)
+{
+	int i = 0;
+	int subsys;
+	struct interrupt_stat *stats = interrupt_stats;
+	const char *subsys_name;
+
+	i += scnprintf(buf + i, max - i,
+		"   Subsystem    |     In    | Out (Hardcoded) |"
+		" Out (Configured) |\n");
+
+	for (subsys = 0; subsys < NUM_SMD_SUBSYSTEMS; ++subsys) {
+		subsys_name = smd_pid_to_subsystem(subsys);
+		if (subsys_name) {
+			i += scnprintf(buf + i, max - i,
+				"%-10s %4s | %9u |       %9u |        %9u |\n",
+				smd_pid_to_subsystem(subsys), "smd",
+				stats->smd_in_count,
+				stats->smd_out_hardcode_count,
+				stats->smd_out_config_count);
+
+			i += scnprintf(buf + i, max - i,
+				"%-10s %4s | %9u |       %9u |        %9u |\n",
+				smd_pid_to_subsystem(subsys), "smsm",
+				stats->smsm_in_count,
+				stats->smsm_out_hardcode_count,
+				stats->smsm_out_config_count);
+		}
+		++stats;
+	}
+
+	return i;
+}
+
+static int debug_int_stats_reset(char *buf, int max)
+{
+	int i = 0;
+	int subsys;
+	struct interrupt_stat *stats = interrupt_stats;
+
+	i += scnprintf(buf + i, max - i, "Resetting interrupt stats.\n");
+
+	for (subsys = 0; subsys < NUM_SMD_SUBSYSTEMS; ++subsys) {
+		stats->smd_in_count = 0;
+		stats->smd_out_hardcode_count = 0;
+		stats->smd_out_config_count = 0;
+		stats->smsm_in_count = 0;
+		stats->smsm_out_hardcode_count = 0;
+		stats->smsm_out_config_count = 0;
+		++stats;
+	}
+
+	return i;
 }
 
 static int debug_diag(char *buf, int max)
@@ -192,8 +248,9 @@ static int debug_read_diag_msg(char *buf, int max)
 }
 
 static int dump_ch(char *buf, int max, int n,
-		  struct smd_half_channel *s,
-		   struct smd_half_channel *r,
+		   void *half_ch_s,
+		   void *half_ch_r,
+		   struct smd_half_channel_access *half_ch_funcs,
 		   unsigned size)
 {
 	return scnprintf(
@@ -201,24 +258,28 @@ static int dump_ch(char *buf, int max, int n,
 		"ch%02d:"
 		" %8s(%04d/%04d) %c%c%c%c%c%c%c%c <->"
 		" %8s(%04d/%04d) %c%c%c%c%c%c%c%c : %5x\n", n,
-		chstate(s->state), s->tail, s->head,
-		s->fDSR ? 'D' : 'd',
-		s->fCTS ? 'C' : 'c',
-		s->fCD ? 'C' : 'c',
-		s->fRI ? 'I' : 'i',
-		s->fHEAD ? 'W' : 'w',
-		s->fTAIL ? 'R' : 'r',
-		s->fSTATE ? 'S' : 's',
-		s->fBLOCKREADINTR ? 'B' : 'b',
-		chstate(r->state), r->tail, r->head,
-		r->fDSR ? 'D' : 'd',
-		r->fCTS ? 'R' : 'r',
-		r->fCD ? 'C' : 'c',
-		r->fRI ? 'I' : 'i',
-		r->fHEAD ? 'W' : 'w',
-		r->fTAIL ? 'R' : 'r',
-		r->fSTATE ? 'S' : 's',
-		r->fBLOCKREADINTR ? 'B' : 'b',
+		chstate(half_ch_funcs->get_state(half_ch_s)),
+		half_ch_funcs->get_tail(half_ch_s),
+		half_ch_funcs->get_head(half_ch_s),
+		half_ch_funcs->get_fDSR(half_ch_s) ? 'D' : 'd',
+		half_ch_funcs->get_fCTS(half_ch_s) ? 'C' : 'c',
+		half_ch_funcs->get_fCD(half_ch_s) ? 'C' : 'c',
+		half_ch_funcs->get_fRI(half_ch_s) ? 'I' : 'i',
+		half_ch_funcs->get_fHEAD(half_ch_s) ? 'W' : 'w',
+		half_ch_funcs->get_fTAIL(half_ch_s) ? 'R' : 'r',
+		half_ch_funcs->get_fSTATE(half_ch_s) ? 'S' : 's',
+		half_ch_funcs->get_fBLOCKREADINTR(half_ch_s) ? 'B' : 'b',
+		chstate(half_ch_funcs->get_state(half_ch_r)),
+		half_ch_funcs->get_tail(half_ch_r),
+		half_ch_funcs->get_head(half_ch_r),
+		half_ch_funcs->get_fDSR(half_ch_r) ? 'D' : 'd',
+		half_ch_funcs->get_fCTS(half_ch_r) ? 'C' : 'c',
+		half_ch_funcs->get_fCD(half_ch_r) ? 'C' : 'c',
+		half_ch_funcs->get_fRI(half_ch_r) ? 'I' : 'i',
+		half_ch_funcs->get_fHEAD(half_ch_r) ? 'W' : 'w',
+		half_ch_funcs->get_fTAIL(half_ch_r) ? 'R' : 'r',
+		half_ch_funcs->get_fSTATE(half_ch_r) ? 'S' : 's',
+		half_ch_funcs->get_fBLOCKREADINTR(half_ch_r) ? 'B' : 'b',
 		size
 		);
 }
@@ -246,6 +307,7 @@ struct SMSM_CB_DATA {
 	uint32_t new_state;
 };
 static struct SMSM_CB_DATA smsm_cb_data;
+static struct completion smsm_cb_completion;
 
 static void smsm_state_cb(void *data, uint32_t old_state, uint32_t new_state)
 {
@@ -253,12 +315,23 @@ static void smsm_state_cb(void *data, uint32_t old_state, uint32_t new_state)
 	smsm_cb_data.old_state = old_state;
 	smsm_cb_data.new_state = new_state;
 	smsm_cb_data.data = data;
+	complete_all(&smsm_cb_completion);
 }
 
 #define UT_EQ_INT(a, b) \
 	if ((a) != (b)) { \
 		i += scnprintf(buf + i, max - i, \
 			"%s:%d " #a "(%d) != " #b "(%d)\n", \
+				__func__, __LINE__, \
+				a, b); \
+		break; \
+	} \
+	do {} while (0)
+
+#define UT_GT_INT(a, b) \
+	if ((a) <= (b)) { \
+		i += scnprintf(buf + i, max - i, \
+			"%s:%d " #a "(%d) > " #b "(%d)\n", \
 				__func__, __LINE__, \
 				a, b); \
 		break; \
@@ -280,7 +353,7 @@ static int debug_test_smsm(char *buf, int max)
 	int test_num = 0;
 	int ret;
 
-	/* Test case 1 - Register new callback for notification */
+	
 	do {
 		test_num++;
 		SMSM_CB_TEST_INIT();
@@ -288,36 +361,44 @@ static int debug_test_smsm(char *buf, int max)
 				smsm_state_cb, (void *)0x1234);
 		UT_EQ_INT(ret, 0);
 
-		/* de-assert SMSM_SMD_INIT to trigger state update */
+		
 		UT_EQ_INT(smsm_cb_data.cb_count, 0);
+		INIT_COMPLETION(smsm_cb_completion);
 		smsm_change_state(SMSM_APPS_STATE, SMSM_SMDINIT, 0x0);
+		UT_GT_INT((int)wait_for_completion_timeout(&smsm_cb_completion,
+					msecs_to_jiffies(20)), 0);
 
-		UT_EQ_INT(smsm_cb_data.cb_count, 1);
 		UT_EQ_INT(smsm_cb_data.cb_count, 1);
 		UT_EQ_INT(smsm_cb_data.old_state & SMSM_SMDINIT, SMSM_SMDINIT);
 		UT_EQ_INT(smsm_cb_data.new_state & SMSM_SMDINIT, 0x0);
 		UT_EQ_INT((int)smsm_cb_data.data, 0x1234);
 
-		/* re-assert SMSM_SMD_INIT to trigger state update */
+		
+		INIT_COMPLETION(smsm_cb_completion);
 		smsm_change_state(SMSM_APPS_STATE, 0x0, SMSM_SMDINIT);
+		UT_GT_INT((int)wait_for_completion_timeout(&smsm_cb_completion,
+					msecs_to_jiffies(20)), 0);
 		UT_EQ_INT(smsm_cb_data.cb_count, 2);
 		UT_EQ_INT(smsm_cb_data.old_state & SMSM_SMDINIT, 0x0);
 		UT_EQ_INT(smsm_cb_data.new_state & SMSM_SMDINIT, SMSM_SMDINIT);
 
-		/* deregister callback */
+		
 		ret = smsm_state_cb_deregister(SMSM_APPS_STATE, SMSM_SMDINIT,
 				smsm_state_cb, (void *)0x1234);
 		UT_EQ_INT(ret, 2);
 
-		/* make sure state change doesn't cause any more callbacks */
+		
+		INIT_COMPLETION(smsm_cb_completion);
 		smsm_change_state(SMSM_APPS_STATE, SMSM_SMDINIT, 0x0);
 		smsm_change_state(SMSM_APPS_STATE, 0x0, SMSM_SMDINIT);
+		UT_EQ_INT((int)wait_for_completion_timeout(&smsm_cb_completion,
+					msecs_to_jiffies(20)), 0);
 		UT_EQ_INT(smsm_cb_data.cb_count, 2);
 
 		i += scnprintf(buf + i, max - i, "Test %d - PASS\n", test_num);
 	} while (0);
 
-	/* Test case 2 - Update already registered callback */
+	
 	do {
 		test_num++;
 		SMSM_CB_TEST_INIT();
@@ -328,45 +409,69 @@ static int debug_test_smsm(char *buf, int max)
 				smsm_state_cb, (void *)0x1234);
 		UT_EQ_INT(ret, 1);
 
-		/* verify both callback bits work */
+		
+		INIT_COMPLETION(smsm_cb_completion);
 		UT_EQ_INT(smsm_cb_data.cb_count, 0);
 		smsm_change_state(SMSM_APPS_STATE, SMSM_SMDINIT, 0x0);
+		UT_GT_INT((int)wait_for_completion_timeout(&smsm_cb_completion,
+					msecs_to_jiffies(20)), 0);
 		UT_EQ_INT(smsm_cb_data.cb_count, 1);
+		INIT_COMPLETION(smsm_cb_completion);
 		smsm_change_state(SMSM_APPS_STATE, 0x0, SMSM_SMDINIT);
+		UT_GT_INT((int)wait_for_completion_timeout(&smsm_cb_completion,
+					msecs_to_jiffies(20)), 0);
 		UT_EQ_INT(smsm_cb_data.cb_count, 2);
 
+		INIT_COMPLETION(smsm_cb_completion);
 		smsm_change_state(SMSM_APPS_STATE, SMSM_INIT, 0x0);
+		UT_GT_INT((int)wait_for_completion_timeout(&smsm_cb_completion,
+					msecs_to_jiffies(20)), 0);
 		UT_EQ_INT(smsm_cb_data.cb_count, 3);
+		INIT_COMPLETION(smsm_cb_completion);
 		smsm_change_state(SMSM_APPS_STATE, 0x0, SMSM_INIT);
+		UT_GT_INT((int)wait_for_completion_timeout(&smsm_cb_completion,
+					msecs_to_jiffies(20)), 0);
 		UT_EQ_INT(smsm_cb_data.cb_count, 4);
 
-		/* deregister 1st callback */
+		
 		ret = smsm_state_cb_deregister(SMSM_APPS_STATE, SMSM_SMDINIT,
 				smsm_state_cb, (void *)0x1234);
 		UT_EQ_INT(ret, 1);
+		INIT_COMPLETION(smsm_cb_completion);
 		smsm_change_state(SMSM_APPS_STATE, SMSM_SMDINIT, 0x0);
 		smsm_change_state(SMSM_APPS_STATE, 0x0, SMSM_SMDINIT);
+		UT_EQ_INT((int)wait_for_completion_timeout(&smsm_cb_completion,
+					msecs_to_jiffies(20)), 0);
 		UT_EQ_INT(smsm_cb_data.cb_count, 4);
 
+		INIT_COMPLETION(smsm_cb_completion);
 		smsm_change_state(SMSM_APPS_STATE, SMSM_INIT, 0x0);
+		UT_GT_INT((int)wait_for_completion_timeout(&smsm_cb_completion,
+					msecs_to_jiffies(20)), 0);
 		UT_EQ_INT(smsm_cb_data.cb_count, 5);
+		INIT_COMPLETION(smsm_cb_completion);
 		smsm_change_state(SMSM_APPS_STATE, 0x0, SMSM_INIT);
+		UT_GT_INT((int)wait_for_completion_timeout(&smsm_cb_completion,
+					msecs_to_jiffies(20)), 0);
 		UT_EQ_INT(smsm_cb_data.cb_count, 6);
 
-		/* deregister 2nd callback */
+		
 		ret = smsm_state_cb_deregister(SMSM_APPS_STATE, SMSM_INIT,
 				smsm_state_cb, (void *)0x1234);
 		UT_EQ_INT(ret, 2);
 
-		/* make sure state change doesn't cause any more callbacks */
+		
+		INIT_COMPLETION(smsm_cb_completion);
 		smsm_change_state(SMSM_APPS_STATE, SMSM_INIT, 0x0);
 		smsm_change_state(SMSM_APPS_STATE, 0x0, SMSM_INIT);
+		UT_EQ_INT((int)wait_for_completion_timeout(&smsm_cb_completion,
+					msecs_to_jiffies(20)), 0);
 		UT_EQ_INT(smsm_cb_data.cb_count, 6);
 
 		i += scnprintf(buf + i, max - i, "Test %d - PASS\n", test_num);
 	} while (0);
 
-	/* Test case 3 - Two callback registrations with different data */
+	
 	do {
 		test_num++;
 		SMSM_CB_TEST_INIT();
@@ -377,20 +482,22 @@ static int debug_test_smsm(char *buf, int max)
 				smsm_state_cb, (void *)0x3456);
 		UT_EQ_INT(ret, 0);
 
-		/* verify both callbacks work */
+		
+		INIT_COMPLETION(smsm_cb_completion);
 		UT_EQ_INT(smsm_cb_data.cb_count, 0);
 		smsm_change_state(SMSM_APPS_STATE, SMSM_SMDINIT, 0x0);
+		UT_GT_INT((int)wait_for_completion_timeout(&smsm_cb_completion,
+					msecs_to_jiffies(20)), 0);
 		UT_EQ_INT(smsm_cb_data.cb_count, 1);
 		UT_EQ_INT((int)smsm_cb_data.data, 0x1234);
 
+		INIT_COMPLETION(smsm_cb_completion);
 		smsm_change_state(SMSM_APPS_STATE, SMSM_INIT, 0x0);
+		UT_GT_INT((int)wait_for_completion_timeout(&smsm_cb_completion,
+					msecs_to_jiffies(20)), 0);
 		UT_EQ_INT(smsm_cb_data.cb_count, 2);
 		UT_EQ_INT((int)smsm_cb_data.data, 0x3456);
 
-		/* cleanup and unregister
-		 * degregister in reverse to verify data field is
-		 * being used
-		 */
 		smsm_change_state(SMSM_APPS_STATE, 0x0, SMSM_SMDINIT);
 		smsm_change_state(SMSM_APPS_STATE, 0x0, SMSM_INIT);
 		ret = smsm_state_cb_deregister(SMSM_APPS_STATE,
@@ -431,35 +538,63 @@ static int debug_read_mem(char *buf, int max)
 	return i;
 }
 
-static int debug_read_ch_v1(char *buf, int max)
+#if (!defined(CONFIG_MSM_SMD_PKG4) && !defined(CONFIG_MSM_SMD_PKG3))
+static int debug_read_ch(char *buf, int max)
 {
 	void *shared;
 	int n, i = 0;
+	struct smd_alloc_elm *ch_tbl;
+	unsigned ch_type;
+	unsigned shared_size;
+
+	ch_tbl = smem_find(ID_CH_ALLOC_TBL, sizeof(*ch_tbl) * 64);
+	if (!ch_tbl)
+		goto fail;
 
 	for (n = 0; n < SMD_CHANNELS; n++) {
+		ch_type = SMD_CHANNEL_TYPE(ch_tbl[n].type);
+		if (is_word_access_ch(ch_type))
+			shared_size =
+				sizeof(struct smd_half_channel_word_access);
+		else
+			shared_size = sizeof(struct smd_half_channel);
 		shared = smem_find(ID_SMD_CHANNELS + n,
-				   2 * (sizeof(struct smd_half_channel) +
-					SMD_BUF_SIZE));
+				2 * shared_size + SMD_BUF_SIZE);
 
 		if (shared == 0)
 			continue;
 		i += dump_ch(buf + i, max - i, n, shared,
-			     (shared + sizeof(struct smd_half_channel) +
-			      SMD_BUF_SIZE), SMD_BUF_SIZE);
+			     (shared + shared_size +
+			     SMD_BUF_SIZE), get_half_ch_funcs(ch_type),
+			     SMD_BUF_SIZE);
 	}
 
+fail:
 	return i;
 }
-
-static int debug_read_ch_v2(char *buf, int max)
+#else
+static int debug_read_ch(char *buf, int max)
 {
 	void *shared, *buffer;
 	unsigned buffer_sz;
 	int n, i = 0;
+	struct smd_alloc_elm *ch_tbl;
+	unsigned ch_type;
+	unsigned shared_size;
+
+	ch_tbl = smem_find(ID_CH_ALLOC_TBL, sizeof(*ch_tbl) * 64);
+	if (!ch_tbl)
+		goto fail;
 
 	for (n = 0; n < SMD_CHANNELS; n++) {
-		shared = smem_find(ID_SMD_CHANNELS + n,
-				   2 * sizeof(struct smd_half_channel));
+		ch_type = SMD_CHANNEL_TYPE(ch_tbl[n].type);
+		if (is_word_access_ch(ch_type))
+			shared_size =
+				sizeof(struct smd_half_channel_word_access);
+		else
+			shared_size = sizeof(struct smd_half_channel);
+
+		shared = smem_find(ID_SMD_CHANNELS + n, 2 * shared_size);
 
 		if (shared == 0)
 			continue;
@@ -470,26 +605,15 @@ static int debug_read_ch_v2(char *buf, int max)
 			continue;
 
 		i += dump_ch(buf + i, max - i, n, shared,
-			     (shared + sizeof(struct smd_half_channel)),
+			     (shared + shared_size),
+			     get_half_ch_funcs(ch_type),
 			     buffer_sz / 2);
 	}
 
+fail:
 	return i;
 }
-
-static int debug_read_ch(char *buf, int max)
-{
-	uint32_t *smd_ver;
-
-	smd_ver = smem_alloc(SMEM_VERSION_SMD, 32 * sizeof(uint32_t));
-
-	if (smd_ver && (((smd_ver[VERSION_MODEM] >> 16) >= 1) ||
-			((smd_ver[VERSION_QDSP6] >> 16) >= 1) ||
-			((smd_ver[VERSION_DSPS] >> 16) >= 1)))
-		return debug_read_ch_v2(buf, max);
-	else
-		return debug_read_ch_v1(buf, max);
-}
+#endif
 
 static int debug_read_smem_version(char *buf, int max)
 {
@@ -507,7 +631,6 @@ static int debug_read_smem_version(char *buf, int max)
 	return i;
 }
 
-/* NNV: revist, it may not be smd version */
 static int debug_read_smd_version(char *buf, int max)
 {
 	uint32_t *smd_ver;
@@ -611,22 +734,21 @@ static ssize_t debug_read(struct file *file, char __user *buf,
 			  size_t count, loff_t *ppos)
 {
 	int (*fill)(char *buf, int max) = file->private_data;
-	int bsize = fill(debug_buffer, DEBUG_BUFMAX);
-	return simple_read_from_buffer(buf, count, ppos, debug_buffer, bsize);
-}
+	int bsize;
 
-static int debug_open(struct inode *inode, struct file *file)
-{
-	file->private_data = inode->i_private;
-	return 0;
+	if (*ppos != 0)
+		return 0;
+
+	bsize = fill(debug_buffer, DEBUG_BUFMAX);
+	return simple_read_from_buffer(buf, count, ppos, debug_buffer, bsize);
 }
 
 static const struct file_operations debug_ops = {
 	.read = debug_read,
-	.open = debug_open,
+	.open = simple_open,
 };
 
-static void debug_create(const char *name, mode_t mode,
+static void debug_create(const char *name, umode_t mode,
 			 struct dentry *dent,
 			 int (*fill)(char *buf, int max))
 {
@@ -650,8 +772,10 @@ static int __init smd_debugfs_init(void)
 	debug_create("modem_err_f3", 0444, dent, debug_modem_err_f3);
 	debug_create("print_diag", 0444, dent, debug_diag);
 	debug_create("print_f3", 0444, dent, debug_f3);
+	debug_create("int_stats", 0444, dent, debug_int_stats);
+	debug_create("int_stats_reset", 0444, dent, debug_int_stats_reset);
 
-	/* NNV: this is google only stuff */
+	
 	debug_create("build", 0444, dent, debug_read_build_id);
 
 	return 0;
@@ -670,6 +794,8 @@ static int __init smsm_debugfs_init(void)
 	debug_create("intr_mux", 0444, dent, debug_read_intr_mux);
 	debug_create("version", 0444, dent, debug_read_smem_version);
 	debug_create("smsm_test", 0444, dent, debug_test_smsm);
+
+	init_completion(&smsm_cb_completion);
 
 	return 0;
 }
@@ -700,9 +826,6 @@ struct tramp_gpio_smem {
 	uint32_t polarity[NUM_GPIO_INT_REGISTERS];
 };
 
-/*
- * Print debug information on shared memory sleep variables
- */
 void smsm_print_sleep_info(uint32_t sleep_delay, uint32_t sleep_limit,
 	uint32_t irq_mask, uint32_t wakeup_reason, uint32_t pending_irqs)
 {

@@ -1,8 +1,8 @@
 #define _LINUX_STRING_H_
 
-#include <linux/compiler.h>	/* for inline */
-#include <linux/types.h>	/* for size_t */
-#include <linux/stddef.h>	/* for NULL */
+#include <linux/compiler.h>	
+#include <linux/types.h>	
+#include <linux/stddef.h>	
 #include <linux/linkage.h>
 #include <asm/string.h>
 
@@ -11,11 +11,10 @@ extern unsigned long free_mem_end_ptr;
 extern void error(char *);
 
 #define STATIC static
-#define STATIC_RW_DATA	/* non-static please */
+#define STATIC_RW_DATA	
 
 #define ARCH_HAS_DECOMP_WDOG
 
-/* Diagnostic functions */
 #ifdef DEBUG
 #  define Assert(cond,msg) {if(!(cond)) error(msg);}
 #  define Trace(x) fprintf x
@@ -42,6 +41,12 @@ extern void error(char *);
 
 #ifdef CONFIG_KERNEL_LZMA
 #include "../../../../lib/decompress_unlzma.c"
+#endif
+
+#ifdef CONFIG_KERNEL_XZ
+#define memmove memmove
+#define memcpy memcpy
+#include "../../../../lib/decompress_unxz.c"
 #endif
 
 int do_decompress(u8 *input, int len, u8 *output, void (*error)(char *x))

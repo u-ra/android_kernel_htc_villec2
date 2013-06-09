@@ -1,4 +1,4 @@
-#include <linux/module.h>
+#include <linux/export.h>
 #include <linux/sched.h>
 #include <linux/fs.h>
 #include <linux/path.h>
@@ -18,43 +18,43 @@ static inline void path_put_longterm(struct path *path)
 	path_put(path);
 }
 
-/*
- * Replace the fs->{rootmnt,root} with {mnt,dentry}. Put the old values.
- * It can block.
- */
 void set_fs_root(struct fs_struct *fs, struct path *path)
 {
 	struct path old_root;
 
+	path_get_longterm(path);
 	spin_lock(&fs->lock);
 	write_seqcount_begin(&fs->seq);
 	old_root = fs->root;
 	fs->root = *path;
-	path_get_longterm(path);
 	write_seqcount_end(&fs->seq);
 	spin_unlock(&fs->lock);
 	if (old_root.dentry)
 		path_put_longterm(&old_root);
 }
 
-/*
- * Replace the fs->{pwdmnt,pwd} with {mnt,dentry}. Put the old values.
- * It can block.
- */
 void set_fs_pwd(struct fs_struct *fs, struct path *path)
 {
 	struct path old_pwd;
 
+	path_get_longterm(path);
 	spin_lock(&fs->lock);
 	write_seqcount_begin(&fs->seq);
 	old_pwd = fs->pwd;
 	fs->pwd = *path;
-	path_get_longterm(path);
 	write_seqcount_end(&fs->seq);
 	spin_unlock(&fs->lock);
 
 	if (old_pwd.dentry)
 		path_put_longterm(&old_pwd);
+}
+
+static inline int replace_path(struct path *p, const struct path *old, const struct path *new)
+{
+	if (likely(p->dentry != old->dentry || p->mnt != old->mnt))
+		return 0;
+	*p = *new;
+	return 1;
 }
 
 void chroot_fs_refs(struct path *old_root, struct path *new_root)
@@ -68,21 +68,16 @@ void chroot_fs_refs(struct path *old_root, struct path *new_root)
 		task_lock(p);
 		fs = p->fs;
 		if (fs) {
+			int hits = 0;
 			spin_lock(&fs->lock);
 			write_seqcount_begin(&fs->seq);
-			if (fs->root.dentry == old_root->dentry
-			    && fs->root.mnt == old_root->mnt) {
-				path_get_longterm(new_root);
-				fs->root = *new_root;
-				count++;
-			}
-			if (fs->pwd.dentry == old_root->dentry
-			    && fs->pwd.mnt == old_root->mnt) {
-				path_get_longterm(new_root);
-				fs->pwd = *new_root;
-				count++;
-			}
+			hits += replace_path(&fs->root, old_root, new_root);
+			hits += replace_path(&fs->pwd, old_root, new_root);
 			write_seqcount_end(&fs->seq);
+			while (hits--) {
+				count++;
+				path_get_longterm(new_root);
+			}
 			spin_unlock(&fs->lock);
 		}
 		task_unlock(p);
@@ -107,10 +102,8 @@ void exit_fs(struct task_struct *tsk)
 		int kill;
 		task_lock(tsk);
 		spin_lock(&fs->lock);
-		write_seqcount_begin(&fs->seq);
 		tsk->fs = NULL;
 		kill = !--fs->users;
-		write_seqcount_end(&fs->seq);
 		spin_unlock(&fs->lock);
 		task_unlock(tsk);
 		if (kill)
@@ -121,7 +114,7 @@ void exit_fs(struct task_struct *tsk)
 struct fs_struct *copy_fs_struct(struct fs_struct *old)
 {
 	struct fs_struct *fs = kmem_cache_alloc(fs_cachep, GFP_KERNEL);
-	/* We don't need to lock fs - think why ;-) */
+	
 	if (fs) {
 		fs->users = 1;
 		fs->in_exec = 0;
@@ -168,7 +161,6 @@ int current_umask(void)
 }
 EXPORT_SYMBOL(current_umask);
 
-/* to be mentioned only in INIT_TASK */
 struct fs_struct init_fs = {
 	.users		= 1,
 	.lock		= __SPIN_LOCK_UNLOCKED(init_fs.lock),

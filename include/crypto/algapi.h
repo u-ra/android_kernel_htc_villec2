@@ -15,6 +15,7 @@
 #include <linux/crypto.h>
 #include <linux/list.h>
 #include <linux/kernel.h>
+#include <linux/skbuff.h>
 
 struct module;
 struct rtattr;
@@ -26,6 +27,7 @@ struct crypto_type {
 	int (*init)(struct crypto_tfm *tfm, u32 type, u32 mask);
 	int (*init_tfm)(struct crypto_tfm *tfm);
 	void (*show)(struct seq_file *m, struct crypto_alg *alg);
+	int (*report)(struct sk_buff *skb, struct crypto_alg *alg);
 	struct crypto_alg *(*lookup)(const char *name, u32 type, u32 mask);
 
 	unsigned int type;
@@ -132,6 +134,7 @@ struct crypto_template *crypto_lookup_template(const char *name);
 
 int crypto_register_instance(struct crypto_template *tmpl,
 			     struct crypto_instance *inst);
+int crypto_unregister_instance(struct crypto_alg *alg);
 
 int crypto_init_spawn(struct crypto_spawn *spawn, struct crypto_alg *alg,
 		      struct crypto_instance *inst, u32 mask);
@@ -176,7 +179,6 @@ void *__crypto_dequeue_request(struct crypto_queue *queue, unsigned int offset);
 struct crypto_async_request *crypto_dequeue_request(struct crypto_queue *queue);
 int crypto_tfm_in_queue(struct crypto_queue *queue, struct crypto_tfm *tfm);
 
-/* These functions require the input/output to be aligned as u32. */
 void crypto_inc(u8 *a, unsigned int size);
 void crypto_xor(u8 *dst, const u8 *src, unsigned int size);
 
@@ -304,7 +306,6 @@ static inline void blkcipher_walk_init(struct blkcipher_walk *walk,
 	walk->in.sg = src;
 	walk->out.sg = dst;
 	walk->total = nbytes;
-	walk->flags = 0;
 }
 
 static inline void ablkcipher_walk_init(struct ablkcipher_walk *walk,
@@ -375,14 +376,10 @@ static inline struct crypto_alg *crypto_get_attr_alg(struct rtattr **tb,
 	return crypto_attr_alg(tb[1], type, mask);
 }
 
-/*
- * Returns CRYPTO_ALG_ASYNC if type/mask requires the use of sync algorithms.
- * Otherwise returns zero.
- */
 static inline int crypto_requires_sync(u32 type, u32 mask)
 {
 	return (type ^ CRYPTO_ALG_ASYNC) & mask & CRYPTO_ALG_ASYNC;
 }
 
-#endif	/* _CRYPTO_ALGAPI_H */
+#endif	
 

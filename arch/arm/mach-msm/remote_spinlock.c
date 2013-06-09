@@ -85,14 +85,6 @@ void _remote_spin_release_all(uint32_t pid)
 
 #endif
 
-/**
- * Release all spinlocks owned by @pid.
- *
- * This is only to be used for situations where the processor owning
- * spinlocks has crashed and the spinlocks must be released.
- *
- * @pid - processor ID of processor to release
- */
 static void remote_spin_release_all_locks(uint32_t pid, int count)
 {
 	int n;
@@ -120,14 +112,14 @@ remote_spinlock_dal_init(const char *chunk_name, _remote_spinlock_t *lock)
 
 	dal_smem_end = dal_smem_start + dal_smem_size;
 
-	/* Find first chunk header */
+	
 	cur_header = (struct dal_chunk_header *)
 			(((uint32_t)dal_smem_start + (4095)) & ~4095);
 	*lock = NULL;
 	while (cur_header->size != 0
 		&& ((uint32_t)(cur_header + 1) < (uint32_t)dal_smem_end)) {
 
-		/* Check if chunk name matches */
+		
 		if (!strncmp(cur_header->name, chunk_name,
 						DAL_CHUNK_NAME_LENGTH)) {
 			*lock = (_remote_spinlock_t)&cur_header->lock;
@@ -146,10 +138,10 @@ int _remote_spin_lock_init(remote_spinlock_id_t id, _remote_spinlock_t *lock)
 	BUG_ON(id == NULL);
 
 	if (id[0] == 'D' && id[1] == ':') {
-		/* DAL chunk name starts after "D:" */
+		
 		return remote_spinlock_dal_init(&id[2], lock);
 	} else if (id[0] == 'S' && id[1] == ':') {
-		/* Single-digit lock ID follows "S:" */
+		
 		BUG_ON(id[3] != '\0');
 
 		return remote_spinlock_init_address((((uint8_t)id[2])-'0'),

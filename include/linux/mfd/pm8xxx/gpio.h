@@ -11,15 +11,12 @@
  * GNU General Public License for more details.
  */
 
-/*
- * Qualcomm PMIC8XXX gpio driver header file
- *
- */
 
 #ifndef __PM8XXX_GPIO_H
 #define __PM8XXX_GPIO_H
 
 #include <linux/errno.h>
+#include <linux/seq_file.h>
 
 #define PM8XXX_GPIO_DEV_NAME	"pm8xxx-gpio"
 
@@ -32,17 +29,13 @@ struct pm8xxx_gpio_platform_data {
 	int				gpio_base;
 };
 
-/* GPIO parameters */
-/* direction */
 #define	PM_GPIO_DIR_OUT			0x01
 #define	PM_GPIO_DIR_IN			0x02
 #define	PM_GPIO_DIR_BOTH		(PM_GPIO_DIR_OUT | PM_GPIO_DIR_IN)
 
-/* output_buffer */
 #define	PM_GPIO_OUT_BUF_OPEN_DRAIN	1
 #define	PM_GPIO_OUT_BUF_CMOS		0
 
-/* pull */
 #define	PM_GPIO_PULL_UP_30		0
 #define	PM_GPIO_PULL_UP_1P5		1
 #define	PM_GPIO_PULL_UP_31P5		2
@@ -50,16 +43,14 @@ struct pm8xxx_gpio_platform_data {
 #define	PM_GPIO_PULL_DN			4
 #define	PM_GPIO_PULL_NO			5
 
-/* vin_sel: Voltage Input Select */
-#define	PM_GPIO_VIN_VPH			0 /* 3v ~ 4.4v */
-#define	PM_GPIO_VIN_BB			1 /* ~3.3v */
-#define	PM_GPIO_VIN_S4			2 /* 1.8v */
+#define	PM_GPIO_VIN_VPH			0 
+#define	PM_GPIO_VIN_BB			1 
+#define	PM_GPIO_VIN_S4			2 
 #define	PM_GPIO_VIN_L15			3
 #define	PM_GPIO_VIN_L4			4
 #define	PM_GPIO_VIN_L3			5
 #define	PM_GPIO_VIN_L17			6
 
-/* vin_sel: Voltage Input select on PM8058 */
 #define PM8058_GPIO_VIN_VPH		0
 #define PM8058_GPIO_VIN_BB		1
 #define PM8058_GPIO_VIN_S3		2
@@ -69,13 +60,28 @@ struct pm8xxx_gpio_platform_data {
 #define PM8058_GPIO_VIN_L5		6
 #define PM8058_GPIO_VIN_L2		7
 
-/* out_strength */
+#define PM8038_GPIO_VIN_VPH		0
+#define PM8038_GPIO_VIN_BB		1
+#define PM8038_GPIO_VIN_L11		2
+#define PM8038_GPIO_VIN_L15		3
+#define PM8038_GPIO_VIN_L4		4
+#define PM8038_GPIO_VIN_L3		5
+#define PM8038_GPIO_VIN_L17		6
+
+#define PM8018_GPIO_VIN_L4		0
+#define PM8018_GPIO_VIN_L14		1
+#define PM8018_GPIO_VIN_S3		2
+#define PM8018_GPIO_VIN_L6		3
+#define PM8018_GPIO_VIN_L2		4
+#define PM8018_GPIO_VIN_L5		5
+#define PM8018_GPIO_VIN_L8		6
+#define PM8018_GPIO_VIN_VPH		7
+
 #define	PM_GPIO_STRENGTH_NO		0
 #define	PM_GPIO_STRENGTH_HIGH		1
 #define	PM_GPIO_STRENGTH_MED		2
 #define	PM_GPIO_STRENGTH_LOW		3
 
-/* function */
 #define	PM_GPIO_FUNC_NORMAL		0
 #define	PM_GPIO_FUNC_PAIRED		1
 #define	PM_GPIO_FUNC_1			2
@@ -85,33 +91,6 @@ struct pm8xxx_gpio_platform_data {
 #define	PM_GPIO_DTEST3			6
 #define	PM_GPIO_DTEST4			7
 
-/**
- * struct pm_gpio - structure to specify gpio configurtion values
- * @direction:		indicates whether the gpio should be input, output, or
- *			both. Should be of the type PM_GPIO_DIR_*
- * @output_buffer:	indicates gpio should be configured as CMOS or open
- *			drain. Should be of the type PM_GPIO_OUT_BUF_*
- * @output_value:	The gpio output value of the gpio line - 0 or 1
- * @pull:		Indicates whether a pull up or pull down should be
- *			applied. If a pullup is required the current strength
- *			needs to be specified. Current values of 30uA, 1.5uA,
- *			31.5uA, 1.5uA with 30uA boost are supported. This value
- *			should be one of the PM_GPIO_PULL_*
- * @vin_sel:		specifies the voltage level when the output is set to 1.
- *			For an input gpio specifies the voltage level at which
- *			the input is interpreted as a logical 1.
- * @out_strength:	the amount of current supplied for an output gpio,
- *			should be of the type PM_GPIO_STRENGTH_*
- * @function:		choose alternate function for the gpio. Certain gpios
- *			can be paired (shorted) with each other. Some gpio pin
- *			can act as alternate functions. This parameter should
- *			be of type PM_GPIO_FUNC_*
- * @inv_int_pol:	Invert polarity before feeding the line to the interrupt
- *			module in pmic. This feature will almost be never used
- *			since the pm8xxx interrupt block can detect both edges
- *			and both levels.
- * @disable_pin:	Disable the gpio by configuring it as high impedance.
- */
 struct pm_gpio {
 	int		direction;
 	int		output_buffer;
@@ -125,13 +104,6 @@ struct pm_gpio {
 };
 
 #if defined(CONFIG_GPIO_PM8XXX) || defined(CONFIG_GPIO_PM8XXX_MODULE)
-/**
- * pm8xxx_gpio_config - configure a gpio controlled by a pm8xxx chip
- * @gpio: gpio number to configure
- * @param: configuration values
- *
- * RETURNS: an appropriate -ERRNO error value on error, or zero for success.
- */
 int pm8xxx_gpio_config(int gpio, struct pm_gpio *param);
 int pm8xxx_dump_gpios(struct seq_file *m, int curr_len, char *gpio_buffer);
 #else
@@ -142,7 +114,6 @@ static inline int pm8xxx_gpio_config(int gpio, struct pm_gpio *param)
 static inline int pm8xxx_dump_gpios(struct seq_file *m, int curr_len, char *gpio_buffer)
 {
 	return curr_len;
-
 }
 #endif
 

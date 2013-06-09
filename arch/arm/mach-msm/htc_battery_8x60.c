@@ -38,9 +38,6 @@
 #include <linux/suspend.h>
 #include <linux/earlysuspend.h>
 #include <mach/rpm.h>
-#ifdef CONFIG_FORCE_FAST_CHARGE
-#include <linux/fastchg.h>
-#endif
 
 #define BATT_SUSPEND_CHECK_TIME			3600
 #define BATT_SUSPEND_HIGHFREQ_CHECK_TIME	(300)
@@ -62,7 +59,6 @@ static struct kset *htc_batt_kset;
 struct early_suspend early_suspend;
 static int screen_state;
 
-/* To disable holding wakelock when AC in for suspend test */
 static int ac_suspend_flag;
 #endif
 static int htc_batt_mhl_dongle;
@@ -73,7 +69,7 @@ module_param_named(phone_call, htc_batt_phone_call,
 struct htc_battery_info {
 	int device_id;
 
-	/* lock to protect the battery info */
+	
 	struct mutex info_lock;
 
 	spinlock_t batt_lock;
@@ -136,7 +132,6 @@ static struct tps65200_chg_int_notifier tps_int_notifier = {
 };
 
 
-/* For touch panel, touch panel may loss wireless charger notification when system boot up */
 int htc_is_wireless_charger(void)
 {
 	if (htc_battery_initial)
@@ -213,10 +208,6 @@ static int batt_set_voltage_alarm_mode(int mode)
 
 
 	mutex_lock(&batt_set_alarm_lock);
-	/*if (battery_vol_alarm_mode != BATT_ALARM_DISABLE_MODE &&
-		mode != BATT_ALARM_DISABLE_MODE)
-		BATT_ERR("%s:Warning:set mode to %d from non-disable mode(%d)",
-			__func__, mode, battery_vol_alarm_mode); */
 	switch (mode) {
 		case BATT_ALARM_DISABLE_MODE:
 			rc = batt_clear_voltage_alarm();
@@ -270,7 +261,7 @@ static int battery_alarm_notifier_func(struct notifier_block *nfb,
 		BATT_LOG("%s: NORMAL_MODE batt alarm status = %u", __func__,
 			htc_batt_timer.batt_alarm_status);
 	}	else {
-		/* BATT_ALARM_DISABLE_MODE */
+		
 		BATT_ERR("%s:Warning: batt alarm triggerred in disable mode ", __func__);
 	}
 #else
@@ -283,23 +274,17 @@ static int battery_alarm_notifier_func(struct notifier_block *nfb,
 static void update_wake_lock(int status)
 {
 #ifdef CONFIG_HTC_BATT_ALARM
-	/* hold an wakelock when charger connected until disconnected
-		except for AC under test mode(ac_suspend_flag=1). */
 	if (status != CHARGER_BATTERY && !ac_suspend_flag)
 		wake_lock(&htc_batt_info.vbus_wake_lock);
 	else if (status == CHARGER_USB && ac_suspend_flag)
-		/* For suspend test, not hold wake lock when AC in */
+		
 		wake_lock(&htc_batt_info.vbus_wake_lock);
 	else
-		/* give userspace some time to see the uevent and update
-		   LED state or whatnot...*/
 		   wake_lock_timeout(&htc_batt_info.vbus_wake_lock, HZ * 5);
 #else
 	if (status == CHARGER_USB)
 		wake_lock(&htc_batt_info.vbus_wake_lock);
 	else
-		/* give userspace some time to see the uevent and update
-		   LED state or whatnot...*/
 		wake_lock_timeout(&htc_batt_info.vbus_wake_lock, HZ * 5);
 #endif
 }
@@ -308,6 +293,8 @@ static void cable_status_notifier_func(enum usb_connect_type online)
 {
 	char message[16];
 	char *envp[] = { message, NULL };
+
+	htc_batt_info.rep.batt_state = 1;
 
 	BATT_LOG("%s %d", __func__, online);
 
@@ -321,26 +308,12 @@ static void cable_status_notifier_func(enum usb_connect_type online)
 
 	switch (online) {
 	case CONNECT_TYPE_USB:
-#ifdef CONFIG_FORCE_FAST_CHARGE
-			/* If forced fast charge is enabled "always" or if no USB device detected, go AC */
-			if ((force_fast_charge == FAST_CHARGE_FORCE_AC) ||
-			    (force_fast_charge == FAST_CHARGE_FORCE_AC_IF_NO_USB &&
-					USB_peripheral_detected == USB_ACC_NOT_DETECTED        )) {
-					BATT_LOG("cable USB forced to AC");
-				htc_batt_info.rep.charging_source = CHARGER_AC;
-				radio_set_cable_status(CHARGER_AC);
-			} else {
-				BATT_LOG("cable USB not forced to AC");
-				htc_batt_info.rep.charging_source = CHARGER_USB;
-				radio_set_cable_status(CHARGER_USB);
-			}
-#else 
 		BATT_LOG("cable USB");
 		htc_batt_info.rep.charging_source = CHARGER_USB;
 		radio_set_cable_status(CHARGER_USB);
-#endif
 		break;
 	case CONNECT_TYPE_AC:
+	case CONNECT_TYPE_MHL_AC:
 		BATT_LOG("cable AC");
 		htc_batt_info.rep.charging_source = CHARGER_AC;
 		radio_set_cable_status(CHARGER_AC);
@@ -395,7 +368,7 @@ static int htc_battery_set_charging(int ctl)
 	return rc;
 }
 
-struct mutex context_event_handler_lock; /* synchroniz context_event_handler */
+struct mutex context_event_handler_lock; 
 static int htc_batt_context_event_handler(enum batt_context_event event)
 {
 
@@ -460,6 +433,12 @@ static void htc_batt_set_full_level(int percent)
 	return;
 }
 
+
+static int htc_battery_get_rt_attr(enum htc_batt_rt_attr attr, int *val)
+{
+	return 0;
+}
+
 static ssize_t htc_battery_show_batt_attr(struct device_attribute *attr,
 					char *buf)
 {
@@ -497,7 +476,7 @@ static int htc_batt_open(struct inode *inode, struct file *filp)
 	spin_unlock(&htc_batt_info.batt_lock);
 
 #ifdef CONFIG_ARCH_MSM8X60_LTE
-	/* Always disable cpu1 for off-mode charging. For 8x60_LTE projects only */
+	
 	if (board_mfg_mode() == 5)
 		cpu_down(1);
 #endif
@@ -521,8 +500,6 @@ static int htc_batt_get_battery_info(struct battery_info_reply *htc_batt_update)
 	htc_batt_update->batt_id = htc_batt_info.rep.batt_id;
 	htc_batt_update->batt_temp = htc_batt_info.rep.batt_temp;
 
-	/* report the net current injection into battery no
-	 * matter charging is enable or not (may negative) */
 	htc_batt_update->batt_current = htc_batt_info.rep.batt_current -
 			htc_batt_info.rep.batt_discharg_current;
 	htc_batt_update->batt_discharg_current =
@@ -568,11 +545,12 @@ u32 htc_batt_getmidvalue(int32_t *value)
 static int32_t htc_batt_get_battery_adc(void)
 {
 	int ret = 0;
+	u32 batt_vol = 0;
 	u32 vref = 0;
 	u32 battid_adc = 0;
 	struct battery_adc_reply adc;
 
-	/* Read battery voltage adc data. */
+	
 	ret = pm8058_htc_config_mpp_and_adc_read(
 			adc.adc_voltage,
 			ADC_REPLY_ARRAY_SIZE,
@@ -581,7 +559,7 @@ static int32_t htc_batt_get_battery_adc(void)
 			htc_batt_info.mpp_config->vol[PM_MPP_AIN_AMUX]);
 	if (ret)
 		goto get_adc_failed;
-	/* Read battery current adc data. */
+	
 	ret = pm8058_htc_config_mpp_and_adc_read(
 			adc.adc_current,
 			ADC_REPLY_ARRAY_SIZE,
@@ -590,7 +568,7 @@ static int32_t htc_batt_get_battery_adc(void)
 			htc_batt_info.mpp_config->curr[PM_MPP_AIN_AMUX]);
 	if (ret)
 		goto get_adc_failed;
-	/* Read battery temperature adc data. */
+	
 	ret = pm8058_htc_config_mpp_and_adc_read(
 			adc.adc_temperature,
 			ADC_REPLY_ARRAY_SIZE,
@@ -599,7 +577,7 @@ static int32_t htc_batt_get_battery_adc(void)
 			htc_batt_info.mpp_config->temp[PM_MPP_AIN_AMUX]);
 	if (ret)
 		goto get_adc_failed;
-	/* Read battery id adc data. */
+	
 	ret = pm8058_htc_config_mpp_and_adc_read(
 			adc.adc_battid,
 			ADC_REPLY_ARRAY_SIZE,
@@ -607,10 +585,11 @@ static int32_t htc_batt_get_battery_adc(void)
 			htc_batt_info.mpp_config->battid[XOADC_MPP],
 			htc_batt_info.mpp_config->battid[PM_MPP_AIN_AMUX]);
 
-	vref = htc_batt_getmidvalue(adc.adc_voltage);
+	batt_vol = htc_batt_getmidvalue(adc.adc_voltage);
+	vref =  htc_batt_getmidvalue(htc_batt_info.adc_vref);
 	battid_adc = htc_batt_getmidvalue(adc.adc_battid);
 
-	BATT_LOG("%s , vref:%d, battid_adc:%d, battid:%d\n", __func__,  vref, battid_adc, battid_adc * 1000 / vref);
+	BATT_LOG("%s , vref: %d, batt_vol:%d, battid_adc:%d, battid:%d\n", __func__,  vref, batt_vol, battid_adc, battid_adc * 1000 / vref);
 
 	if (ret)
 		goto get_adc_failed;
@@ -715,7 +694,7 @@ static long htc_batt_ioctl(struct file *filp,
 		}
 		BATT_LOG("do charger control = %u", charger_mode);
 
-		/* if MHL dongle exist, set boost mode instead of charger ic off */
+		
 		if((charger_mode == 0) && (htc_batt_mhl_dongle))
 		{
 			BATT_LOG("%s POWER_SUPPLY_ENABLE_INTERNAL", __func__);
@@ -751,7 +730,7 @@ static long htc_batt_ioctl(struct file *filp,
 			htc_batt_info.rep.level);
 
 #ifdef CONFIG_HTC_BATT_ALARM
-		/* Set a 3V voltage alarm when screen is on */
+		
 		if (screen_state == 1) {
 			if (battery_vol_alarm_mode != BATT_ALARM_CRITICAL_MODE)
 				batt_set_voltage_alarm_mode(BATT_ALARM_CRITICAL_MODE);
@@ -798,7 +777,7 @@ static long htc_batt_ioctl(struct file *filp,
 		break;
 	}
 	case HTC_BATT_IOCTL_SET_ALARM_TIMER_FLAG: {
-		/* alarm flag could be reset by cable. */
+		
 		unsigned int flag = htc_batt_timer.alarm_timer_flag;
 		if (copy_from_user(&flag, (void *)arg, sizeof(unsigned int))) {
 			BATT_ERR("Set timer type into alarm failed!");
@@ -810,7 +789,7 @@ static long htc_batt_ioctl(struct file *filp,
 		break;
 	}
 	default:
-		BATT_ERR("%s: no matched ioctl cmd:%d", __func__, cmd);
+		BATT_ERR("%s: no matched ioctl cmd:0x%x", __func__, cmd);
 		break;
 	}
 
@@ -819,11 +798,10 @@ static long htc_batt_ioctl(struct file *filp,
 	return ret;
 }
 
-/*  MBAT_IN interrupt handler	*/
 static void mbat_in_func(struct work_struct *work)
 {
 #if defined(CONFIG_MACH_RUBY) || defined(CONFIG_MACH_HOLIDAY) || defined(CONFIG_MACH_VIGOR)
-	/* add sw debounce */
+	
 	#define LTE_GPIO_MBAT_IN      61
 	if (gpio_get_value(LTE_GPIO_MBAT_IN) == 0) {
 		BATT_LOG("re-enable MBAT_IN irq!! due to false alarm\n");
@@ -848,7 +826,6 @@ static irqreturn_t mbat_int_handler(int irq, void *data)
 
 	return IRQ_HANDLED;
 }
-/*  MBAT_IN interrupt handler end   */
 
 const struct file_operations htc_batt_fops = {
 	.owner = THIS_MODULE,
@@ -878,7 +855,7 @@ int htc_batt_turn_off_mhl_dongle_5v(void)
 {
 	int ret = 0;
 
-	/* if MHL dongle exist, disable boost mode, means turn off charger ic */
+	
 	if ((htc_batt_mhl_dongle) && (htc_batt_info.rep.charging_source == CHARGER_BATTERY))
 	{
 		BATT_LOG("%s success", __func__);
@@ -948,7 +925,7 @@ static int htc_battery_prepare(struct device *dev)
 		htc_batt_phone_call,
 		next_alarm_sec);
 
-	/* check if alarm is over time or in 1 second near future */
+	
 	if (next_alarm_sec <= 1) {
 		BATT_LOG("%s:total_time_ms:%lu ms, trigger batt_work immediately."
 			"(htc_batt_phone_call=0x%x)", __func__,
@@ -960,11 +937,6 @@ static int htc_battery_prepare(struct device *dev)
 		wake_lock(&htc_batt_timer.battery_lock);
 		queue_work(htc_batt_timer.batt_wq, &htc_batt_timer.batt_work);
 
-		/* interval = ktime_set(check_time, 0);
-		next_alarm = ktime_add(alarm_get_elapsed_realtime(), interval);
-		alarm_start_range(&htc_batt_timer.batt_check_wakeup_alarm,
-					next_alarm, ktime_add(next_alarm, slack));
-		*/
 		return -EBUSY;
 	}
 
@@ -1025,10 +997,6 @@ static void htc_battery_complete(struct device *dev)
 		htc_batt_phone_call);
 
 
-	/*
-	 * When kernel resumes, battery driver should check total time to
-	 * decide if do battery information update or just ignore.
-	 */
 	if (htc_batt_timer.total_time_ms >= check_time) {
 		BATT_LOG("%s total_time_ms:%lu ms, check_time:%ld,  trigger batt_work while resume."
 			"(htc_batt_phone_call=%d)",
@@ -1080,8 +1048,8 @@ static int htc_battery_probe(struct platform_device *pdev)
 		return -ENOMEM;
 	}
 
+	memset(htc_battery_core_ptr, 0, sizeof(struct htc_battery_core));
 	INIT_DELAYED_WORK(&mbat_in_struct, mbat_in_func);
-
 
 	if (pdata->gpio_mbat_in_trigger_level == MBAT_IN_HIGH_TRIGGER)
 		rc = request_irq(pdata->gpio_mbat_in,
@@ -1096,6 +1064,7 @@ static int htc_battery_probe(struct platform_device *pdev)
 	else
 		set_irq_wake(pdata->gpio_mbat_in, 1);
 
+	htc_battery_core_ptr->func_get_batt_rt_attr = htc_battery_get_rt_attr;
 	htc_battery_core_ptr->func_show_batt_attr = htc_battery_show_batt_attr;
 	htc_battery_core_ptr->func_show_cc_attr = htc_battery_show_cc_attr;
 	htc_battery_core_ptr->func_get_battery_info = htc_batt_get_battery_info;
@@ -1229,7 +1198,7 @@ static int __init htc_battery_init(void)
 	cable_detect_register_notifier(&cable_status_notifier);
 	platform_driver_register(&htc_battery_driver);
 
-	/* init battery parameters. */
+	
 	htc_batt_info.rep.batt_vol = 3300;
 	htc_batt_info.rep.batt_id = 1;
 	htc_batt_info.rep.batt_temp = 300;

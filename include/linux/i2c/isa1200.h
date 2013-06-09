@@ -3,7 +3,7 @@
  *
  *  Copyright (C) 2009 Samsung Electronics
  *  Kyungmin Park <kyungmin.park@samsung.com>
- *  Copyright (c) 2010-2011, Code Aurora Forum. All rights reserved.
+ *  Copyright (c) 2010-2012, Code Aurora Forum. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 as
@@ -32,29 +32,31 @@ enum mode_control {
 };
 
 union pwm_div_freq {
-	unsigned int pwm_div; /* PWM gen mode */
-	unsigned int pwm_freq; /* PWM input mode */
+	unsigned int pwm_div; 
+	unsigned int pwm_freq; 
 };
 
 struct isa1200_platform_data {
 	const char *name;
-	unsigned int pwm_ch_id; /* pwm channel id */
+	unsigned int pwm_ch_id; 
 	unsigned int max_timeout;
 	unsigned int hap_en_gpio;
 	unsigned int hap_len_gpio;
-	bool overdrive_high; /* high/low overdrive */
-	bool overdrive_en; /* enable/disable overdrive */
-	enum mode_control mode_ctrl; /* input/generation/wave */
+	bool overdrive_high; 
+	bool overdrive_en; 
+	enum mode_control mode_ctrl; 
 	union pwm_div_freq pwm_fd;
-	bool smart_en; /* smart mode enable/disable */
+	bool smart_en; 
 	bool is_erm;
 	bool ext_clk_en;
+	bool need_pwm_clk;
 	unsigned int chip_en;
 	unsigned int duty;
 	struct isa1200_regulator *regulator_info;
 	u8 num_regulators;
 	int (*power_on)(int on);
 	int (*dev_setup)(bool on);
+	int (*clk_enable)(bool on);
 };
 
-#endif /* __LINUX_ISA1200_H */
+#endif 

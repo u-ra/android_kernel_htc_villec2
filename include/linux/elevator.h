@@ -5,6 +5,8 @@
 
 #ifdef CONFIG_BLOCK
 
+struct io_cq;
+
 typedef int (elevator_merge_fn) (struct request_queue *, struct request **,
 				 struct bio *);
 
@@ -24,6 +26,8 @@ typedef struct request *(elevator_request_list_fn) (struct request_queue *, stru
 typedef void (elevator_completed_req_fn) (struct request_queue *, struct request *);
 typedef int (elevator_may_queue_fn) (struct request_queue *, int);
 
+typedef void (elevator_init_icq_fn) (struct io_cq *);
+typedef void (elevator_exit_icq_fn) (struct io_cq *);
 typedef int (elevator_set_req_fn) (struct request_queue *, struct request *, gfp_t);
 typedef void (elevator_put_req_fn) (struct request *);
 typedef void (elevator_activate_req_fn) (struct request_queue *, struct request *);
@@ -50,6 +54,9 @@ struct elevator_ops
 	elevator_request_list_fn *elevator_former_req_fn;
 	elevator_request_list_fn *elevator_latter_req_fn;
 
+	elevator_init_icq_fn *elevator_init_icq_fn;	
+	elevator_exit_icq_fn *elevator_exit_icq_fn;	
+
 	elevator_set_req_fn *elevator_set_req_fn;
 	elevator_put_req_fn *elevator_put_req_fn;
 
@@ -57,7 +64,6 @@ struct elevator_ops
 
 	elevator_init_fn *elevator_init_fn;
 	elevator_exit_fn *elevator_exit_fn;
-	void (*trim)(struct io_context *);
 };
 
 #define ELV_NAME_MAX	(16)
@@ -68,41 +74,39 @@ struct elv_fs_entry {
 	ssize_t (*store)(struct elevator_queue *, const char *, size_t);
 };
 
-/*
- * identifies an elevator type, such as AS or deadline
- */
 struct elevator_type
 {
-	struct list_head list;
+	
+	struct kmem_cache *icq_cache;
+
+	
 	struct elevator_ops ops;
+	size_t icq_size;	
+	size_t icq_align;	
 	struct elv_fs_entry *elevator_attrs;
 	char elevator_name[ELV_NAME_MAX];
 	struct module *elevator_owner;
+
+	
+	char icq_cache_name[ELV_NAME_MAX + 5];	
+	struct list_head list;
 };
 
-/*
- * each queue has an elevator_queue associated with it
- */
 struct elevator_queue
 {
-	struct elevator_ops *ops;
+	struct elevator_type *type;
 	void *elevator_data;
 	struct kobject kobj;
-	struct elevator_type *elevator_type;
 	struct mutex sysfs_lock;
 	struct hlist_head *hash;
 	unsigned int registered:1;
 };
 
-/*
- * block elevator interface
- */
 extern void elv_dispatch_sort(struct request_queue *, struct request *);
 extern void elv_dispatch_add_tail(struct request_queue *, struct request *);
 extern void elv_add_request(struct request_queue *, struct request *, int);
 extern void __elv_add_request(struct request_queue *, struct request *, int);
 extern int elv_merge(struct request_queue *, struct request **, struct bio *);
-extern int elv_try_merge(struct request *, struct bio *);
 extern void elv_merge_requests(struct request_queue *, struct request *,
 			       struct request *);
 extern void elv_merged_request(struct request_queue *, struct request *, int);
@@ -120,46 +124,28 @@ extern int elv_set_request(struct request_queue *, struct request *, gfp_t);
 extern void elv_put_request(struct request_queue *, struct request *);
 extern void elv_drain_elevator(struct request_queue *);
 
-/*
- * io scheduler registration
- */
-extern void elv_register(struct elevator_type *);
+extern int elv_register(struct elevator_type *);
 extern void elv_unregister(struct elevator_type *);
 
-/*
- * io scheduler sysfs switching
- */
 extern ssize_t elv_iosched_show(struct request_queue *, char *);
 extern ssize_t elv_iosched_store(struct request_queue *, const char *, size_t);
 
 extern int elevator_init(struct request_queue *, char *);
 extern void elevator_exit(struct elevator_queue *);
 extern int elevator_change(struct request_queue *, const char *);
-extern int elv_rq_merge_ok(struct request *, struct bio *);
+extern bool elv_rq_merge_ok(struct request *, struct bio *);
 
-/*
- * Helper functions.
- */
 extern struct request *elv_rb_former_request(struct request_queue *, struct request *);
 extern struct request *elv_rb_latter_request(struct request_queue *, struct request *);
 
-/*
- * rb support functions.
- */
-extern struct request *elv_rb_add(struct rb_root *, struct request *);
+extern void elv_rb_add(struct rb_root *, struct request *);
 extern void elv_rb_del(struct rb_root *, struct request *);
 extern struct request *elv_rb_find(struct rb_root *, sector_t);
 
-/*
- * Return values from elevator merger
- */
 #define ELEVATOR_NO_MERGE	0
 #define ELEVATOR_FRONT_MERGE	1
 #define ELEVATOR_BACK_MERGE	2
 
-/*
- * Insertion selection
- */
 #define ELEVATOR_INSERT_FRONT	1
 #define ELEVATOR_INSERT_BACK	2
 #define ELEVATOR_INSERT_SORT	3
@@ -167,9 +153,6 @@ extern struct request *elv_rb_find(struct rb_root *, sector_t);
 #define ELEVATOR_INSERT_FLUSH	5
 #define ELEVATOR_INSERT_SORT_MERGE	6
 
-/*
- * return values from elevator_may_queue_fn
- */
 enum {
 	ELV_MQUEUE_MAY,
 	ELV_MQUEUE_NO,
@@ -179,10 +162,6 @@ enum {
 #define rq_end_sector(rq)	(blk_rq_pos(rq) + blk_rq_sectors(rq))
 #define rb_entry_rq(node)	rb_entry((node), struct request, rb_node)
 
-/*
- * Hack to reuse the csd.list list_head as the fifo time holder while
- * the request is in the io scheduler. Saves an unsigned long in rq.
- */
 #define rq_fifo_time(rq)	((unsigned long) (rq)->csd.list.next)
 #define rq_set_fifo_time(rq,exp)	((rq)->csd.list.next = (void *) (exp))
 #define rq_entry_fifo(ptr)	list_entry((ptr), struct request, queuelist)
@@ -191,22 +170,5 @@ enum {
 	INIT_LIST_HEAD(&(rq)->csd.list);	\
 	} while (0)
 
-/*
- * io context count accounting
- */
-#define elv_ioc_count_mod(name, __val) this_cpu_add(name, __val)
-#define elv_ioc_count_inc(name)	this_cpu_inc(name)
-#define elv_ioc_count_dec(name)	this_cpu_dec(name)
-
-#define elv_ioc_count_read(name)				\
-({								\
-	unsigned long __val = 0;				\
-	int __cpu;						\
-	smp_wmb();						\
-	for_each_possible_cpu(__cpu)				\
-		__val += per_cpu(name, __cpu);			\
-	__val;							\
-})
-
-#endif /* CONFIG_BLOCK */
+#endif 
 #endif

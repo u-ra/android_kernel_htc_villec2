@@ -27,11 +27,8 @@
 #include <asm/uaccess.h>
 
 #include "idle_stats.h"
-#include "cpuidle.h"
+#include <mach/cpuidle.h>
 
-/******************************************************************************
- * Debug Definitions
- *****************************************************************************/
 
 enum {
 	MSM_IDLE_STATS_DEBUG_API = BIT(0),
@@ -44,9 +41,6 @@ module_param_named(
 	debug_mask, msm_idle_stats_debug_mask, int, S_IRUGO | S_IWUSR | S_IWGRP
 );
 
-/******************************************************************************
- * Driver Definitions
- *****************************************************************************/
 
 #define MSM_IDLE_STATS_DRIVER_NAME "msm_idle_stats"
 
@@ -54,9 +48,6 @@ static dev_t msm_idle_stats_dev_nr;
 static struct cdev msm_idle_stats_cdev;
 static struct class *msm_idle_stats_class;
 
-/******************************************************************************
- * Device Definitions
- *****************************************************************************/
 
 struct msm_idle_stats_device {
 	unsigned int cpu;
@@ -74,9 +65,6 @@ struct msm_idle_stats_device {
 static DEFINE_SPINLOCK(msm_idle_stats_devs_lock);
 static DEFINE_PER_CPU(struct msm_idle_stats_device *, msm_idle_stats_devs);
 
-/******************************************************************************
- *
- *****************************************************************************/
 
 static inline int64_t msm_idle_stats_bound_interval(int64_t interval)
 {
@@ -261,21 +249,11 @@ static int msm_idle_stats_collect(struct file *filp,
 		goto collect_unlock_exit;
 	}
 
-	/*
-	 * When collection_timer == 0, stop collecting at the next
-	 * post idle.
-	 */
 	stats_dev->collection_expiration =
 		ktime_to_us(ktime_get()) + stats->collection_timer;
 
-	/*
-	 * Enable collection before starting any timer.
-	 */
 	atomic_set(&stats_dev->collecting, 1);
 
-	/*
-	 * When busy_timer == 0, do not set any busy timer.
-	 */
 	if (stats->busy_timer > 0) {
 		rc = hrtimer_start(&stats_dev->timer,
 			ktime_set(0, stats->busy_timer * 1000),
@@ -345,9 +323,6 @@ static int msm_idle_stats_open(struct inode *inode, struct file *filp)
 
 	filp->private_data = stats_dev;
 
-	/*
-	 * Make sure only one device exists per cpu.
-	 */
 	spin_lock(&msm_idle_stats_devs_lock);
 	if (per_cpu(msm_idle_stats_devs, stats_dev->cpu)) {
 		spin_unlock(&msm_idle_stats_devs_lock);
@@ -432,9 +407,6 @@ static long msm_idle_stats_ioctl(struct file *filp, unsigned int cmd,
 	return rc;
 }
 
-/******************************************************************************
- *
- *****************************************************************************/
 
 static const struct file_operations msm_idle_stats_fops = {
 	.owner   = THIS_MODULE,
@@ -485,10 +457,6 @@ static int __init msm_idle_stats_init(void)
 	cdev_init(&msm_idle_stats_cdev, &msm_idle_stats_fops);
 	msm_idle_stats_cdev.owner = THIS_MODULE;
 
-	/*
-	 * Call cdev_add() last, after everything else is initialized and
-	 * the driver is ready to accept system calls.
-	 */
 	rc = cdev_add(&msm_idle_stats_cdev, msm_idle_stats_dev_nr, nr_cpus);
 	if (rc) {
 		pr_err("%s: failed to register char device, rc %d\n",

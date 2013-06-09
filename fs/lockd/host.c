@@ -17,6 +17,8 @@
 #include <linux/lockd/lockd.h>
 #include <linux/mutex.h>
 
+#include <linux/sunrpc/svc_xprt.h>
+
 #include <net/ipv6.h>
 
 #define NLMDBG_FACILITY		NLMDBG_HOSTCACHE
@@ -46,19 +48,17 @@ static DEFINE_MUTEX(nlm_host_mutex);
 static void			nlm_gc_hosts(void);
 
 struct nlm_lookup_host_info {
-	const int		server;		/* search for server|client */
-	const struct sockaddr	*sap;		/* address to search for */
-	const size_t		salen;		/* it's length */
-	const unsigned short	protocol;	/* transport to search for*/
-	const u32		version;	/* NLM version to search for */
-	const char		*hostname;	/* remote's hostname */
-	const size_t		hostname_len;	/* it's length */
-	const int		noresvport;	/* use non-priv port */
+	const int		server;		
+	const struct sockaddr	*sap;		
+	const size_t		salen;		
+	const unsigned short	protocol;	
+	const u32		version;	
+	const char		*hostname;	
+	const size_t		hostname_len;	
+	const int		noresvport;	
+	struct net		*net;		
 };
 
-/*
- * Hash function must work well on big- and little-endian platforms
- */
 static unsigned int __nlm_hash32(const __be32 n)
 {
 	unsigned int hash = (__force u32)n ^ ((__force u32)n >> 16);
@@ -98,9 +98,6 @@ static unsigned int nlm_hash_address(const struct sockaddr *sap)
 	return hash & (NLM_HOST_NRHASH - 1);
 }
 
-/*
- * Allocate and initialize an nlm_host.  Common to both client and server.
- */
 static struct nlm_host *nlm_alloc_host(struct nlm_lookup_host_info *ni,
 				       struct nsm_handle *nsm)
 {
@@ -155,16 +152,12 @@ static struct nlm_host *nlm_alloc_host(struct nlm_lookup_host_info *ni,
 	INIT_LIST_HEAD(&host->h_reclaim);
 	host->h_nsmhandle  = nsm;
 	host->h_addrbuf    = nsm->sm_addrbuf;
+	host->net	   = ni->net;
 
 out:
 	return host;
 }
 
-/*
- * Destroy an nlm_host and free associated resources
- *
- * Caller must hold nlm_host_mutex.
- */
 static void nlm_destroy_host_locked(struct nlm_host *host)
 {
 	struct rpc_clnt	*clnt;
@@ -187,26 +180,13 @@ static void nlm_destroy_host_locked(struct nlm_host *host)
 	nrhosts--;
 }
 
-/**
- * nlmclnt_lookup_host - Find an NLM host handle matching a remote server
- * @sap: network address of server
- * @salen: length of server address
- * @protocol: transport protocol to use
- * @version: NLM protocol version
- * @hostname: '\0'-terminated hostname of server
- * @noresvport: 1 if non-privileged port should be used
- *
- * Returns an nlm_host structure that matches the passed-in
- * [server address, transport protocol, NLM version, server hostname].
- * If one doesn't already exist in the host cache, a new handle is
- * created and returned.
- */
 struct nlm_host *nlmclnt_lookup_host(const struct sockaddr *sap,
 				     const size_t salen,
 				     const unsigned short protocol,
 				     const u32 version,
 				     const char *hostname,
-				     int noresvport)
+				     int noresvport,
+				     struct net *net)
 {
 	struct nlm_lookup_host_info ni = {
 		.server		= 0,
@@ -217,6 +197,7 @@ struct nlm_host *nlmclnt_lookup_host(const struct sockaddr *sap,
 		.hostname	= hostname,
 		.hostname_len	= strlen(hostname),
 		.noresvport	= noresvport,
+		.net		= net,
 	};
 	struct hlist_head *chain;
 	struct hlist_node *pos;
@@ -231,10 +212,12 @@ struct nlm_host *nlmclnt_lookup_host(const struct sockaddr *sap,
 
 	chain = &nlm_client_hosts[nlm_hash_address(sap)];
 	hlist_for_each_entry(host, pos, chain, h_hash) {
+		if (host->net != net)
+			continue;
 		if (!rpc_cmp_addr(nlm_addr(host), sap))
 			continue;
 
-		/* Same address. Share an NSM handle if we already have one */
+		
 		if (nsm == NULL)
 			nsm = host->h_nsmhandle;
 
@@ -264,11 +247,6 @@ out:
 	return host;
 }
 
-/**
- * nlmclnt_release_host - release client nlm_host
- * @host: nlm_host to release
- *
- */
 void nlmclnt_release_host(struct nlm_host *host)
 {
 	if (host == NULL)
@@ -290,24 +268,6 @@ void nlmclnt_release_host(struct nlm_host *host)
 	}
 }
 
-/**
- * nlmsvc_lookup_host - Find an NLM host handle matching a remote client
- * @rqstp: incoming NLM request
- * @hostname: name of client host
- * @hostname_len: length of client hostname
- *
- * Returns an nlm_host structure that matches the [client address,
- * transport protocol, NLM version, client hostname] of the passed-in
- * NLM request.  If one doesn't already exist in the host cache, a
- * new handle is created and returned.
- *
- * Before possibly creating a new nlm_host, construct a sockaddr
- * for a specific source address in case the local system has
- * multiple network addresses.  The family of the address in
- * rq_daddr is guaranteed to be the same as the family of the
- * address in rq_addr, so it's safe to use the same family for
- * the source address.
- */
 struct nlm_host *nlmsvc_lookup_host(const struct svc_rqst *rqstp,
 				    const char *hostname,
 				    const size_t hostname_len)
@@ -316,14 +276,9 @@ struct nlm_host *nlmsvc_lookup_host(const struct svc_rqst *rqstp,
 	struct hlist_node *pos;
 	struct nlm_host	*host = NULL;
 	struct nsm_handle *nsm = NULL;
-	struct sockaddr_in sin = {
-		.sin_family	= AF_INET,
-	};
-	struct sockaddr_in6 sin6 = {
-		.sin6_family	= AF_INET6,
-	};
-	struct sockaddr *src_sap;
-	size_t src_len = rqstp->rq_addrlen;
+	struct sockaddr *src_sap = svc_daddr(rqstp);
+	size_t src_len = rqstp->rq_daddrlen;
+	struct net *net = rqstp->rq_xprt->xpt_net;
 	struct nlm_lookup_host_info ni = {
 		.server		= 1,
 		.sap		= svc_addr(rqstp),
@@ -332,6 +287,7 @@ struct nlm_host *nlmsvc_lookup_host(const struct svc_rqst *rqstp,
 		.version	= rqstp->rq_vers,
 		.hostname	= hostname,
 		.hostname_len	= hostname_len,
+		.net		= net,
 	};
 
 	dprintk("lockd: %s(host='%*s', vers=%u, proto=%s)\n", __func__,
@@ -340,30 +296,17 @@ struct nlm_host *nlmsvc_lookup_host(const struct svc_rqst *rqstp,
 
 	mutex_lock(&nlm_host_mutex);
 
-	switch (ni.sap->sa_family) {
-	case AF_INET:
-		sin.sin_addr.s_addr = rqstp->rq_daddr.addr.s_addr;
-		src_sap = (struct sockaddr *)&sin;
-		break;
-	case AF_INET6:
-		ipv6_addr_copy(&sin6.sin6_addr, &rqstp->rq_daddr.addr6);
-		src_sap = (struct sockaddr *)&sin6;
-		break;
-	default:
-		dprintk("lockd: %s failed; unrecognized address family\n",
-			__func__);
-		goto out;
-	}
-
 	if (time_after_eq(jiffies, next_gc))
 		nlm_gc_hosts();
 
 	chain = &nlm_server_hosts[nlm_hash_address(ni.sap)];
 	hlist_for_each_entry(host, pos, chain, h_hash) {
+		if (host->net != net)
+			continue;
 		if (!rpc_cmp_addr(nlm_addr(host), ni.sap))
 			continue;
 
-		/* Same address. Share an NSM handle if we already have one */
+		
 		if (nsm == NULL)
 			nsm = host->h_nsmhandle;
 
@@ -374,7 +317,7 @@ struct nlm_host *nlmsvc_lookup_host(const struct svc_rqst *rqstp,
 		if (!rpc_cmp_addr(nlm_srcaddr(host), src_sap))
 			continue;
 
-		/* Move to head of hash chain. */
+		
 		hlist_del(&host->h_hash);
 		hlist_add_head(&host->h_hash, chain);
 
@@ -401,12 +344,6 @@ out:
 	return host;
 }
 
-/**
- * nlmsvc_release_host - release server nlm_host
- * @host: nlm_host to release
- *
- * Host is destroyed later in nlm_gc_host().
- */
 void nlmsvc_release_host(struct nlm_host *host)
 {
 	if (host == NULL)
@@ -419,9 +356,6 @@ void nlmsvc_release_host(struct nlm_host *host)
 	atomic_dec(&host->h_count);
 }
 
-/*
- * Create the NLM RPC client for an NLM peer
- */
 struct rpc_clnt *
 nlm_bind_host(struct nlm_host *host)
 {
@@ -430,12 +364,9 @@ nlm_bind_host(struct nlm_host *host)
 	dprintk("lockd: nlm_bind_host %s (%s)\n",
 			host->h_name, host->h_addrbuf);
 
-	/* Lock host handle */
+	
 	mutex_lock(&host->h_mutex);
 
-	/* If we've already created an RPC client, check whether
-	 * RPC rebind is required
-	 */
 	if ((clnt = host->h_rpcclnt) != NULL) {
 		if (time_after_eq(jiffies, host->h_nextrebind)) {
 			rpc_force_rebind(clnt);
@@ -452,7 +383,7 @@ nlm_bind_host(struct nlm_host *host)
 			.to_retries	= 5U,
 		};
 		struct rpc_create_args args = {
-			.net		= &init_net,
+			.net		= host->net,
 			.protocol	= host->h_proto,
 			.address	= nlm_addr(host),
 			.addrsize	= host->h_addrlen,
@@ -465,11 +396,6 @@ nlm_bind_host(struct nlm_host *host)
 					   RPC_CLNT_CREATE_AUTOBIND),
 		};
 
-		/*
-		 * lockd retries server side blocks automatically so we want
-		 * those to be soft RPC calls. Client side calls need to be
-		 * hard RPC tasks.
-		 */
 		if (!host->h_server)
 			args.flags |= RPC_CLNT_CREATE_HARDRTRY;
 		if (host->h_noresvport)
@@ -490,9 +416,6 @@ nlm_bind_host(struct nlm_host *host)
 	return clnt;
 }
 
-/*
- * Force a portmap lookup of the remote lockd port
- */
 void
 nlm_rebind_host(struct nlm_host *host)
 {
@@ -503,9 +426,6 @@ nlm_rebind_host(struct nlm_host *host)
 	}
 }
 
-/*
- * Increment NLM host count
- */
 struct nlm_host * nlm_get_host(struct nlm_host *host)
 {
 	if (host) {
@@ -541,13 +461,6 @@ static struct nlm_host *next_host_state(struct hlist_head *cache,
 	return NULL;
 }
 
-/**
- * nlm_host_rebooted - Release all resources held by rebooted host
- * @info: pointer to decoded results of NLM_SM_NOTIFY call
- *
- * We were notified that the specified host has rebooted.  Release
- * all resources held by that peer.
- */
 void nlm_host_rebooted(const struct nlm_reboot *info)
 {
 	struct nsm_handle *nsm;
@@ -557,11 +470,6 @@ void nlm_host_rebooted(const struct nlm_reboot *info)
 	if (unlikely(nsm == NULL))
 		return;
 
-	/* Mark all hosts tied to this NSM state as having rebooted.
-	 * We run the loop repeatedly, because we drop the host table
-	 * lock for this.
-	 * To avoid processing a host several times, we match the nsmstate.
-	 */
 	while ((host = next_host_state(nlm_server_hosts, nsm, info)) != NULL) {
 		nlmsvc_free_host_resources(host);
 		nlmsvc_release_host(host);
@@ -574,12 +482,8 @@ void nlm_host_rebooted(const struct nlm_reboot *info)
 	nsm_release(nsm);
 }
 
-/*
- * Shut down the hosts module.
- * Note that this routine is called only at server shutdown time.
- */
 void
-nlm_shutdown_hosts(void)
+nlm_shutdown_hosts_net(struct net *net)
 {
 	struct hlist_head *chain;
 	struct hlist_node *pos;
@@ -588,9 +492,11 @@ nlm_shutdown_hosts(void)
 	dprintk("lockd: shutting down host module\n");
 	mutex_lock(&nlm_host_mutex);
 
-	/* First, make all hosts eligible for gc */
+	
 	dprintk("lockd: nuking all hosts...\n");
 	for_each_host(host, pos, chain, nlm_server_hosts) {
+		if (net && host->net != net)
+			continue;
 		host->h_expires = jiffies - 1;
 		if (host->h_rpcclnt) {
 			rpc_shutdown_client(host->h_rpcclnt);
@@ -598,27 +504,32 @@ nlm_shutdown_hosts(void)
 		}
 	}
 
-	/* Then, perform a garbage collection pass */
+	
 	nlm_gc_hosts();
 	mutex_unlock(&nlm_host_mutex);
+}
 
-	/* complain if any hosts are left */
+void
+nlm_shutdown_hosts(void)
+{
+	struct hlist_head *chain;
+	struct hlist_node *pos;
+	struct nlm_host	*host;
+
+	nlm_shutdown_hosts_net(NULL);
+
+	
 	if (nrhosts != 0) {
 		printk(KERN_WARNING "lockd: couldn't shutdown host module!\n");
 		dprintk("lockd: %lu hosts left:\n", nrhosts);
 		for_each_host(host, pos, chain, nlm_server_hosts) {
-			dprintk("       %s (cnt %d use %d exp %ld)\n",
+			dprintk("       %s (cnt %d use %d exp %ld net %p)\n",
 				host->h_name, atomic_read(&host->h_count),
-				host->h_inuse, host->h_expires);
+				host->h_inuse, host->h_expires, host->net);
 		}
 	}
 }
 
-/*
- * Garbage collect any unused NLM hosts.
- * This GC combines reference counting for async operations with
- * mark & sweep for resources held by remote clients.
- */
 static void
 nlm_gc_hosts(void)
 {
@@ -630,7 +541,7 @@ nlm_gc_hosts(void)
 	for_each_host(host, pos, chain, nlm_server_hosts)
 		host->h_inuse = 0;
 
-	/* Mark all hosts that hold locks, blocks or shares */
+	
 	nlmsvc_mark_resources();
 
 	for_each_host_safe(host, pos, next, chain, nlm_server_hosts) {

@@ -22,6 +22,7 @@
  * 02110-1301 USA
  */
 
+#include <linux/module.h>
 #include <linux/bitops.h>
 #include <linux/slab.h>
 #include <media/v4l2-dev.h>
@@ -36,10 +37,6 @@ int v4l2_fh_init(struct v4l2_fh *fh, struct video_device *vdev)
 	set_bit(V4L2_FL_USES_V4L2_FH, &fh->vdev->flags);
 	fh->prio = V4L2_PRIORITY_UNSET;
 
-	/*
-	 * fh->events only needs to be initialized if the driver
-	 * supports the VIDIOC_SUBSCRIBE_EVENT ioctl.
-	 */
 	if (vdev->ioctl_ops && vdev->ioctl_ops->vidioc_subscribe_event)
 		return v4l2_event_init(fh);
 

@@ -141,7 +141,7 @@ gss_mech_get(struct gss_api_mech *gm)
 EXPORT_SYMBOL_GPL(gss_mech_get);
 
 struct gss_api_mech *
-gss_mech_get_by_name(const char *name)
+_gss_mech_get_by_name(const char *name)
 {
 	struct gss_api_mech	*pos, *gm = NULL;
 
@@ -158,6 +158,17 @@ gss_mech_get_by_name(const char *name)
 
 }
 
+struct gss_api_mech * gss_mech_get_by_name(const char *name)
+{
+	struct gss_api_mech *gm = NULL;
+
+	gm = _gss_mech_get_by_name(name);
+	if (!gm) {
+		request_module("rpc-auth-gss-%s", name);
+		gm = _gss_mech_get_by_name(name);
+	}
+	return gm;
+}
 EXPORT_SYMBOL_GPL(gss_mech_get_by_name);
 
 struct gss_api_mech *
@@ -194,10 +205,9 @@ mech_supports_pseudoflavor(struct gss_api_mech *gm, u32 pseudoflavor)
 	return 0;
 }
 
-struct gss_api_mech *
-gss_mech_get_by_pseudoflavor(u32 pseudoflavor)
+struct gss_api_mech *_gss_mech_get_by_pseudoflavor(u32 pseudoflavor)
 {
-	struct gss_api_mech *pos, *gm = NULL;
+	struct gss_api_mech *gm = NULL, *pos;
 
 	spin_lock(&registered_mechs_lock);
 	list_for_each_entry(pos, &registered_mechs, gm_list) {
@@ -213,17 +223,32 @@ gss_mech_get_by_pseudoflavor(u32 pseudoflavor)
 	return gm;
 }
 
+struct gss_api_mech *
+gss_mech_get_by_pseudoflavor(u32 pseudoflavor)
+{
+	struct gss_api_mech *gm;
+
+	gm = _gss_mech_get_by_pseudoflavor(pseudoflavor);
+
+	if (!gm) {
+		request_module("rpc-auth-gss-%u", pseudoflavor);
+		gm = _gss_mech_get_by_pseudoflavor(pseudoflavor);
+	}
+	return gm;
+}
+
 EXPORT_SYMBOL_GPL(gss_mech_get_by_pseudoflavor);
 
 int gss_mech_list_pseudoflavors(rpc_authflavor_t *array_ptr)
 {
 	struct gss_api_mech *pos = NULL;
-	int i = 0;
+	int j, i = 0;
 
 	spin_lock(&registered_mechs_lock);
 	list_for_each_entry(pos, &registered_mechs, gm_list) {
-		array_ptr[i] = pos->gm_pfs->pseudoflavor;
-		i++;
+		for (j=0; j < pos->gm_pf_num; j++) {
+			array_ptr[i++] = pos->gm_pfs[j].pseudoflavor;
+		}
 	}
 	spin_unlock(&registered_mechs_lock);
 	return i;
@@ -241,7 +266,7 @@ gss_svc_to_pseudoflavor(struct gss_api_mech *gm, u32 service)
 			return gm->gm_pfs[i].pseudoflavor;
 		}
 	}
-	return RPC_AUTH_MAXFLAVOR; /* illegal value */
+	return RPC_AUTH_MAXFLAVOR; 
 }
 EXPORT_SYMBOL_GPL(gss_svc_to_pseudoflavor);
 
@@ -282,8 +307,6 @@ gss_mech_put(struct gss_api_mech * gm)
 
 EXPORT_SYMBOL_GPL(gss_mech_put);
 
-/* The mech could probably be determined from the token instead, but it's just
- * as easy for now to pass it in. */
 int
 gss_import_sec_context(const void *input_token, size_t bufsize,
 		       struct gss_api_mech	*mech,
@@ -298,7 +321,6 @@ gss_import_sec_context(const void *input_token, size_t bufsize,
 		->gss_import_sec_context(input_token, bufsize, *ctx_id, gfp_mask);
 }
 
-/* gss_get_mic: compute a mic over message and return mic_token. */
 
 u32
 gss_get_mic(struct gss_ctx	*context_handle,
@@ -311,7 +333,6 @@ gss_get_mic(struct gss_ctx	*context_handle,
 			      mic_token);
 }
 
-/* gss_verify_mic: check whether the provided mic_token verifies message. */
 
 u32
 gss_verify_mic(struct gss_ctx		*context_handle,
@@ -324,20 +345,6 @@ gss_verify_mic(struct gss_ctx		*context_handle,
 				 mic_token);
 }
 
-/*
- * This function is called from both the client and server code.
- * Each makes guarantees about how much "slack" space is available
- * for the underlying function in "buf"'s head and tail while
- * performing the wrap.
- *
- * The client and server code allocate RPC_MAX_AUTH_SIZE extra
- * space in both the head and tail which is available for use by
- * the wrap function.
- *
- * Underlying functions should verify they do not use more than
- * RPC_MAX_AUTH_SIZE of extra space in either the head or tail
- * when performing the wrap.
- */
 u32
 gss_wrap(struct gss_ctx	*ctx_id,
 	 int		offset,
@@ -358,9 +365,6 @@ gss_unwrap(struct gss_ctx	*ctx_id,
 }
 
 
-/* gss_delete_sec_context: free all resources associated with context_handle.
- * Note this differs from the RFC 2744-specified prototype in that we don't
- * bother returning an output token, since it would never be used anyway. */
 
 u32
 gss_delete_sec_context(struct gss_ctx	**context_handle)

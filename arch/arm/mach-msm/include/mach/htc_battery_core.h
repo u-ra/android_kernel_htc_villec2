@@ -50,6 +50,13 @@ enum {
 	FULL_BAT,
 	OVER_VCHG,
 	BATT_STATE,
+	OVERLOAD,
+};
+
+enum htc_batt_rt_attr {
+	HTC_BATT_RT_VOLTAGE = 0,
+	HTC_BATT_RT_CURRENT,
+	HTC_BATT_RT_TEMPERATURE,
 };
 
 struct battery_info_reply {
@@ -59,6 +66,7 @@ struct battery_info_reply {
 	s32 batt_current;
 	u32 batt_discharg_current;
 	u32 level;
+	u32 level_raw;
 	u32 charging_source;
 	u32 charging_enabled;
 	u32 full_bat;
@@ -66,9 +74,11 @@ struct battery_info_reply {
 	u32 over_vchg;
 	s32 temp_fault;
 	u32 batt_state;
+	u32 overload;
 };
 
 struct htc_battery_core {
+	int (*func_get_batt_rt_attr)(enum htc_batt_rt_attr attr, int* val);
 	int (*func_show_batt_attr)(struct device_attribute *attr, char *buf);
 	int (*func_show_cc_attr)(struct device_attribute *attr, char *buf);
 	int (*func_get_battery_info)(struct battery_info_reply *buffer);
@@ -79,8 +89,11 @@ struct htc_battery_core {
 #ifdef CONFIG_HTC_BATT_CORE
 extern int htc_battery_core_update_changed(void);
 extern int htc_battery_core_register(struct device *dev, struct htc_battery_core *htc_battery);
+const struct battery_info_reply* htc_battery_core_get_batt_info_rep(void);
 #else
 static int htc_battery_core_update_changed(void) { return 0; }
 static int htc_battery_core_register(struct device *dev, struct htc_battery_core *htc_battery) { return 0; }
+static struct battery_info_reply* htc_battery_core_get_batt_info_rep(void)
+{ return NULL; }
 #endif
 #endif

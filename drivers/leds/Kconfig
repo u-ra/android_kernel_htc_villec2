@@ -17,7 +17,7 @@ menuconfig NEW_LEDS
 if NEW_LEDS
 
 config LEDS_CLASS
-	bool "LED Class Support"
+	tristate "LED Class Support"
 	help
 	  This option enables the led sysfs class in /sys/class/leds.  You'll
 	  need this to do anything useful with LEDs.  If unsure, say N.
@@ -69,17 +69,10 @@ config LEDS_MIKROTIK_RB532
 config LEDS_S3C24XX
 	tristate "LED Support for Samsung S3C24XX GPIO LEDs"
 	depends on LEDS_CLASS
-	depends on ARCH_S3C2410
+	depends on ARCH_S3C24XX
 	help
 	  This option enables support for LEDs connected to GPIO lines
 	  on Samsung S3C24XX series CPUs, such as the S3C2410 and S3C2440.
-
-config LEDS_AMS_DELTA
-	tristate "LED Support for the Amstrad Delta (E3)"
-	depends on LEDS_CLASS
-	depends on MACH_AMS_DELTA
-	help
-	  This option enables support for the LEDs on Amstrad Delta (E3).
 
 config LEDS_NET48XX
 	tristate "LED Support for Soekris net48xx series Error LED"
@@ -88,16 +81,6 @@ config LEDS_NET48XX
 	help
 	  This option enables support for the Soekris net4801 and net4826 error
 	  LED.
-
-config LEDS_NET5501
-	tristate "LED Support for Soekris net5501 series Error LED"
-	depends on LEDS_TRIGGERS
-	depends on X86 && LEDS_GPIO_PLATFORM && GPIO_CS5535
-	select LEDS_TRIGGER_DEFAULT_ON
-	default n
-	help
-	  Add support for the Soekris net5501 board (detection, error led
-	  and GPIO).
 
 config LEDS_FSG
 	tristate "LED Support for the Freecom FSG-3"
@@ -112,14 +95,6 @@ config LEDS_WRAP
 	depends on SCx200_GPIO
 	help
 	  This option enables support for the PCEngines WRAP programmable LEDs.
-
-config LEDS_ALIX2
-	tristate "LED Support for ALIX.2 and ALIX.3 series"
-	depends on LEDS_CLASS
-	depends on X86 && !GPIO_CS5535 && !CS5535_GPIO
-	help
-	  This option enables support for the PCEngines ALIX.2 and ALIX.3 LEDs.
-	  You have to set leds-alix2.force=1 for boards with Award BIOS.
 
 config LEDS_COBALT_QUBE
 	tristate "LED Support for the Cobalt Qube series front LED"
@@ -194,6 +169,18 @@ config LEDS_MSM_PDM
 	  To compile this driver as a module, choose M here: the
 	  module will be called leds-msm-pdm.
 
+config LEDS_PMIC_MPP
+        tristate "LED Support for Qualcomm PMIC MPP connected LEDs"
+        depends on LEDS_CLASS && MSM_SMD
+        help
+          This option enables support for LEDs connected to  PMIC MPPs
+	  on Qualcomm reference boards.
+
+	  If unsure, say N.
+
+	  To compile this driver as a module, choose M here: the
+	  module will be called leds-pmic-mpp.
+
 config LEDS_GPIO_PLATFORM
 	bool "Platform device bindings for GPIO LEDs"
 	depends on LEDS_GPIO
@@ -237,6 +224,16 @@ config LEDS_LP5521
 	  LP5521 LED driver. It is 3 channel chip with programmable engines.
 	  Driver provides direct control via LED class and interface for
 	  programming the engines.
+
+config LEDS_LP5521_HTC
+        tristate "LED Support for N.S. LP5521 LED driver chip"
+        depends on LEDS_CLASS && I2C
+        help
+          If you say yes here you get support for the National Semiconductor
+          LP5521 LED driver. It is 3 channel chip with programmable engines.
+          Driver provides direct control via LED class and interface for
+          programming the engines.
+
 
 config LEDS_LP5523
 	tristate "LED Support for N.S. LP5523 LED driver chip"
@@ -298,6 +295,43 @@ config LEDS_PM8XXX
 	  To compile this driver as a module, choose M here: the module will
 	  be called leds-pmic8xxx.
 
+config LEDS_PM8921
+        tristate "LED Support for Qualcomm PMIC8921"
+        depends on MFD_PM8XXX
+        help
+          This option enables support for LEDs connected over PMIC8XXX
+          (Power Management IC) chip on Qualcomm reference boards,
+          for example SURF and FFAs.
+
+          To compile this driver as a module, choose M here: the module will
+          be called leds-pmic8921.
+
+config LEDS_PM8038
+        tristate "LED Support for Qualcomm PMIC8038"
+        depends on MFD_PM8XXX
+        help
+          This option enables support for LEDs connected over PMIC8XXX
+          (Power Management IC) chip on Qualcomm reference boards,
+          for example SURF and FFAs.
+
+          To compile this driver as a module, choose M here: the module will
+          be called leds-pmic8038.
+
+config LEDS_PCA9633
+	tristate "LED support for PCA9633 I2C chip"
+	depends on LEDS_CLASS
+	depends on I2C
+	help
+	  This option enables support for LEDs connected to the PCA9633
+	  LED driver chip accessed via the I2C bus.
+
+config BACKLIGHT_WLED_CABC
+	bool "Select WLED CABC for PMIC backlight control"
+	depends on LEDS_PM8038
+	default n
+	help
+	  This option selects the WLED CABC path for PMIC backlight control.
+
 config LEDS_WM831X_STATUS
 	tristate "LED support for status LEDs on WM831x PMICs"
 	depends on LEDS_CLASS
@@ -354,7 +388,7 @@ config LEDS_BD2802
 
 config LEDS_MSM_PMIC
         tristate "LED Support for Qualcomm PMIC connected LEDs"
-        default y
+        default n
         depends on ARCH_MSM
         help
           This option enables support for LEDs connected over PMIC
@@ -369,6 +403,13 @@ config LEDS_PMIC8058
 	  This option enables support for LEDs connected over PMIC8058
 	  (Power Management IC) chip on Qualcomm reference boards,
 	  for example SURF and FFAs.
+
+config LEDS_PM8058
+	tristate "LED Support for PM8058"
+	depends on PMIC8058_PWM
+	help
+	  This option enables support for LEDs connected to PM8058
+	  LED driver chips accessed via the SSBI bus and rpc.
 
 config LEDS_INTEL_SS4200
 	tristate "LED driver for Intel NAS SS4200 series"
@@ -427,7 +468,8 @@ config LEDS_QCIBL
 config LEDS_NS2
 	tristate "LED support for Network Space v2 GPIO LEDs"
 	depends on LEDS_CLASS
-	depends on MACH_NETSPACE_V2 || MACH_INETSPACE_V2 || MACH_NETSPACE_MAX_V2 || D2NET_V2
+	depends on MACH_NETSPACE_V2 || MACH_INETSPACE_V2 || \
+		   MACH_NETSPACE_MAX_V2 || MACH_D2NET_V2
 	default y
 	help
 	  This option enable support for the dual-GPIO LED found on the
@@ -437,6 +479,7 @@ config LEDS_NS2
 config LEDS_NETXBIG
 	tristate "LED support for Big Network series LEDs"
 	depends on MACH_NET2BIG_V2 || MACH_NET5BIG_V2
+	depends on LEDS_CLASS
 	default y
 	help
 	  This option enable support for LEDs found on the LaCie 2Big
@@ -454,6 +497,40 @@ config LEDS_ASIC3
 	  cannot be used. This driver supports hardware blinking with an on+off
 	  period from 62ms to 125s. Say Y to enable LEDs on the HP iPAQ hx4700.
 
+config LEDS_RENESAS_TPU
+	bool "LED support for Renesas TPU"
+	depends on LEDS_CLASS && HAVE_CLK && GENERIC_GPIO
+	help
+	  This option enables build of the LED TPU platform driver,
+	  suitable to drive any TPU channel on newer Renesas SoCs.
+	  The driver controls the GPIO pin connected to the LED via
+	  the GPIO framework and expects the LED to be connected to
+	  a pin that can be driven in both GPIO mode and using TPU
+	  pin function. The latter to support brightness control.
+	  Brightness control is supported but hardware blinking is not.
+
+config LEDS_TCA6507
+	tristate "LED Support for TCA6507 I2C chip"
+	depends on LEDS_CLASS && I2C
+	help
+	  This option enables support for LEDs connected to TC6507
+	  LED driver chips accessed via the I2C bus.
+	  Driver support brightness control and hardware-assisted blinking.
+
+config LEDS_MAX8997
+	tristate "LED support for MAX8997 PMIC"
+	depends on LEDS_CLASS && MFD_MAX8997
+	help
+	  This option enables support for on-chip LED drivers on
+	  MAXIM MAX8997 PMIC.
+
+config LEDS_OT200
+	tristate "LED support for the Bachmann OT200"
+	depends on LEDS_CLASS && HAS_IOMEM
+	help
+	  This option enables support for the LEDs on the Bachmann OT200.
+	  Say Y to enable LEDs on the Bachmann OT200.
+
 config LEDS_TRIGGERS
 	bool "LED Trigger support"
 	depends on LEDS_CLASS
@@ -461,36 +538,6 @@ config LEDS_TRIGGERS
 	  This option enables trigger support for the leds class.
 	  These triggers allow kernel events to drive the LEDs and can
 	  be configured via sysfs. If unsure, say Y.
-
-config LEDS_PM8029
-	tristate "LED Support for PM8029"
-	default n
-	help
-	  This option enables support for LEDs connected to PM8029
-	  LED driver chips accessed via the SSBI bus and rpc.
-
-config LEDS_PM8058
-	tristate "LED Support for PM8058"
-	depends on PMIC8058_PWM
-	help
-	  This option enables support for LEDs connected to PM8058
-	  LED driver chips accessed via the SSBI bus and rpc.
-
-config LEDS_MAX8957_FLASH
-	tristate "FLASH LED Support for Maxim MAX8957 PMIC"
-	depends on MFD_MAX8957
-	default y
-	help
-	  This option enable support for on-chip FLASH LED drivers found
-	  on Maxim MAX8957 PMIC.
-
-config LEDS_MAX8957_LPG
-	tristate "LPG(Light Pulse Generator) LED Support for Maxim MAX8957 PMIC"
-	depends on MFD_MAX8957
-	default y
-	help
-	  This option enable support for on-chip White LED drivers found
-	  on Maxim MAX8957 PMIC.
 
 comment "LED Triggers"
 
@@ -501,7 +548,7 @@ config LEDS_TRIGGER_TIMER
 	  This allows LEDs to be controlled by a programmable timer
 	  via sysfs. Some LED hardware can be programmed to start
 	  blinking the LED without any further software interaction.
-	  For more details read Documentation/leds-class.txt.
+	  For more details read Documentation/leds/leds-class.txt.
 
 	  If unsure, say Y.
 
@@ -551,26 +598,16 @@ config LEDS_TRIGGER_DEFAULT_ON
 	  This allows LEDs to be initialised in the ON state.
 	  If unsure, say Y.
 
+config FLASHLIGHT_TPS61310
+        tristate "TI TPS61310 flashlight"
+        help
+          Say Y here to enable the TI TPS61310 flashlight
+
 config LEDS_TRIGGER_SLEEP
 	tristate "LED Sleep Mode Trigger"
 	depends on LEDS_TRIGGERS && HAS_EARLYSUSPEND
 	help
 	  This turns LEDs on when the screen is off but the cpu still running.
-
-config FLASHLIGHT_TPS61310
-	tristate "TI TPS61310 flashlight"
-	help
-	  Say Y here to enable the TI TPS61310 flashlight
-
-config FLASHLIGHT_AAT1271
-	tristate "flashlight AAT1271"
-	help
-	  Say Y here to enable the AAT flashlight
-
-config FLASHLIGHT_AAT1277
-        tristate "flashlight AAT1277"
-        help
-          Say Y here to enable the AAT flashlight
 
 comment "iptables trigger is under Netfilter config (LED target)"
 	depends on LEDS_TRIGGERS

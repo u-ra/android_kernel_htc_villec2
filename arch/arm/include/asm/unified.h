@@ -30,36 +30,30 @@
 #error Thumb-2 kernel requires gcc >= 4
 #endif
 
-/* The CPSR bit describing the instruction set (Thumb) */
 #define PSR_ISETSTATE	PSR_T_BIT
 
 #define ARM(x...)
 #define THUMB(x...)	x
 #ifdef __ASSEMBLY__
 #define W(instr)	instr.w
-#endif
 #define BSYM(sym)	sym + 1
+#endif
 
-#else	/* !CONFIG_THUMB2_KERNEL */
+#else	
 
-/* The CPSR bit describing the instruction set (ARM) */
 #define PSR_ISETSTATE	0
 
 #define ARM(x...)	x
 #define THUMB(x...)
 #ifdef __ASSEMBLY__
 #define W(instr)	instr
-#endif
 #define BSYM(sym)	sym
+#endif
 
-#endif	/* CONFIG_THUMB2_KERNEL */
+#endif	
 
 #ifndef CONFIG_ARM_ASM_UNIFIED
 
-/*
- * If the unified assembly syntax isn't used (in ARM mode), these
- * macros expand to an empty string
- */
 #ifdef __ASSEMBLY__
 	.macro	it, cond
 	.endm
@@ -91,7 +85,7 @@
 	.endm
 	.macro	iteee, cond
 	.endm
-#else	/* !__ASSEMBLY__ */
+#else	
 __asm__(
 "	.macro	it, cond\n"
 "	.endm\n"
@@ -123,8 +117,8 @@ __asm__(
 "	.endm\n"
 "	.macro	iteee, cond\n"
 "	.endm\n");
-#endif	/* __ASSEMBLY__ */
+#endif	
 
-#endif	/* CONFIG_ARM_ASM_UNIFIED */
+#endif	
 
-#endif	/* !__ASM_UNIFIED_H */
+#endif	

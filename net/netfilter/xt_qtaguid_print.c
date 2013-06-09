@@ -8,13 +8,6 @@
  * published by the Free Software Foundation.
  */
 
-/*
- * Most of the functions in this file just waste time if DEBUG is not defined.
- * The matching xt_qtaguid_print.h will static inline empty funcs if the needed
- * debug flags ore not defined.
- * Those funcs that fail to allocate memory will panic as there is no need to
- * hobble allong just pretending to do the requested work.
- */
 
 #define DEBUG
 
@@ -183,7 +176,11 @@ char *pp_iface_stat(struct iface_stat *is)
 		res = kasprintf(GFP_ATOMIC, "iface_stat@%p{"
 				"list=list_head{...}, "
 				"ifname=%s, "
-				"total={rx={bytes=%llu, "
+				"total_dev={rx={bytes=%llu, "
+				"packets=%llu}, "
+				"tx={bytes=%llu, "
+				"packets=%llu}}, "
+				"total_skb={rx={bytes=%llu, "
 				"packets=%llu}, "
 				"tx={bytes=%llu, "
 				"packets=%llu}}, "
@@ -198,10 +195,14 @@ char *pp_iface_stat(struct iface_stat *is)
 				"tag_stat_tree=rb_root{...}}",
 				is,
 				is->ifname,
-				is->totals[IFS_RX].bytes,
-				is->totals[IFS_RX].packets,
-				is->totals[IFS_TX].bytes,
-				is->totals[IFS_TX].packets,
+				is->totals_via_dev[IFS_RX].bytes,
+				is->totals_via_dev[IFS_RX].packets,
+				is->totals_via_dev[IFS_TX].bytes,
+				is->totals_via_dev[IFS_TX].packets,
+				is->totals_via_skb[IFS_RX].bytes,
+				is->totals_via_skb[IFS_RX].packets,
+				is->totals_via_skb[IFS_TX].bytes,
+				is->totals_via_skb[IFS_TX].packets,
 				is->last_known_valid,
 				is->last_known[IFS_RX].bytes,
 				is->last_known[IFS_RX].packets,
@@ -277,7 +278,6 @@ char *pp_proc_qtu_data(struct proc_qtu_data *pqd)
 	return res;
 }
 
-/*------------------------------------------*/
 void prdebug_sock_tag_tree(int indent_level,
 			   struct rb_root *sock_tag_tree)
 {
@@ -521,8 +521,7 @@ void prdebug_iface_stat_list(int indent_level,
 	pr_debug("%*d: %s\n", indent_level*2, indent_level, str);
 }
 
-#endif  /* ifdef DDEBUG */
-/*------------------------------------------*/
+#endif  
 static const char * const netdev_event_strings[] = {
 	"netdev_unknown",
 	"NETDEV_UP",

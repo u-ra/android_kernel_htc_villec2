@@ -93,7 +93,7 @@ static inline unsigned int u32_hash_fold(__be32 key,
 	return h;
 }
 
-static int u32_classify(struct sk_buff *skb, struct tcf_proto *tp, struct tcf_result *res)
+static int u32_classify(struct sk_buff *skb, const struct tcf_proto *tp, struct tcf_result *res)
 {
 	struct {
 		struct tc_u_knode *knode;
@@ -177,7 +177,7 @@ check_terminal:
 			goto next_knode;
 		}
 
-		/* PUSH */
+		
 		if (sdepth >= TC_U32_MAXDEPTH)
 			goto deadloop;
 		stack[sdepth].knode = n;
@@ -223,7 +223,7 @@ check_terminal:
 			goto next_ht;
 	}
 
-	/* POP */
+	
 	if (sdepth--) {
 		n = stack[sdepth].knode;
 		ht = n->ht_up;

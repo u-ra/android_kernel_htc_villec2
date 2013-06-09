@@ -1,4 +1,4 @@
-/* Copyright (c) 2008-2011, Code Aurora Forum. All rights reserved.
+/* Copyright (c) 2008-2012, Code Aurora Forum. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -20,42 +20,38 @@ struct msm_fb_data_type;
 
 typedef void (*msm_fb_vsync_handler_type) (void *arg);
 
-/* panel id type */
 typedef struct panel_id_s {
 	uint16 id;
 	uint16 type;
 } panel_id_type;
 
-/* panel type list */
-#define NO_PANEL		0xffff	/* No Panel */
-#define MDDI_PANEL		1	/* MDDI */
-#define EBI2_PANEL		2	/* EBI2 */
-#define LCDC_PANEL		3	/* internal LCDC type */
-#define EXT_MDDI_PANEL		4	/* Ext.MDDI */
-#define TV_PANEL		5	/* TV */
-#define HDMI_PANEL		6	/* HDMI TV */
-#define DTV_PANEL		7	/* DTV */
-#define MIPI_VIDEO_PANEL	8	/* MIPI */
-#define MIPI_CMD_PANEL		9	/* MIPI */
-#define WRITEBACK_PANEL		10	/* Wifi display */
+#define NO_PANEL		0xffff	
+#define MDDI_PANEL		1	
+#define EBI2_PANEL		2	
+#define LCDC_PANEL		3	
+#define EXT_MDDI_PANEL		4	
+#define TV_PANEL		5	
+#define HDMI_PANEL		6	
+#define DTV_PANEL		7	
+#define MIPI_VIDEO_PANEL	8	
+#define MIPI_CMD_PANEL		9	
+#define WRITEBACK_PANEL		10	
+#define LVDS_PANEL		11	
 
-/* panel class */
 typedef enum {
-	DISPLAY_LCD = 0,	/* lcd = ebi2/mddi */
-	DISPLAY_LCDC,		/* lcdc */
-	DISPLAY_TV,		/* TV Out */
-	DISPLAY_EXT_MDDI,	/* External MDDI */
+	DISPLAY_LCD = 0,	
+	DISPLAY_LCDC,		
+	DISPLAY_TV,		
+	DISPLAY_EXT_MDDI,	
 } DISP_TARGET;
 
-/* panel device locaiton */
 typedef enum {
-	DISPLAY_1 = 0,		/* attached as first device */
-	DISPLAY_2,		/* attached on second device */
-	DISPLAY_3,              /* attached on third writeback device */
+	DISPLAY_1 = 0,		
+	DISPLAY_2,		
+	DISPLAY_3,              
 	MAX_PHYS_TARGET_NUM,
 } DISP_TARGET_PHYS;
 
-/* panel info type */
 struct lcd_panel_info {
 	__u32 vsync_enable;
 	__u32 refx100;
@@ -77,34 +73,40 @@ struct lcdc_panel_info {
 	__u32 border_clr;
 	__u32 underflow_clr;
 	__u32 hsync_skew;
+	
+	uint32 xres_pad;
+	
+	uint32 yres_pad;
+	boolean is_sync_active_high;
 };
 
 struct mddi_panel_info {
 	__u32 vdopkt;
+	boolean is_type1;
 };
 
 struct mipi_panel_info {
-	char mode;		/* video/cmd */
+	char mode;		
 	char interleave_mode;
 	char crc_check;
 	char ecc_check;
-	char dst_format;	/* shared by video and command */
+	char dst_format;	
 	char data_lane0;
 	char data_lane1;
 	char data_lane2;
 	char data_lane3;
-	char dlane_swap;	/* data lane swap */
+	char dlane_swap;	
 	char rgb_swap;
 	char b_sel;
 	char g_sel;
 	char r_sel;
 	char rx_eot_ignore;
 	char tx_eot_append;
-	char t_clk_post; /* 0xc0, DSI_CLKOUT_TIMING_CTRL */
-	char t_clk_pre;  /* 0xc0, DSI_CLKOUT_TIMING_CTRL */
-	char vc;	/* virtual channel */
+	char t_clk_post; 
+	char t_clk_pre;  
+	char vc;	
 	struct mipi_dsi_phy_ctrl *dsi_phy_db;
-	/* video mode */
+	
 	char pulse_mode_hsa_he;
 	char hfp_power_stop;
 	char hbp_power_stop;
@@ -113,24 +115,33 @@ struct mipi_panel_info {
 	char bllp_power_stop;
 	char traffic_mode;
 	char frame_rate;
-	/* command mode */
+	
 	char interleave_max;
 	char insert_dcs_cmd;
 	char wr_mem_continue;
 	char wr_mem_start;
 	char te_sel;
-	char stream;	/* 0 or 1 */
+	char stream;	
 	char mdp_trigger;
 	char dma_trigger;
 	uint32 dsi_pclk_rate;
-	/* The packet-size should not bet changed */
+	
+	uint32 esc_byte_ratio;
+	
 	char no_max_pkt_size;
-	/* Clock required during LP commands */
+	
 	char force_clk_lane_hs;
-	/* Pad width */
-	uint32 xres_pad;
-	/* Pad height */
-	uint32 yres_pad;
+};
+
+enum lvds_mode {
+	LVDS_SINGLE_CHANNEL_MODE,
+	LVDS_DUAL_CHANNEL_MODE,
+};
+
+struct lvds_panel_info {
+	enum lvds_mode channel_mode;
+	
+	char channel_swap;
 };
 
 struct msm_panel_info {
@@ -149,19 +160,18 @@ struct msm_panel_info {
 	__u32 clk_rate;
 	__u32 clk_min;
 	__u32 clk_max;
-	__u32 pll_pref_div_ratio;
 	__u32 frame_count;
 	__u32 is_3d_panel;
-
+	__u32 frame_rate;
 	__u32 width;
 	__u32 height;
+	__u32 camera_backlight;
 
 	struct mddi_panel_info mddi;
 	struct lcd_panel_info lcd;
 	struct lcdc_panel_info lcdc;
-
 	struct mipi_panel_info mipi;
-	struct gamma_curvy panel_char;
+	struct lvds_panel_info lvds;
 };
 
 #define MSM_FB_SINGLE_MODE_PANEL(pinfo)		\
@@ -176,26 +186,22 @@ struct msm_fb_panel_data {
 	void (*set_rect) (int x, int y, int xres, int yres);
 	void (*set_vsync_notifier) (msm_fb_vsync_handler_type, void *arg);
 	void (*set_backlight) (struct msm_fb_data_type *);
+
+	
 	void (*display_on) (struct msm_fb_data_type *);
-#ifdef CONFIG_FB_MSM_CABC
-	void (*enable_cabc) (int, bool, struct msm_fb_data_type *);
-#endif
-	/* function entry chain */
+	void (*display_off) (struct msm_fb_data_type *);
 	int (*on) (struct platform_device *pdev);
 	int (*off) (struct platform_device *pdev);
+	int (*power_ctrl) (boolean enable);
 	struct platform_device *next;
 	int (*clk_func) (int enable);
-#if defined CONFIG_FB_MSM_SELF_REFRESH
-	void (*self_refresh_switch) (int enable);
-#endif
-#if defined (CONFIG_MSM_AUTOBL_ENABLE)
+#ifdef CONFIG_FB_MSM_CABC
 	int (*autobl_enable) (int on, struct msm_fb_data_type *);
+	void (*enable_cabc) (int, bool, struct msm_fb_data_type *);
 #endif
+	void (*color_enhance) (struct msm_fb_data_type *, int on);
 };
 
-/*===========================================================================
-  FUNCTIONS PROTOTYPES
-============================================================================*/
 struct platform_device *msm_fb_device_alloc(struct msm_fb_panel_data *pdata,
 						u32 type, u32 id);
 int panel_next_on(struct platform_device *pdev);
@@ -206,4 +212,4 @@ int lcdc_device_register(struct msm_panel_info *pinfo);
 int mddi_toshiba_device_register(struct msm_panel_info *pinfo,
 					u32 channel, u32 panel);
 
-#endif /* MSM_FB_PANEL_H */
+#endif 

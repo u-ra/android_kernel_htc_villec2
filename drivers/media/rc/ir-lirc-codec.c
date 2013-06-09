@@ -14,6 +14,7 @@
 
 #include <linux/sched.h>
 #include <linux/wait.h>
+#include <linux/module.h>
 #include <media/lirc.h>
 #include <media/lirc_dev.h>
 #include <media/rc-core.h>
@@ -21,14 +22,6 @@
 
 #define LIRCBUF_SIZE 256
 
-/**
- * ir_lirc_decode() - Send raw IR data to lirc_dev to be relayed to the
- *		      lircd userspace daemon for decoding.
- * @input_dev:	the struct rc_dev descriptor of the device
- * @duration:	the struct ir_raw_event descriptor of the pulse/space
- *
- * This function returns -EINVAL if the lirc interfaces aren't wired up.
- */
 static int ir_lirc_decode(struct rc_dev *dev, struct ir_raw_event ev)
 {
 	struct lirc_codec *lirc = &dev->raw->lirc;
@@ -40,16 +33,16 @@ static int ir_lirc_decode(struct rc_dev *dev, struct ir_raw_event ev)
 	if (!dev->raw->lirc.drv || !dev->raw->lirc.drv->rbuf)
 		return -EINVAL;
 
-	/* Packet start */
+	
 	if (ev.reset)
 		return 0;
 
-	/* Carrier reports */
+	
 	if (ev.carrier_report) {
 		sample = LIRC_FREQUENCY(ev.carrier);
 		IR_dprintk(2, "carrier report (freq: %d)\n", sample);
 
-	/* Packet end */
+	
 	} else if (ev.timeout) {
 
 		if (lirc->gap)
@@ -65,7 +58,7 @@ static int ir_lirc_decode(struct rc_dev *dev, struct ir_raw_event ev)
 		sample = LIRC_TIMEOUT(ev.duration / 1000);
 		IR_dprintk(2, "timeout report (duration: %d)\n", sample);
 
-	/* Normal sample */
+	
 	} else {
 
 		if (lirc->gap) {
@@ -74,7 +67,7 @@ static int ir_lirc_decode(struct rc_dev *dev, struct ir_raw_event ev)
 			lirc->gap_duration += ktime_to_ns(ktime_sub(ktime_get(),
 				lirc->gap_start));
 
-			/* Convert to ms and cap by LIRC_VALUE_MASK */
+			
 			do_div(lirc->gap_duration, 1000);
 			lirc->gap_duration = min(lirc->gap_duration,
 							(u64)LIRC_VALUE_MASK);
@@ -98,24 +91,24 @@ static int ir_lirc_decode(struct rc_dev *dev, struct ir_raw_event ev)
 	return 0;
 }
 
-static ssize_t ir_lirc_transmit_ir(struct file *file, const char *buf,
+static ssize_t ir_lirc_transmit_ir(struct file *file, const char __user *buf,
 				   size_t n, loff_t *ppos)
 {
 	struct lirc_codec *lirc;
 	struct rc_dev *dev;
-	int *txbuf; /* buffer with values to transmit */
-	int ret = 0;
+	unsigned int *txbuf; 
+	ssize_t ret = 0;
 	size_t count;
 
 	lirc = lirc_get_pdata(file);
 	if (!lirc)
 		return -EFAULT;
 
-	if (n % sizeof(int))
+	if (n < sizeof(unsigned) || n % sizeof(unsigned))
 		return -EINVAL;
 
-	count = n / sizeof(int);
-	if (count > LIRCBUF_SIZE || count % 2 == 0 || n % sizeof(int) != 0)
+	count = n / sizeof(unsigned);
+	if (count > LIRCBUF_SIZE || count % 2 == 0)
 		return -EINVAL;
 
 	txbuf = memdup_user(buf, n);
@@ -129,7 +122,10 @@ static ssize_t ir_lirc_transmit_ir(struct file *file, const char *buf,
 	}
 
 	if (dev->tx_ir)
-		ret = dev->tx_ir(dev, txbuf, (u32)n);
+		ret = dev->tx_ir(dev, txbuf, count);
+
+	if (ret > 0)
+		ret *= sizeof(unsigned);
 
 out:
 	kfree(txbuf);
@@ -137,10 +133,11 @@ out:
 }
 
 static long ir_lirc_ioctl(struct file *filep, unsigned int cmd,
-			unsigned long __user arg)
+			unsigned long arg)
 {
 	struct lirc_codec *lirc;
 	struct rc_dev *dev;
+	u32 __user *argp = (u32 __user *)(arg);
 	int ret = 0;
 	__u32 val = 0, tmp;
 
@@ -153,14 +150,14 @@ static long ir_lirc_ioctl(struct file *filep, unsigned int cmd,
 		return -EFAULT;
 
 	if (_IOC_DIR(cmd) & _IOC_WRITE) {
-		ret = get_user(val, (__u32 *)arg);
+		ret = get_user(val, argp);
 		if (ret)
 			return ret;
 	}
 
 	switch (cmd) {
 
-	/* legacy support */
+	
 	case LIRC_GET_SEND_MODE:
 		val = LIRC_CAN_SEND_PULSE & LIRC_CAN_SEND_MASK;
 		break;
@@ -170,7 +167,7 @@ static long ir_lirc_ioctl(struct file *filep, unsigned int cmd,
 			return -EINVAL;
 		return 0;
 
-	/* TX settings */
+	
 	case LIRC_SET_TRANSMITTER_MASK:
 		if (!dev->s_tx_mask)
 			return -EINVAL;
@@ -192,7 +189,7 @@ static long ir_lirc_ioctl(struct file *filep, unsigned int cmd,
 
 		return dev->s_tx_duty_cycle(dev, val);
 
-	/* RX settings */
+	
 	case LIRC_SET_REC_CARRIER:
 		if (!dev->s_rx_carrier_range)
 			return -ENOSYS;
@@ -227,7 +224,7 @@ static long ir_lirc_ioctl(struct file *filep, unsigned int cmd,
 
 		return dev->s_carrier_report(dev, !!val);
 
-	/* Generic timeout support */
+	
 	case LIRC_GET_MIN_TIMEOUT:
 		if (!dev->max_timeout)
 			return -ENOSYS;
@@ -262,7 +259,7 @@ static long ir_lirc_ioctl(struct file *filep, unsigned int cmd,
 	}
 
 	if (_IOC_DIR(cmd) & _IOC_READ)
-		ret = put_user(val, (__u32 *)arg);
+		ret = put_user(val, argp);
 
 	return ret;
 }

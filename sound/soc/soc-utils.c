@@ -14,6 +14,7 @@
  */
 
 #include <linux/platform_device.h>
+#include <linux/export.h>
 #include <sound/core.h>
 #include <sound/pcm.h>
 #include <sound/pcm_params.h>
@@ -62,7 +63,7 @@ static const struct snd_pcm_hardware dummy_dma_hardware = {
 	.channels_min		= 1,
 	.channels_max		= UINT_MAX,
 
-	/* Random values to keep userspace happy when checking constraints */
+	
 	.info			= SNDRV_PCM_INFO_INTERLEAVED |
 				  SNDRV_PCM_INFO_BLOCK_TRANSFER,
 	.buffer_bytes_max	= 128*1024,
@@ -88,14 +89,32 @@ static struct snd_soc_platform_driver dummy_platform = {
 	.ops = &dummy_dma_ops,
 };
 
+static struct snd_soc_codec_driver dummy_codec;
+static struct snd_soc_dai_driver dummy_dai = {
+	.name = "snd-soc-dummy-dai",
+};
+
 static __devinit int snd_soc_dummy_probe(struct platform_device *pdev)
 {
-	return snd_soc_register_platform(&pdev->dev, &dummy_platform);
+	int ret;
+
+	ret = snd_soc_register_codec(&pdev->dev, &dummy_codec, &dummy_dai, 1);
+	if (ret < 0)
+		return ret;
+
+	ret = snd_soc_register_platform(&pdev->dev, &dummy_platform);
+	if (ret < 0) {
+		snd_soc_unregister_codec(&pdev->dev);
+		return ret;
+	}
+
+	return ret;
 }
 
 static __devexit int snd_soc_dummy_remove(struct platform_device *pdev)
 {
 	snd_soc_unregister_platform(&pdev->dev);
+	snd_soc_unregister_codec(&pdev->dev);
 
 	return 0;
 }

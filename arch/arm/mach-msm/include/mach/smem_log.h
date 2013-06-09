@@ -1,4 +1,4 @@
-/* Copyright (c) 2008-2009, Code Aurora Forum. All rights reserved.
+/* Copyright (c) 2008-2009, 2012, Code Aurora Forum. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -24,11 +24,6 @@
 #define SMIOC_LOG 0x00000003
 #define SMIOC_STATIC_LOG 0x00000004
 
-/* Event indentifier format:
- * bit  31-28 is processor ID 8 => apps, 4 => Q6, 0 => modem
- * bits 27-16 are subsystem id (event base)
- * bits 15-0  are event id
- */
 
 #define PROC                            0xF0000000
 #define SUB                             0x0FFF0000
@@ -37,6 +32,7 @@
 #define SMEM_LOG_PROC_ID_MODEM          0x00000000
 #define SMEM_LOG_PROC_ID_Q6             0x40000000
 #define SMEM_LOG_PROC_ID_APPS           0x80000000
+#define SMEM_LOG_PROC_ID_WCNSS          0xC0000000
 
 #define SMEM_LOG_CONT                   0x10000000
 

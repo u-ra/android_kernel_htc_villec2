@@ -17,23 +17,12 @@
   $
  */
 
-/**
- *  @defgroup   ACCELDL (Motion Library - Accelerometer Driver Layer)
- *  @brief      Provides the interface to setup and handle an accelerometers
- *              connected to the secondary I2C interface of the gyroscope.
- *
- *  @{
- *      @file   bma250.c
- *      @brief  Accelerometer setup and handling methods.
- */
 
-/* ------------------ */
-/* - Include Files. - */
-/* ------------------ */
 
 #ifdef __KERNEL__
 #include <linux/module.h>
 #endif
+#include <linux/delay.h>
 
 #include "mpu.h"
 #include "mlos.h"
@@ -43,18 +32,17 @@
 #undef MPL_LOG_TAG
 #define MPL_LOG_TAG "MPL-acc"
 
-/* full scale setting - register and mask */
 #define BOSCH_CTRL_REG      (0x0F)
 #define BOSCH_INT_REG       (0x16)
 #define BOSCH_PWR_REG       (0x11)
 #define BMA250_REG_SOFT_RESET (0x14)
-#define BMA250_BW_REG        (0x10)    /* BMA250 : BW setting register */
+#define BMA250_BW_REG        (0x10)    
 
 #define ACCEL_BOSCH_CTRL_MASK              (0x0F)
 #define ACCEL_BOSCH_CTRL_MASK_FSR          (0xF8)
 #define ACCEL_BOSCH_INT_MASK_WUP           (0xF8)
 #define ACCEL_BOSCH_INT_MASK_IRQ           (0xDF)
-#define BMA250_BW_MASK      (0xE0)    /* BMA250 : BW setting mask */
+#define BMA250_BW_MASK      (0xE0)    
 
 #define D(x...) printk(KERN_DEBUG "[GSNR][BMA250] " x)
 #define I(x...) printk(KERN_INFO "[GSNR][BMA250] " x)
@@ -63,17 +51,14 @@
 	if (debug_flag) \
 		printk(KERN_DEBUG "[GSNR][BMA250 DEBUG] " x)
 
-/* --------------------- */
-/* -    Variables.     - */
-/* --------------------- */
 
 struct bma250_config {
-	unsigned int odr; /* Output data rate mHz */
-	unsigned int fsr; /* full scale range mg */
+	unsigned int odr; 
+	unsigned int fsr; 
 	unsigned int irq_type;
 	unsigned int power_mode;
-	unsigned char ctrl_reg; /* range */
-	unsigned char bw_reg; /* bandwidth */
+	unsigned char ctrl_reg; 
+	unsigned char bw_reg; 
 	unsigned char int_reg;
 };
 
@@ -83,22 +68,20 @@ struct bma250_private_data {
 	unsigned char state;
 };
 
+static int set_normal_mode(void *mlsl_handle,
+			 struct ext_slave_platform_data *pdata)
+{
+	int result = 0;
 
-/*********************************************
-    Accelerometer Initialization Functions
-**********************************************/
+	result = MLSLSerialWriteSingle(mlsl_handle,
+		pdata->address,	BOSCH_PWR_REG, 0x00);
+	ERROR_CHECK(result);
 
-/**
- * Sets the IRQ to fire when one of the IRQ events occur.  Threshold and
- * duration will not be used uless the type is MOT or NMOT.
- *
- * @param config configuration to apply to, suspend or resume
- * @param irq_type The type of IRQ.  Valid values are
- * - MPU_SLAVE_IRQ_TYPE_NONE
- * - MPU_SLAVE_IRQ_TYPE_MOTION
- * - MPU_SLAVE_IRQ_TYPE_DATA_READY
- *
- */
+	usleep(2000);
+
+	return 0;
+}
+
 static int bma250_set_irq(void *mlsl_handle,
 			struct ext_slave_platform_data *pdata,
 			struct bma250_config *config,
@@ -108,7 +91,7 @@ static int bma250_set_irq(void *mlsl_handle,
 	unsigned char irq_bits = 0;
 	int result = ML_SUCCESS;
 
-	/* TODO Use irq when necessary */
+	
 	return ML_SUCCESS;
 
 	if (irq_type == MPU_SLAVE_IRQ_TYPE_MOTION)
@@ -130,7 +113,7 @@ static int bma250_set_irq(void *mlsl_handle,
 	if (apply) {
 
 		if (!config->power_mode) {
-			/* BMA250: Software reset */
+			
 			result = MLSLSerialWriteSingle(mlsl_handle,
 					pdata->address, BMA250_REG_SOFT_RESET,
 					0xB6);
@@ -151,17 +134,14 @@ static int bma250_set_irq(void *mlsl_handle,
 				pdata->address, BOSCH_PWR_REG, 0x80);
 			ERROR_CHECK(result);
 			MLOSSleep(1);
+		} else {
+			result = set_normal_mode(mlsl_handle, pdata);
+			ERROR_CHECK(result);
 		}
 	}
 	return result;
 }
 
-/**
- * Set the Output data rate for the particular configuration
- *
- * @param config Config to modify with new ODR
- * @param odr Output data rate in units of 1/1000Hz
- */
 static int bma250_set_odr(void *mlsl_handle,
 			struct ext_slave_platform_data *pdata,
 			struct bma250_config *config,
@@ -172,32 +152,7 @@ static int bma250_set_odr(void *mlsl_handle,
 	unsigned char wup_bits = 0;
 	int result = ML_SUCCESS;
 
-	/* TO DO use dynamic bandwidth when stability safe */
-	/*if (odr > 100000) {
-		config->odr = 125000;
-		odr_bits = 0x0C;
-		config->power_mode = 1;
-	} else if (odr > 50000) {
-		config->odr = 62500;
-		odr_bits = 0x0B;
-		config->power_mode = 1;
-	} else if (odr > 20000) {
-		config->odr = 31250;
-		odr_bits = 0x0A;
-		config->power_mode = 1;
-	} else if (odr > 15000) {
-		config->odr = 15630;
-		odr_bits = 0x09;
-		config->power_mode = 1;
-	} else if (odr > 0) {
-		config->odr = 7810;
-		odr_bits = 0x08;
-		config->power_mode = 1;
-	} else {
-		config->odr = 0;
-		wup_bits = 0x00;
-		config->power_mode = 0;
-	}*/
+	
 	if (odr > 100000) {
 		config->odr = 31250;
 		odr_bits = 0x0A;
@@ -240,7 +195,7 @@ static int bma250_set_odr(void *mlsl_handle,
 
 	MPL_LOGV("ODR: %d \n", config->odr);
 	if (apply) {
-			/* BMA250: Software reset */
+			
 			result = MLSLSerialWriteSingle(mlsl_handle,
 					pdata->address, BMA250_REG_SOFT_RESET,
 					0xB6);
@@ -252,12 +207,7 @@ static int bma250_set_odr(void *mlsl_handle,
 					config->bw_reg);
 			ERROR_CHECK(result);
 
-			/* TODO Use irq when necessary */
-			/*
-			result = MLSLSerialWriteSingle(mlsl_handle,
-					pdata->address,	BOSCH_INT_REG,
-					config->int_reg);
-			ERROR_CHECK(result);*/
+			
 
 			if (!config->power_mode) {
 				result = MLSLSerialWriteSingle(mlsl_handle,
@@ -265,18 +215,15 @@ static int bma250_set_odr(void *mlsl_handle,
 						0x80);
 				ERROR_CHECK(result);
 				MLOSSleep(1);
+			} else {
+				result = set_normal_mode(mlsl_handle, pdata);
+				ERROR_CHECK(result);
 			}
 	}
 
 	return result;
 }
 
-/**
- * Set the full scale range of the accels
- *
- * @param config pointer to configuration
- * @param fsr requested full scale range
- */
 static int bma250_set_fsr(void *mlsl_handle,
 			struct ext_slave_platform_data *pdata,
 			struct bma250_config *config,
@@ -286,23 +233,7 @@ static int bma250_set_fsr(void *mlsl_handle,
 	unsigned char fsr_bits;
 	int result = ML_SUCCESS;
 
-	/* TO DO use dynamic range when stability safe */
-	/*if (fsr <= 2048) {
-		fsr_bits = 0x03;
-		config->fsr = 2048;
-	} else if (fsr <= 4096) {
-		fsr_bits = 0x05;
-		config->fsr = 4096;
-	} else if (fsr <= 8192) {
-		fsr_bits = 0x08;
-		config->fsr = 8192;
-	} else if (fsr <= 16384) {
-		fsr_bits = 0x0C;
-		config->fsr = 16384;
-	} else {
-		fsr_bits = 0x03;
-		config->fsr = 2048;
-	}*/
+	
 	if (fsr <= 2048) {
 		fsr_bits = 0x03;
 		config->fsr = 2048;
@@ -327,7 +258,7 @@ static int bma250_set_fsr(void *mlsl_handle,
 	if (apply) {
 
 		if (!config->power_mode) {
-			/* BMA250: Software reset */
+			
 			result = MLSLSerialWriteSingle(mlsl_handle,
 				pdata->address, BMA250_REG_SOFT_RESET, 0xB6);
 			ERROR_CHECK(result);
@@ -347,6 +278,9 @@ static int bma250_set_fsr(void *mlsl_handle,
 				pdata->address,	BOSCH_PWR_REG, 0x80);
 			ERROR_CHECK(result);
 			MLOSSleep(1);
+		} else {
+			result = set_normal_mode(mlsl_handle, pdata);
+			ERROR_CHECK(result);
 		}
 	}
 	return result;
@@ -367,21 +301,10 @@ static int bma250_suspend(void *mlsl_handle,
 
 	private_data->state = 1;
 
-	/* TO DO sync from bma150 of MPL3.3.0, comment follows */
-	/* BMA250: Software reset */
-	/*result = MLSLSerialWriteSingle(mlsl_handle, pdata->address,
-		BMA250_REG_SOFT_RESET, 0xB6);
-	ERROR_CHECK(result);
-	MLOSSleep(1);
+	
+	
 
-	result = MLSLSerialWriteSingle(mlsl_handle, pdata->address,
-		BOSCH_CTRL_REG, ctrl_reg);
-	ERROR_CHECK(result);*/
-
-	/* TODO Use irq when necessary */
-	/*result = MLSLSerialWriteSingle(mlsl_handle, pdata->address,
-		BOSCH_INT_REG, int_reg);
-	ERROR_CHECK(result);*/
+	
 
 	if (!private_data->suspend.power_mode) {
 		result = MLSLSerialWriteSingle(mlsl_handle, pdata->address,
@@ -411,7 +334,7 @@ static int bma250_resume(void *mlsl_handle,
 	private_data->state = 0;
 
 	result = MLSLSerialWriteSingle(mlsl_handle, pdata->address,
-		BMA250_REG_SOFT_RESET, 0xB6);  /* BMA250: Software reset */
+		BMA250_REG_SOFT_RESET, 0xB6);  
 	ERROR_CHECK(result);
 	MLOSSleep(1);
 
@@ -423,14 +346,14 @@ static int bma250_resume(void *mlsl_handle,
 		BMA250_BW_REG, bw_reg);
 	ERROR_CHECK(result);
 
-	/* TODO Use irq when necessary */
-	/*result = MLSLSerialWriteSingle(mlsl_handle, pdata->address,
-		BOSCH_INT_REG, int_reg);
-	ERROR_CHECK(result);*/
+	
 
 	if (!private_data->resume.power_mode) {
 		result = MLSLSerialWriteSingle(mlsl_handle, pdata->address,
 			BOSCH_PWR_REG, 0x80);
+		ERROR_CHECK(result);
+	} else {
+		result = set_normal_mode(mlsl_handle, pdata);
 		ERROR_CHECK(result);
 	}
 
@@ -462,6 +385,8 @@ static int bma250_init(void *mlsl_handle,
 	private_data = (struct bma250_private_data *)
 		MLOSMalloc(sizeof(struct bma250_private_data));
 
+	printk(KERN_DEBUG "%s\n", __func__);
+
 	if (!private_data)
 		return ML_ERROR_MEMORY_EXAUSTED;
 
@@ -471,7 +396,7 @@ static int bma250_init(void *mlsl_handle,
 
 	result =
 	    MLSLSerialWriteSingle(mlsl_handle, pdata->address,
-		BMA250_REG_SOFT_RESET, 0xB6);  /* BMA250: Software reset */
+		BMA250_REG_SOFT_RESET, 0xB6);  
 	ERROR_CHECK(result);
 	MLOSSleep(1);
 
@@ -491,10 +416,7 @@ static int bma250_init(void *mlsl_handle,
 	private_data->resume.bw_reg = bw_reg;
 	private_data->suspend.bw_reg = bw_reg;
 
-	/* TODO Use irq when necessary */
-	/*result =
-	    MLSLSerialRead(mlsl_handle, pdata->address, BOSCH_INT_REG, 1, &reg);
-	ERROR_CHECK(result);*/
+	
 
 	private_data->resume.int_reg = reg;
 	private_data->suspend.int_reg = reg;
@@ -513,13 +435,7 @@ static int bma250_init(void *mlsl_handle,
 	bma250_set_fsr(mlsl_handle, pdata, &private_data->resume,
 			FALSE, 2048);
 
-	/* TODO Use irq when necessary */
-	/*bma250_set_irq(mlsl_handle, pdata, &private_data->suspend,
-			FALSE,
-			MPU_SLAVE_IRQ_TYPE_NONE);
-	bma250_set_irq(mlsl_handle, pdata, &private_data->resume,
-			FALSE,
-			MPU_SLAVE_IRQ_TYPE_NONE);*/
+	
 
 	result =
 	    MLSLSerialWriteSingle(mlsl_handle, pdata->address, BOSCH_PWR_REG,
@@ -627,20 +543,20 @@ static int bma250_get_config(void *mlsl_handle,
 }
 
 static struct ext_slave_descr bma250_descr = {
-	/*.init             = */ bma250_init,
-	/*.exit             = */ bma250_exit,
-	/*.suspend          = */ bma250_suspend,
-	/*.resume           = */ bma250_resume,
-	/*.read             = */ bma250_read,
-	/*.config           = */ bma250_config,
-	/*.get_config       = */ bma250_get_config,
-	/*.name             = */ "bma250",
-	/*.type             = */ EXT_SLAVE_TYPE_ACCELEROMETER,
-	/*.id               = */ ACCEL_ID_BMA250,
-	/*.reg              = */ 0x02,
-	/*.len              = */ 6,
-	/*.endian           = */ EXT_SLAVE_LITTLE_ENDIAN,
-	/*.range            = */ {2, 0},
+	 bma250_init,
+	 bma250_exit,
+	 bma250_suspend,
+	 bma250_resume,
+	 bma250_read,
+	 bma250_config,
+	 bma250_get_config,
+	 "bma250",
+	 EXT_SLAVE_TYPE_ACCELEROMETER,
+	 ACCEL_ID_BMA250,
+	 0x02,
+	 6,
+	 EXT_SLAVE_LITTLE_ENDIAN,
+	 {2, 0},
 };
 
 struct ext_slave_descr *bma250_get_slave_descr(void)
@@ -656,6 +572,3 @@ MODULE_LICENSE("GPL");
 MODULE_ALIAS("bma");
 #endif
 
-/**
- *  @}
- */

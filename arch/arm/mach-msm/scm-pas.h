@@ -1,4 +1,4 @@
-/* Copyright (c) 2010-2011, Code Aurora Forum. All rights reserved.
+/* Copyright (c) 2010-2012, Code Aurora Forum. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -16,13 +16,14 @@ enum pas_id {
 	PAS_MODEM,
 	PAS_Q6,
 	PAS_DSPS,
-	PAS_PLAYREADY,
+	PAS_TZAPPS,
 	PAS_MODEM_SW,
 	PAS_MODEM_FW,
 	PAS_RIVA,
+	PAS_SECAPP,
+	PAS_GSS,
+	PAS_VIDC,
 };
-
-#define PAS_TZAPPS PAS_PLAYREADY
 
 extern int pas_init_image(enum pas_id id, const u8 *metadata, size_t size);
 extern int pas_auth_and_reset(enum pas_id id);

@@ -1,6 +1,7 @@
 /* include/linux/msm_mdp.h
  *
  * Copyright (C) 2007 Google Incorporated
+ * Copyright (c) 2012 Code Aurora Forum. All rights reserved.
  *
  * This software is licensed under the terms of the GNU General Public
  * License version 2, as published by the Free Software Foundation, and
@@ -25,14 +26,16 @@
 #define MSMFB_CURSOR _IOW(MSMFB_IOCTL_MAGIC, 130, struct fb_cursor)
 #define MSMFB_SET_LUT _IOW(MSMFB_IOCTL_MAGIC, 131, struct fb_cmap)
 #define MSMFB_HISTOGRAM _IOWR(MSMFB_IOCTL_MAGIC, 132, struct mdp_histogram_data)
-/* new ioctls's for set/get ccs matrix */
 #define MSMFB_GET_CCS_MATRIX  _IOWR(MSMFB_IOCTL_MAGIC, 133, struct mdp_ccs)
 #define MSMFB_SET_CCS_MATRIX  _IOW(MSMFB_IOCTL_MAGIC, 134, struct mdp_ccs)
 #define MSMFB_OVERLAY_SET       _IOWR(MSMFB_IOCTL_MAGIC, 135, \
 						struct mdp_overlay)
 #define MSMFB_OVERLAY_UNSET     _IOW(MSMFB_IOCTL_MAGIC, 136, unsigned int)
+
 #define MSMFB_OVERLAY_PLAY      _IOW(MSMFB_IOCTL_MAGIC, 137, \
 						struct msmfb_overlay_data)
+#define MSMFB_OVERLAY_QUEUE	MSMFB_OVERLAY_PLAY
+
 #define MSMFB_GET_PAGE_PROTECTION _IOR(MSMFB_IOCTL_MAGIC, 138, \
 					struct mdp_page_protection)
 #define MSMFB_SET_PAGE_PROTECTION _IOW(MSMFB_IOCTL_MAGIC, 139, \
@@ -55,17 +58,9 @@
 						struct msmfb_mixer_info_req)
 #define MSMFB_OVERLAY_PLAY_WAIT _IOWR(MSMFB_IOCTL_MAGIC, 149, \
 						struct msmfb_overlay_data)
-
 #define MSMFB_WRITEBACK_INIT _IO(MSMFB_IOCTL_MAGIC, 150)
-
-/* The QCT latest code base is used, adding on 2/9/2012 */
 #define MSMFB_WRITEBACK_START _IO(MSMFB_IOCTL_MAGIC, 151)
 #define MSMFB_WRITEBACK_STOP _IO(MSMFB_IOCTL_MAGIC, 152)
-
-#define MSMFB_WRITEBACK_REGISTER_BUFFER _IOW(MSMFB_IOCTL_MAGIC, 151, \
-						struct msmfb_writeback_data)
-#define MSMFB_WRITEBACK_UNREGISTER_BUFFER _IOW(MSMFB_IOCTL_MAGIC, 152, \
-						struct msmfb_writeback_data)
 #define MSMFB_WRITEBACK_QUEUE_BUFFER _IOW(MSMFB_IOCTL_MAGIC, 153, \
 						struct msmfb_data)
 #define MSMFB_WRITEBACK_DEQUEUE_BUFFER _IOW(MSMFB_IOCTL_MAGIC, 154, \
@@ -73,52 +68,59 @@
 #define MSMFB_WRITEBACK_TERMINATE _IO(MSMFB_IOCTL_MAGIC, 155)
 #define MSMFB_MDP_PP _IOWR(MSMFB_IOCTL_MAGIC, 156, struct msmfb_mdp_pp)
 
-/* HTC: Define custom ioctl started from 200 */
-#define MSMFB_OVERLAY_CHANGE_ZORDER_VG_PIPES    _IOW(MSMFB_IOCTL_MAGIC, 200, unsigned int)
-#define MSMFB_GET_GAMMA_CURVY _IOWR(MSMFB_IOCTL_MAGIC, 201, struct gamma_curvy)
+#define MSMFB_OVERLAY_VSYNC_CTRL  _IOW(MSMFB_IOCTL_MAGIC, 160, unsigned int)
+
+
+#define MSMFB_GET_USB_PROJECTOR_INFO _IOR(MSMFB_IOCTL_MAGIC, 301, struct msmfb_usb_projector_info)
+#define MSMFB_SET_USB_PROJECTOR_INFO _IOW(MSMFB_IOCTL_MAGIC, 302, struct msmfb_usb_projector_info)
 
 
 #define FB_TYPE_3D_PANEL 0x10101010
 #define MDP_IMGTYPE2_START 0x10000
 #define MSMFB_DRIVER_VERSION	0xF9E8D701
 
-#define MSMFB_GET_USB_PROJECTOR_INFO _IOR(MSMFB_IOCTL_MAGIC, 301, struct msmfb_usb_projector_info)
-#define MSMFB_SET_USB_PROJECTOR_INFO _IOW(MSMFB_IOCTL_MAGIC, 302, struct msmfb_usb_projector_info)
+
+struct msmfb_usb_projector_info {
+	int usb_offset;
+	int latest_offset;
+};
+
 
 enum {
 	NOTIFY_UPDATE_START,
 	NOTIFY_UPDATE_STOP,
-	NOTIFY_TERMINATE_BLOCKING,
-	NOTIFY_NUM,
 };
 
 enum {
-	MDP_RGB_565,      /* RGB 565 planer */
-	MDP_XRGB_8888,    /* RGB 888 padded */
-	MDP_Y_CBCR_H2V2,  /* Y and CbCr, pseudo planer w/ Cb is in MSB */
+	MDP_RGB_565,      
+	MDP_XRGB_8888,    
+	MDP_Y_CBCR_H2V2,  
 	MDP_Y_CBCR_H2V2_ADRENO,
-	MDP_ARGB_8888,    /* ARGB 888 */
-	MDP_RGB_888,      /* RGB 888 planer */
-	MDP_Y_CRCB_H2V2,  /* Y and CrCb, pseudo planer w/ Cr is in MSB */
-	MDP_YCRYCB_H2V1,  /* YCrYCb interleave */
-	MDP_Y_CRCB_H2V1,  /* Y and CrCb, pseduo planer w/ Cr is in MSB */
-	MDP_Y_CBCR_H2V1,   /* Y and CrCb, pseduo planer w/ Cr is in MSB */
-	MDP_RGBA_8888,    /* ARGB 888 */
-	MDP_BGRA_8888,	  /* ABGR 888 */
-	MDP_RGBX_8888,	  /* RGBX 888 */
-	MDP_Y_CRCB_H2V2_TILE,  /* Y and CrCb, pseudo planer tile */
-	MDP_Y_CBCR_H2V2_TILE,  /* Y and CbCr, pseudo planer tile */
-	MDP_Y_CR_CB_H2V2,  /* Y, Cr and Cb, planar */
-	MDP_Y_CR_CB_GH2V2,  /* Y, Cr and Cb, planar aligned to Android YV12 */
-	MDP_Y_CB_CR_H2V2,  /* Y, Cb and Cr, planar */
-	MDP_Y_CRCB_H1V1,  /* Y and CrCb, pseduo planer w/ Cr is in MSB */
-	MDP_Y_CBCR_H1V1,  /* Y and CbCr, pseduo planer w/ Cb is in MSB */
-	MDP_YCRCB_H1V1,   /* YCrCb interleave */
-	MDP_YCBCR_H1V1,   /* YCbCr interleave */
+	MDP_ARGB_8888,    
+	MDP_RGB_888,      
+	MDP_Y_CRCB_H2V2,  
+	MDP_YCRYCB_H2V1,  
+	MDP_Y_CRCB_H2V1,  
+	MDP_Y_CBCR_H2V1,   
+	MDP_Y_CRCB_H1V2,
+	MDP_Y_CBCR_H1V2,
+	MDP_RGBA_8888,    
+	MDP_BGRA_8888,	  
+	MDP_RGBX_8888,	  
+	MDP_Y_CRCB_H2V2_TILE,  
+	MDP_Y_CBCR_H2V2_TILE,  
+	MDP_Y_CR_CB_H2V2,  
+	MDP_Y_CR_CB_GH2V2,  
+	MDP_Y_CB_CR_H2V2,  
+	MDP_Y_CRCB_H1V1,  
+	MDP_Y_CBCR_H1V1,  
+	MDP_YCRCB_H1V1,   
+	MDP_YCBCR_H1V1,   
+	MDP_BGR_565,      
 	MDP_IMGTYPE_LIMIT,
-	MDP_BGR_565 = MDP_IMGTYPE2_START,      /* BGR 565 planer */
-	MDP_FB_FORMAT,    /* framebuffer format */
-	MDP_IMGTYPE_LIMIT2 /* Non valid image type after this enum */
+	MDP_RGB_BORDERFILL,	
+	MDP_FB_FORMAT = MDP_IMGTYPE2_START,    
+	MDP_IMGTYPE_LIMIT2 
 };
 
 enum {
@@ -134,7 +136,9 @@ enum {
 	NUM_HSIC_PARAM,
 };
 
-/* mdp_blit_req flag values */
+#define MDSS_MDP_ROT_ONLY		0x80
+#define MDSS_MDP_RIGHT_MIXER		0x100
+
 #define MDP_ROT_NOP 0
 #define MDP_FLIP_LR 0x1
 #define MDP_FLIP_UD 0x2
@@ -159,7 +163,6 @@ enum {
 #define MDP_DEINTERLACE_ODD		0x00400000
 #define MDP_OV_PLAY_NOWAIT		0x00200000
 #define MDP_SOURCE_ROTATED_90		0x00100000
-#define MDP_MEMORY_ID_TYPE_FB		0x00001000
 #define MDP_DPP_HSIC			0x00080000
 #define MDP_BACKEND_COMPOSITION		0x00040000
 #define MDP_BORDERFILL_SUPPORTED	0x00010000
@@ -174,9 +177,7 @@ enum {
 #define MDP_FB_PAGE_PROTECTION_WRITETHROUGHCACHE (2)
 #define MDP_FB_PAGE_PROTECTION_WRITEBACKCACHE    (3)
 #define MDP_FB_PAGE_PROTECTION_WRITEBACKWACACHE  (4)
-/* Sentinel: Don't use! */
 #define MDP_FB_PAGE_PROTECTION_INVALID           (5)
-/* Count of the number of MDP_FB_PAGE_PROTECTION_... values. */
 #define MDP_NUM_FB_PAGE_PROTECTION_VALUES        (5)
 
 struct mdp_rect {
@@ -191,13 +192,10 @@ struct mdp_img {
 	uint32_t height;
 	uint32_t format;
 	uint32_t offset;
-	int memory_id;		/* the file descriptor */
+	int memory_id;		
 	uint32_t priv;
 };
 
-/*
- * {3x3} + {3} ccs matrix
- */
 
 #define MDP_CCS_RGB2YUV 	0
 #define MDP_CCS_YUV2RGB 	1
@@ -206,9 +204,9 @@ struct mdp_img {
 #define MDP_BV_SIZE	3
 
 struct mdp_ccs {
-	int direction;			/* MDP_CCS_RGB2YUV or YUV2RGB */
-	uint16_t ccs[MDP_CCS_SIZE];	/* 3x3 color coefficients */
-	uint16_t bv[MDP_BV_SIZE];	/* 1x3 bias vector */
+	int direction;			
+	uint16_t ccs[MDP_CCS_SIZE];	
+	uint16_t bv[MDP_BV_SIZE];	
 };
 
 struct mdp_csc {
@@ -220,10 +218,6 @@ struct mdp_csc {
 	uint32_t csc_post_lv[6];
 };
 
-/* The version of the mdp_blit_req structure so that
- * user applications can selectively decide which functionality
- * to include
- */
 
 #define MDP_BLIT_REQ_VERSION 2
 
@@ -235,7 +229,7 @@ struct mdp_blit_req {
 	uint32_t alpha;
 	uint32_t transp_mask;
 	uint32_t flags;
-	int sharpening_strength;  /* -127 <--> 127, default 64 */
+	int sharpening_strength;  
 };
 
 struct mdp_blit_req_list {
@@ -259,11 +253,10 @@ struct msmfb_data {
 struct msmfb_overlay_data {
 	uint32_t id;
 	struct msmfb_data data;
-#ifndef CONFIG_FB_MSM_OVERLAY_LEGACY
 	uint32_t version_key;
 	struct msmfb_data plane1_data;
 	struct msmfb_data plane2_data;
-#endif
+	struct msmfb_data dst_data;
 };
 
 struct msmfb_img {
@@ -279,12 +272,6 @@ struct msmfb_writeback_data {
 };
 
 struct dpp_ctrl {
-	/*
-	 *'sharp_strength' has inputs = -128 <-> 127
-	 *  Increasingly positive values correlate with increasingly sharper
-	 *  picture. Increasingly negative values correlate with increasingly
-	 *  smoothed picture.
-	 */
 	int8_t sharp_strength;
 	int8_t hsic_params[NUM_HSIC_PARAM];
 };
@@ -293,16 +280,14 @@ struct mdp_overlay {
 	struct msmfb_img src;
 	struct mdp_rect src_rect;
 	struct mdp_rect dst_rect;
-	uint32_t z_order;	/* stage number */
-	uint32_t is_fg;		/* control alpha & transp */
+	uint32_t z_order;	
+	uint32_t is_fg;		
 	uint32_t alpha;
 	uint32_t transp_mask;
 	uint32_t flags;
 	uint32_t id;
 	uint32_t user_data[8];
-#ifndef CONFIG_FB_MSM_OVERLAY_LEGACY
 	struct dpp_ctrl dpp;
-#endif
 };
 
 struct msmfb_overlay_3d {
@@ -329,15 +314,6 @@ struct mdp_histogram {
 };
 
 
-/*
-
-	mdp_block_type defines the identifiers for each of pipes in MDP 4.3
-
-	MDP_BLOCK_RESERVED is provided for backward compatibility and is
-	deprecated. It corresponds to DMA_P. So MDP_BLOCK_DMA_P should be used
-	instead.
-
-*/
 
 enum {
 	MDP_BLOCK_RESERVED = 0,
@@ -354,10 +330,6 @@ enum {
 	MDP_BLOCK_MAX,
 };
 
-/*
-mdp_histogram_start_req is used to provide the parameters for
-histogram start request
-*/
 
 struct mdp_histogram_start_req {
 	uint32_t block;
@@ -365,14 +337,6 @@ struct mdp_histogram_start_req {
 	uint8_t bit_mask;
 	uint8_t num_bins;
 };
-
-
-/*
-
-   mdp_histogram_data is used to return the histogram data, once
-   the histogram is done/stopped/cance
-
- */
 
 
 struct mdp_histogram_data {
@@ -399,7 +363,7 @@ struct mdp_pcc_cfg_data {
 #define MDP_CSC_FLAG_YUV_OUT	0x4
 
 struct mdp_csc_cfg {
-	/* flags for enable CSC, toggling RGB,YUV input/output */
+	
 	uint32_t flags;
 	uint32_t csc_mv[9];
 	uint32_t csc_pre_bv[3];
@@ -471,12 +435,17 @@ struct mdp_qseed_cfg_data {
 	uint32_t *data;
 };
 
+struct mdp_bl_scale_data {
+       uint32_t min_lvl;
+       uint32_t scale;
+};
 
 enum {
 	mdp_op_pcc_cfg,
 	mdp_op_csc_cfg,
 	mdp_op_lut_cfg,
 	mdp_op_qseed_cfg,
+	mdp_bl_scale_cfg,
 	mdp_op_max,
 };
 
@@ -487,6 +456,7 @@ struct msmfb_mdp_pp {
 		struct mdp_csc_cfg_data csc_cfg_data;
 		struct mdp_lut_cfg_data lut_cfg_data;
 		struct mdp_qseed_cfg_data qseed_cfg_data;
+		struct mdp_bl_scale_data bl_scale_data;
 	} data;
 };
 
@@ -512,11 +482,6 @@ struct msmfb_mixer_info_req {
 	struct mdp_mixer_info info[MAX_PIPE_PER_MIXER];
 };
 
-struct msmfb_usb_projector_info {
-	int usb_offset;
-	int latest_offset;
-};
-
 enum {
 	DISPLAY_SUBSYSTEM_ID,
 	ROTATOR_SUBSYSTEM_ID,
@@ -524,26 +489,17 @@ enum {
 
 #ifdef __KERNEL__
 
-/* get the framebuffer physical address information */
 int get_fb_phys_info(unsigned long *start, unsigned long *len, int fb_num,
 	int subsys_id);
-
 struct fb_info *msm_fb_get_writeback_fb(void);
 int msm_fb_writeback_init(struct fb_info *info);
-
-/* The QCT latest code base is used, adding on 2/9/2012 */
 int msm_fb_writeback_start(struct fb_info *info);
-int msm_fb_writeback_stop(struct fb_info *info);
-
-int msm_fb_writeback_register_buffer(struct fb_info *info,
-		struct msmfb_writeback_data *data);
 int msm_fb_writeback_queue_buffer(struct fb_info *info,
 		struct msmfb_data *data);
 int msm_fb_writeback_dequeue_buffer(struct fb_info *info,
 		struct msmfb_data *data);
-int msm_fb_writeback_unregister_buffer(struct fb_info *info,
-		struct msmfb_writeback_data *data);
+int msm_fb_writeback_stop(struct fb_info *info);
 int msm_fb_writeback_terminate(struct fb_info *info);
 #endif
 
-#endif /*_MSM_MDP_H_*/
+#endif 

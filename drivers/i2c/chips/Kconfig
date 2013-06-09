@@ -6,19 +6,6 @@
 
 menu "Miscellaneous I2C Chip support"
 
-
-config SENSORS_ONLY_BMA250
-	tristate "BMA250 acceleration sensor support"
-	depends on I2C=y
-	help
-	  BMA250 ONLY G-sensor Driver implemented by HTC.
-
-config SENSORS_I2C_AK_BMA250
-	tristate "BMA250 acceleration sensor without AKM support(SH)"
-	depends on I2C=y
-	help
-	 BMA250 ONLY G-sensor Driver implemented by HTC.
-
 config SENSORS_AKM8975
         tristate "AKM8973 Compass Driver"
         depends on I2C
@@ -31,19 +18,31 @@ config SENSORS_AKM8975_PANA_GYRO
         help
          AKM8975 Compass Driver implemented by HTC.
 
+config SENSORS_AK8963
+        tristate "AK8963 compass support"
+        default n
+        depends on I2C
+        help
+          If you say yes here you get support for Asahi Kasei's
+          orientation sensor AK8963.
+
 config SENSORS_PANASONIC_GYRO
 	tristate "PANASONIC GYRO sensor support"
 	depends on I2C=y
 	help
 
-config SMB349
-	tristate "smb349 Driver"
-	depends on I2C
+config SENSORS_R3GD20
+	tristate "ST R3GD20 3-axis gyroscope"
+	depends on I2C=y
+	default n
 	help
-	 SMB349 Switch charger implemented by HTC.
-	 This could enable battery driver to set
-	 Charging current 100mA~500mA or 500mA~1000mA
-	 by GPIO or Register
+          This driver provides support for the R3Gd20 chip which is a
+          3-axis gyroscope.
+
+          This driver can also be built as modules.  If so, the module for
+          accelerometer will be called r3gd20.
+
+          Say Y here if you have a device containing r3gd20 chip.
 
 config TPS65200
         tristate "tps65200 Driver"
@@ -56,11 +55,26 @@ config TPS65200
 
 	  PANASONIC GYR Driver implemented by HTC.
 
-config SENSORS_BMA150
-	tristate "BMA150 G-sensor Driver"
-	depends on I2C
+config BOSCH_BMA250
+        tristate "BMA250 acceleration sensor support"
+	depends on I2C=y
 	help
-	 BMA150 G-sensor Driver implemented by HTC.
+	  If you say yes here you get support for Bosch Sensortec's
+	  acceleration sensors BMA250.
+
+config BOSCH_BMA250_ENABLE_INT1
+	tristate "BMA250 acceleration sensor interrupt INT1 support"
+	depends on BOSCH_BMA250=y
+        help
+	  If you say yes here you get INT1 support for Bosch Sensortec's
+	  acceleration sensors BMA250.
+
+config BOSCH_BMA250_ENABLE_INT2
+	tristate "BMA250 acceleration sensor interrupt INT2 support"
+	depends on BOSCH_BMA250=y
+	help
+	  If you say yes here you get INT2 support for Bosch Sensortec's
+	  acceleration sensors BMA250.
 
 config SENSORS_BMA250
 	tristate "BMA250 acceleration sensor support"
@@ -105,6 +119,30 @@ config AMP_TPA2051D3
         help
          TI TPA2051D3 Speaker AMP Driver implemented by HTC.
 
+config AMP_TPA6185
+        tristate "TI TPA6185 AMP Driver"
+	depends on I2C=y
+        help
+          TI TPA6185 AMP Driver implemented by HTC.
+
+config AMP_RT5501
+        tristate "TI RT5501 AMP Driver"
+	depends on I2C=y
+        help
+          TI RT5501 AMP Driver implemented by HTC.
+
+config AMP_TFA9887
+        tristate "NXP TFA9887 Speaker AMP Driver"
+	depends on I2C=y
+        help
+         NXP TFA9887 Speaker AMP Driver implemented by HTC.
+
+config AMP_TFA9887L
+        tristate "NXP TFA9887L Speaker AMP Driver"
+	depends on I2C=y
+        help
+         NXP TFA9887L Speaker AMP Driver implemented by HTC.
+
 config INPUT_ISL29028
 	tristate "ISL29028 proximity and light sensor"
 	help
@@ -123,17 +161,5 @@ config AMP_TPA2051D3_ON_GPIO
 	default n
 	help
 	 TI TPA2051D3_ON_GPIO Speaker AMP Driver implemented by HTC.
-
-config CODEC_AIC3254
-	tristate "Codec AIC3254 support"
-	depends on I2C=y
-	help
-	  AIC3254 Driver implemented by HTC.
-
-config CODEC_AIC3008
-	tristate "Codec AIC3008 support"
-	depends on I2C=y
-	help
-	  AIC3008 Driver implemented by HTC.
 
 endmenu

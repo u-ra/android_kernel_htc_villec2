@@ -18,31 +18,23 @@
  * The full GNU General Public License is included in this distribution in the
  * file called COPYING.
  */
-#ifndef DMAENGINE_H
-#define DMAENGINE_H
+#ifndef LINUX_DMAENGINE_H
+#define LINUX_DMAENGINE_H
 
 #include <linux/device.h>
 #include <linux/uio.h>
-#include <linux/dma-mapping.h>
+#include <linux/bug.h>
+#include <linux/scatterlist.h>
+#include <linux/bitmap.h>
+#include <linux/types.h>
+#include <asm/page.h>
 
-/**
- * typedef dma_cookie_t - an opaque DMA cookie
- *
- * if dma_cookie_t is >0 it's a DMA request cookie, <0 it's an error code
- */
 typedef s32 dma_cookie_t;
 #define DMA_MIN_COOKIE	1
 #define DMA_MAX_COOKIE	INT_MAX
 
 #define dma_submit_error(cookie) ((cookie) < 0 ? 1 : 0)
 
-/**
- * enum dma_status - DMA transaction status
- * @DMA_SUCCESS: transaction completed successfully
- * @DMA_IN_PROGRESS: transaction not yet processed
- * @DMA_PAUSED: transaction is paused
- * @DMA_ERROR: transaction failed
- */
 enum dma_status {
 	DMA_SUCCESS,
 	DMA_IN_PROGRESS,
@@ -50,12 +42,6 @@ enum dma_status {
 	DMA_ERROR,
 };
 
-/**
- * enum dma_transaction_type - DMA transaction types/indexes
- *
- * Note: The DMA_ASYNC_TX capability is not to be set by drivers.  It is
- * automatically set as dma devices are registered.
- */
 enum dma_transaction_type {
 	DMA_MEMCPY,
 	DMA_XOR,
@@ -69,34 +55,37 @@ enum dma_transaction_type {
 	DMA_ASYNC_TX,
 	DMA_SLAVE,
 	DMA_CYCLIC,
+	DMA_INTERLEAVE,
+	DMA_TX_TYPE_END,
 };
 
-/* last transaction type for creation of the capabilities mask */
-#define DMA_TX_TYPE_END (DMA_CYCLIC + 1)
+enum dma_transfer_direction {
+	DMA_MEM_TO_MEM,
+	DMA_MEM_TO_DEV,
+	DMA_DEV_TO_MEM,
+	DMA_DEV_TO_DEV,
+	DMA_TRANS_NONE,
+};
 
 
-/**
- * enum dma_ctrl_flags - DMA flags to augment operation preparation,
- *  control completion, and communicate status.
- * @DMA_PREP_INTERRUPT - trigger an interrupt (callback) upon completion of
- *  this transaction
- * @DMA_CTRL_ACK - if clear, the descriptor cannot be reused until the client
- *  acknowledges receipt, i.e. has has a chance to establish any dependency
- *  chains
- * @DMA_COMPL_SKIP_SRC_UNMAP - set to disable dma-unmapping the source buffer(s)
- * @DMA_COMPL_SKIP_DEST_UNMAP - set to disable dma-unmapping the destination(s)
- * @DMA_COMPL_SRC_UNMAP_SINGLE - set to do the source dma-unmapping as single
- * 	(if not set, do the source dma-unmapping as page)
- * @DMA_COMPL_DEST_UNMAP_SINGLE - set to do the destination dma-unmapping as single
- * 	(if not set, do the destination dma-unmapping as page)
- * @DMA_PREP_PQ_DISABLE_P - prevent generation of P while generating Q
- * @DMA_PREP_PQ_DISABLE_Q - prevent generation of Q while generating P
- * @DMA_PREP_CONTINUE - indicate to a driver that it is reusing buffers as
- *  sources that were the result of a previous operation, in the case of a PQ
- *  operation it continues the calculation with new sources
- * @DMA_PREP_FENCE - tell the driver that subsequent operations depend
- *  on the result of this operation
- */
+struct data_chunk {
+	size_t size;
+	size_t icg;
+};
+
+struct dma_interleaved_template {
+	dma_addr_t src_start;
+	dma_addr_t dst_start;
+	enum dma_transfer_direction dir;
+	bool src_inc;
+	bool dst_inc;
+	bool src_sgl;
+	bool dst_sgl;
+	size_t numf;
+	size_t frame_size;
+	struct data_chunk sgl[0];
+};
+
 enum dma_ctrl_flags {
 	DMA_PREP_INTERRUPT = (1 << 0),
 	DMA_CTRL_ACK = (1 << 1),
@@ -110,20 +99,6 @@ enum dma_ctrl_flags {
 	DMA_PREP_FENCE = (1 << 9),
 };
 
-/**
- * enum dma_ctrl_cmd - DMA operations that can optionally be exercised
- * on a running channel.
- * @DMA_TERMINATE_ALL: terminate all ongoing transfers
- * @DMA_PAUSE: pause ongoing transfers
- * @DMA_RESUME: resume paused transfer
- * @DMA_SLAVE_CONFIG: this command is only implemented by DMA controllers
- * that need to runtime reconfigure the slave channels (as opposed to passing
- * configuration data in statically from the platform). An additional
- * argument of struct dma_slave_config must be passed in with this
- * command.
- * @FSLDMA_EXTERNAL_START: this command will put the Freescale DMA controller
- * into external start mode.
- */
 enum dma_ctrl_cmd {
 	DMA_TERMINATE_ALL,
 	DMA_PAUSE,
@@ -132,60 +107,32 @@ enum dma_ctrl_cmd {
 	FSLDMA_EXTERNAL_START,
 };
 
-/**
- * enum sum_check_bits - bit position of pq_check_flags
- */
 enum sum_check_bits {
 	SUM_CHECK_P = 0,
 	SUM_CHECK_Q = 1,
 };
 
-/**
- * enum pq_check_flags - result of async_{xor,pq}_zero_sum operations
- * @SUM_CHECK_P_RESULT - 1 if xor zero sum error, 0 otherwise
- * @SUM_CHECK_Q_RESULT - 1 if reed-solomon zero sum error, 0 otherwise
- */
 enum sum_check_flags {
 	SUM_CHECK_P_RESULT = (1 << SUM_CHECK_P),
 	SUM_CHECK_Q_RESULT = (1 << SUM_CHECK_Q),
 };
 
 
-/**
- * dma_cap_mask_t - capabilities bitmap modeled after cpumask_t.
- * See linux/cpumask.h
- */
 typedef struct { DECLARE_BITMAP(bits, DMA_TX_TYPE_END); } dma_cap_mask_t;
 
-/**
- * struct dma_chan_percpu - the per-CPU part of struct dma_chan
- * @memcpy_count: transaction counter
- * @bytes_transferred: byte counter
- */
 
 struct dma_chan_percpu {
-	/* stats */
+	
 	unsigned long memcpy_count;
 	unsigned long bytes_transferred;
 };
 
-/**
- * struct dma_chan - devices supply DMA channels, clients use them
- * @device: ptr to the dma device who supplies this channel, always !%NULL
- * @cookie: last cookie value returned to client
- * @chan_id: channel ID for sysfs
- * @dev: class device for sysfs
- * @device_node: used to add this to the device chan list
- * @local: per-cpu pointer to a struct dma_chan_percpu
- * @client-count: how many clients are using this channel
- * @table_count: number of appearances in the mem-to-mem allocation table
- * @private: private data for certain client-channel associations
- */
 struct dma_chan {
 	struct dma_device *device;
 	dma_cookie_t cookie;
+	dma_cookie_t completed_cookie;
 
-	/* sysfs */
+	
 	int chan_id;
 	struct dma_chan_dev *dev;
 
@@ -196,13 +143,6 @@ struct dma_chan {
 	void *private;
 };
 
-/**
- * struct dma_chan_dev - relate sysfs device node to backing channel device
- * @chan - driver channel device
- * @device - sysfs device
- * @dev_id - parent dma_device dev_id
- * @idr_ref - reference count to gate release of dma_device dev_id
- */
 struct dma_chan_dev {
 	struct dma_chan *chan;
 	struct device device;
@@ -210,10 +150,6 @@ struct dma_chan_dev {
 	atomic_t *idr_ref;
 };
 
-/**
- * enum dma_slave_buswidth - defines bus with of the DMA slave
- * device, source or target buses
- */
 enum dma_slave_buswidth {
 	DMA_SLAVE_BUSWIDTH_UNDEFINED = 0,
 	DMA_SLAVE_BUSWIDTH_1_BYTE = 1,
@@ -247,6 +183,9 @@ enum dma_slave_buswidth {
  * may or may not be applicable on memory sources.
  * @dst_maxburst: same as src_maxburst but for destination target
  * mutatis mutandis.
+ * @device_fc: Flow Controller Settings. Only valid for slave channels. Fill
+ * with 'true' if peripheral should be flow controller. Direction will be
+ * selected at Runtime.
  *
  * This struct is passed in as configuration data to a DMA engine
  * in order to set up a certain channel for DMA transport at runtime.
@@ -266,13 +205,14 @@ enum dma_slave_buswidth {
  * struct, if applicable.
  */
 struct dma_slave_config {
-	enum dma_data_direction direction;
+	enum dma_transfer_direction direction;
 	dma_addr_t src_addr;
 	dma_addr_t dst_addr;
 	enum dma_slave_buswidth src_addr_width;
 	enum dma_slave_buswidth dst_addr_width;
 	u32 src_maxburst;
 	u32 dst_maxburst;
+	bool device_fc;
 };
 
 static inline const char *dma_chan_name(struct dma_chan *chan)
@@ -282,40 +222,12 @@ static inline const char *dma_chan_name(struct dma_chan *chan)
 
 void dma_chan_cleanup(struct kref *kref);
 
-/**
- * typedef dma_filter_fn - callback filter for dma_request_channel
- * @chan: channel to be reviewed
- * @filter_param: opaque parameter passed through dma_request_channel
- *
- * When this optional parameter is specified in a call to dma_request_channel a
- * suitable channel is passed to this routine for further dispositioning before
- * being returned.  Where 'suitable' indicates a non-busy channel that
- * satisfies the given capability mask.  It returns 'true' to indicate that the
- * channel is suitable.
- */
 typedef bool (*dma_filter_fn)(struct dma_chan *chan, void *filter_param);
 
 typedef void (*dma_async_tx_callback)(void *dma_async_param);
-/**
- * struct dma_async_tx_descriptor - async transaction descriptor
- * ---dma generic offload fields---
- * @cookie: tracking cookie for this transaction, set to -EBUSY if
- *	this tx is sitting on a dependency list
- * @flags: flags to augment operation preparation, control completion, and
- * 	communicate status
- * @phys: physical address of the descriptor
- * @chan: target channel for this operation
- * @tx_submit: set the prepared descriptor(s) to be executed by the engine
- * @callback: routine to call after this operation is complete
- * @callback_param: general parameter to pass to the callback routine
- * ---async_tx api specific fields---
- * @next: at completion submit this descriptor
- * @parent: pointer to the next level up in the dependency chain
- * @lock: protect the parent and next pointers
- */
 struct dma_async_tx_descriptor {
 	dma_cookie_t cookie;
-	enum dma_ctrl_flags flags; /* not a 'long' to pack with cookie */
+	enum dma_ctrl_flags flags; 
 	dma_addr_t phys;
 	struct dma_chan *chan;
 	dma_cookie_t (*tx_submit)(struct dma_async_tx_descriptor *tx);
@@ -386,58 +298,12 @@ static inline struct dma_async_tx_descriptor *txd_next(struct dma_async_tx_descr
 }
 #endif
 
-/**
- * struct dma_tx_state - filled in to report the status of
- * a transfer.
- * @last: last completed DMA cookie
- * @used: last issued DMA cookie (i.e. the one in progress)
- * @residue: the remaining number of bytes left to transmit
- *	on the selected transfer for states DMA_IN_PROGRESS and
- *	DMA_PAUSED if this is implemented in the driver, else 0
- */
 struct dma_tx_state {
 	dma_cookie_t last;
 	dma_cookie_t used;
 	u32 residue;
 };
 
-/**
- * struct dma_device - info on the entity supplying DMA services
- * @chancnt: how many DMA channels are supported
- * @privatecnt: how many DMA channels are requested by dma_request_channel
- * @channels: the list of struct dma_chan
- * @global_node: list_head for global dma_device_list
- * @cap_mask: one or more dma_capability flags
- * @max_xor: maximum number of xor sources, 0 if no capability
- * @max_pq: maximum number of PQ sources and PQ-continue capability
- * @copy_align: alignment shift for memcpy operations
- * @xor_align: alignment shift for xor operations
- * @pq_align: alignment shift for pq operations
- * @fill_align: alignment shift for memset operations
- * @dev_id: unique device ID
- * @dev: struct device reference for dma mapping api
- * @device_alloc_chan_resources: allocate resources and return the
- *	number of allocated descriptors
- * @device_free_chan_resources: release DMA channel's resources
- * @device_prep_dma_memcpy: prepares a memcpy operation
- * @device_prep_dma_xor: prepares a xor operation
- * @device_prep_dma_xor_val: prepares a xor validation operation
- * @device_prep_dma_pq: prepares a pq operation
- * @device_prep_dma_pq_val: prepares a pqzero_sum operation
- * @device_prep_dma_memset: prepares a memset operation
- * @device_prep_dma_interrupt: prepares an end of chain interrupt operation
- * @device_prep_slave_sg: prepares a slave dma operation
- * @device_prep_dma_cyclic: prepare a cyclic dma operation suitable for audio.
- *	The function takes a buffer of size buf_len. The callback function will
- *	be called after period_len bytes have been transferred.
- * @device_control: manipulate all pending operations on a channel, returns
- *	zero or error code
- * @device_tx_status: poll for transaction completion, the optional
- *	txstate parameter can be supplied with a pointer to get a
- *	struct with auxiliary transfer status information, otherwise the call
- *	will just return a simple status code
- * @device_issue_pending: push pending transactions to hardware
- */
 struct dma_device {
 
 	unsigned int chancnt;
@@ -489,11 +355,15 @@ struct dma_device {
 
 	struct dma_async_tx_descriptor *(*device_prep_slave_sg)(
 		struct dma_chan *chan, struct scatterlist *sgl,
-		unsigned int sg_len, enum dma_data_direction direction,
-		unsigned long flags);
+		unsigned int sg_len, enum dma_transfer_direction direction,
+		unsigned long flags, void *context);
 	struct dma_async_tx_descriptor *(*device_prep_dma_cyclic)(
 		struct dma_chan *chan, dma_addr_t buf_addr, size_t buf_len,
-		size_t period_len, enum dma_data_direction direction);
+		size_t period_len, enum dma_transfer_direction direction,
+		void *context);
+	struct dma_async_tx_descriptor *(*device_prep_interleaved_dma)(
+		struct dma_chan *chan, struct dma_interleaved_template *xt,
+		unsigned long flags);
 	int (*device_control)(struct dma_chan *chan, enum dma_ctrl_cmd cmd,
 		unsigned long arg);
 
@@ -515,6 +385,33 @@ static inline int dmaengine_slave_config(struct dma_chan *chan,
 {
 	return dmaengine_device_control(chan, DMA_SLAVE_CONFIG,
 			(unsigned long)config);
+}
+
+static inline struct dma_async_tx_descriptor *dmaengine_prep_slave_single(
+	struct dma_chan *chan, void *buf, size_t len,
+	enum dma_transfer_direction dir, unsigned long flags)
+{
+	struct scatterlist sg;
+	sg_init_one(&sg, buf, len);
+
+	return chan->device->device_prep_slave_sg(chan, &sg, 1,
+						  dir, flags, NULL);
+}
+
+static inline struct dma_async_tx_descriptor *dmaengine_prep_slave_sg(
+	struct dma_chan *chan, struct scatterlist *sgl,	unsigned int sg_len,
+	enum dma_transfer_direction dir, unsigned long flags)
+{
+	return chan->device->device_prep_slave_sg(chan, sgl, sg_len,
+						  dir, flags, NULL);
+}
+
+static inline struct dma_async_tx_descriptor *dmaengine_prep_dma_cyclic(
+		struct dma_chan *chan, dma_addr_t buf_addr, size_t buf_len,
+		size_t period_len, enum dma_transfer_direction dir)
+{
+	return chan->device->device_prep_dma_cyclic(chan, buf_addr, buf_len,
+						period_len, dir, NULL);
 }
 
 static inline int dmaengine_terminate_all(struct dma_chan *chan)
@@ -603,19 +500,6 @@ static inline unsigned short dma_dev_to_maxpq(struct dma_device *dma)
 	return dma->max_pq & ~DMA_HAS_PQ_CONTINUE;
 }
 
-/* dma_maxpq - reduce maxpq in the face of continued operations
- * @dma - dma device with PQ capability
- * @flags - to check if DMA_PREP_CONTINUE and DMA_PREP_PQ_DISABLE_P are set
- *
- * When an engine does not support native continuation we need 3 extra
- * source slots to reuse P and Q with the following coefficients:
- * 1/ {00} * P : remove P from Q', but use it as a source for P'
- * 2/ {01} * Q : use Q to continue Q' calculation
- * 3/ {00} * Q : subtract Q from P' to cancel (2)
- *
- * In the case where P is disabled we only need 1 extra source:
- * 1/ {01} * Q : use Q to continue Q' calculation
- */
 static inline int dma_maxpq(struct dma_device *dma, enum dma_ctrl_flags flags)
 {
 	if (dma_dev_has_pq_continue(dma) || !dmaf_continue(flags))
@@ -627,7 +511,6 @@ static inline int dma_maxpq(struct dma_device *dma, enum dma_ctrl_flags flags)
 	BUG();
 }
 
-/* --- public DMA engine API --- */
 
 #ifdef CONFIG_DMA_ENGINE
 void dmaengine_get(void);
@@ -660,7 +543,7 @@ static inline void net_dmaengine_put(void)
 #define async_dma_find_channel(type) dma_find_channel(DMA_ASYNC_TX)
 #else
 #define async_dma_find_channel(type) dma_find_channel(type)
-#endif /* CONFIG_ASYNC_TX_ENABLE_CHANNEL_SWITCH */
+#endif 
 #else
 static inline void async_dmaengine_get(void)
 {
@@ -673,7 +556,7 @@ async_dma_find_channel(enum dma_transaction_type type)
 {
 	return NULL;
 }
-#endif /* CONFIG_ASYNC_TX_DMA */
+#endif 
 
 dma_cookie_t dma_async_memcpy_buf_to_buf(struct dma_chan *chan,
 	void *dest, void *src, size_t len);
@@ -746,13 +629,6 @@ __dma_has_cap(enum dma_transaction_type tx_type, dma_cap_mask_t *srcp)
 		(cap) < DMA_TX_TYPE_END;	\
 		(cap) = next_dma_cap((cap), (mask)))
 
-/**
- * dma_async_issue_pending - flush pending transactions to HW
- * @chan: target DMA channel
- *
- * This allows drivers to push copies to HW in batches,
- * reducing MMIO writes where possible.
- */
 static inline void dma_async_issue_pending(struct dma_chan *chan)
 {
 	chan->device->device_issue_pending(chan);
@@ -760,17 +636,6 @@ static inline void dma_async_issue_pending(struct dma_chan *chan)
 
 #define dma_async_memcpy_issue_pending(chan) dma_async_issue_pending(chan)
 
-/**
- * dma_async_is_tx_complete - poll for transaction completion
- * @chan: DMA channel
- * @cookie: transaction identifier to check status of
- * @last: returns last completed cookie, can be NULL
- * @used: returns last issued cookie, can be NULL
- *
- * If @last and @used are passed in, upon return they reflect the driver
- * internal state and can be used with dma_async_is_complete() to check
- * the status of multiple cookies without re-checking hardware state.
- */
 static inline enum dma_status dma_async_is_tx_complete(struct dma_chan *chan,
 	dma_cookie_t cookie, dma_cookie_t *last, dma_cookie_t *used)
 {
@@ -788,15 +653,6 @@ static inline enum dma_status dma_async_is_tx_complete(struct dma_chan *chan,
 #define dma_async_memcpy_complete(chan, cookie, last, used)\
 	dma_async_is_tx_complete(chan, cookie, last, used)
 
-/**
- * dma_async_is_complete - test a cookie against chan state
- * @cookie: transaction identifier to test status of
- * @last_complete: last know completed transaction
- * @last_used: last cookie value handed out
- *
- * dma_async_is_complete() is used in dma_async_memcpy_complete()
- * the test logic is separated for lightweight testing of multiple cookies
- */
 static inline enum dma_status dma_async_is_complete(dma_cookie_t cookie,
 			dma_cookie_t last_complete, dma_cookie_t last_used)
 {
@@ -844,15 +700,14 @@ static inline void dma_release_channel(struct dma_chan *chan)
 }
 #endif
 
-/* --- DMA device --- */
 
 int dma_async_device_register(struct dma_device *device);
 void dma_async_device_unregister(struct dma_device *device);
 void dma_run_dependencies(struct dma_async_tx_descriptor *tx);
 struct dma_chan *dma_find_channel(enum dma_transaction_type tx_type);
+struct dma_chan *net_dma_find_channel(void);
 #define dma_request_channel(mask, x, y) __dma_request_channel(&(mask), x, y)
 
-/* --- Helper iov-locking functions --- */
 
 struct dma_page_list {
 	char __user *base_address;
@@ -874,4 +729,4 @@ dma_cookie_t dma_memcpy_pg_to_iovec(struct dma_chan *chan, struct iovec *iov,
 	struct dma_pinned_list *pinned_list, struct page *page,
 	unsigned int offset, size_t len);
 
-#endif /* DMAENGINE_H */
+#endif 

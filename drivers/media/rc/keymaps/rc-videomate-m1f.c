@@ -1,4 +1,4 @@
-/* videomate-m1f.h - Keytable for videomate_m1f Remote Controller
+/* videomate-k100.h - Keytable for videomate_k100 Remote Controller
  *
  * keymap imported from ir-keymaps.c
  *
@@ -11,25 +11,26 @@
  */
 
 #include <media/rc-map.h>
+#include <linux/module.h>
 
-static struct rc_map_table videomate_m1f[] = {
+static struct rc_map_table videomate_k100[] = {
 	{ 0x01, KEY_POWER },
 	{ 0x31, KEY_TUNER },
 	{ 0x33, KEY_VIDEO },
 	{ 0x2f, KEY_RADIO },
 	{ 0x30, KEY_CAMERA },
-	{ 0x2d, KEY_NEW }, /* TV record button */
+	{ 0x2d, KEY_NEW }, 
 	{ 0x17, KEY_CYCLEWINDOWS },
 	{ 0x2c, KEY_ANGLE },
 	{ 0x2b, KEY_LANGUAGE },
-	{ 0x32, KEY_SEARCH }, /* '...' button */
+	{ 0x32, KEY_SEARCH }, 
 	{ 0x11, KEY_UP },
 	{ 0x13, KEY_LEFT },
 	{ 0x15, KEY_OK },
 	{ 0x14, KEY_RIGHT },
 	{ 0x12, KEY_DOWN },
 	{ 0x16, KEY_BACKSPACE },
-	{ 0x02, KEY_ZOOM }, /* WIN key */
+	{ 0x02, KEY_ZOOM }, 
 	{ 0x04, KEY_INFO },
 	{ 0x05, KEY_VOLUMEUP },
 	{ 0x03, KEY_MUTE },
@@ -53,9 +54,9 @@ static struct rc_map_table videomate_m1f[] = {
 	{ 0x24, KEY_7 },
 	{ 0x25, KEY_8 },
 	{ 0x26, KEY_9 },
-	{ 0x2a, KEY_NUMERIC_STAR }, /* * key */
+	{ 0x2a, KEY_NUMERIC_STAR }, 
 	{ 0x1d, KEY_0 },
-	{ 0x29, KEY_SUBTITLE }, /* # key */
+	{ 0x29, KEY_SUBTITLE }, 
 	{ 0x27, KEY_CLEAR },
 	{ 0x34, KEY_SCREEN },
 	{ 0x28, KEY_ENTER },
@@ -66,27 +67,27 @@ static struct rc_map_table videomate_m1f[] = {
 	{ 0x18, KEY_TEXT },
 };
 
-static struct rc_map_list videomate_m1f_map = {
+static struct rc_map_list videomate_k100_map = {
 	.map = {
-		.scan    = videomate_m1f,
-		.size    = ARRAY_SIZE(videomate_m1f),
-		.rc_type = RC_TYPE_UNKNOWN,     /* Legacy IR type */
-		.name    = RC_MAP_VIDEOMATE_M1F,
+		.scan    = videomate_k100,
+		.size    = ARRAY_SIZE(videomate_k100),
+		.rc_type = RC_TYPE_UNKNOWN,     
+		.name    = RC_MAP_VIDEOMATE_K100,
 	}
 };
 
-static int __init init_rc_map_videomate_m1f(void)
+static int __init init_rc_map_videomate_k100(void)
 {
-	return rc_map_register(&videomate_m1f_map);
+	return rc_map_register(&videomate_k100_map);
 }
 
-static void __exit exit_rc_map_videomate_m1f(void)
+static void __exit exit_rc_map_videomate_k100(void)
 {
-	rc_map_unregister(&videomate_m1f_map);
+	rc_map_unregister(&videomate_k100_map);
 }
 
-module_init(init_rc_map_videomate_m1f)
-module_exit(exit_rc_map_videomate_m1f)
+module_init(init_rc_map_videomate_k100)
+module_exit(exit_rc_map_videomate_k100)
 
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("Pavel Osnova <pvosnova@gmail.com>");

@@ -17,14 +17,24 @@
 #include "kgsl_sharedmem.h"
 #include "adreno.h"
 
-/* quad for copying GMEM to context shadow */
+#define KGSL_INIT_REFTIMESTAMP		0x7FFFFFFF
+
 #define QUAD_LEN 12
+#define QUAD_RESTORE_LEN 14
 
 static unsigned int gmem_copy_quad[QUAD_LEN] = {
 	0x00000000, 0x00000000, 0x3f800000,
 	0x00000000, 0x00000000, 0x3f800000,
 	0x00000000, 0x00000000, 0x3f800000,
 	0x00000000, 0x00000000, 0x3f800000
+};
+
+static unsigned int gmem_restore_quad[QUAD_RESTORE_LEN] = {
+	0x00000000, 0x3f800000, 0x3f800000,
+	0x00000000, 0x00000000, 0x00000000,
+	0x3f800000, 0x00000000, 0x00000000,
+	0x3f800000, 0x00000000, 0x00000000,
+	0x3f800000, 0x3f800000,
 };
 
 #define TEXCOORD_LEN 8
@@ -36,15 +46,7 @@ static unsigned int gmem_copy_texcoord[TEXCOORD_LEN] = {
 	0x3f800000, 0x00000000
 };
 
-/*
- * Helper functions
- * These are global helper functions used by the GPUs during context switch
- */
 
-/**
- * uint2float - convert a uint to IEEE754 single precision float
- * @ uintval - value to convert
- */
 
 unsigned int uint2float(unsigned int uintval)
 {
@@ -55,11 +57,11 @@ unsigned int uint2float(unsigned int uintval)
 
 	exp = ilog2(uintval);
 
-	/* Calculate fraction */
+	
 	if (23 > exp)
 		frac = (uintval & (~(1 << exp))) << (23 - exp);
 
-	/* Exp is biased by 127 and shifted 23 bits */
+	
 	exp = (exp + 127) << 23;
 
 	return exp | frac;
@@ -67,43 +69,43 @@ unsigned int uint2float(unsigned int uintval)
 
 static void set_gmem_copy_quad(struct gmem_shadow_t *shadow)
 {
-	/* set vertex buffer values */
+	
 	gmem_copy_quad[1] = uint2float(shadow->height);
 	gmem_copy_quad[3] = uint2float(shadow->width);
 	gmem_copy_quad[4] = uint2float(shadow->height);
 	gmem_copy_quad[9] = uint2float(shadow->width);
 
-	gmem_copy_quad[0] = 0;
-	gmem_copy_quad[6] = 0;
-	gmem_copy_quad[7] = 0;
-	gmem_copy_quad[10] = 0;
+	gmem_restore_quad[5] = uint2float(shadow->height);
+	gmem_restore_quad[7] = uint2float(shadow->width);
 
 	memcpy(shadow->quad_vertices.hostptr, gmem_copy_quad, QUAD_LEN << 2);
+	memcpy(shadow->quad_vertices_restore.hostptr, gmem_restore_quad,
+		QUAD_RESTORE_LEN << 2);
 
 	memcpy(shadow->quad_texcoords.hostptr, gmem_copy_texcoord,
 		TEXCOORD_LEN << 2);
 }
 
-/**
- * build_quad_vtxbuff - Create a quad for saving/restoring GMEM
- * @ context - Pointer to the context being created
- * @ shadow - Pointer to the GMEM shadow structure
- * @ incmd - Pointer to pointer to the temporary command buffer
- */
 
-/* quad for saving/restoring gmem */
 void build_quad_vtxbuff(struct adreno_context *drawctxt,
 		struct gmem_shadow_t *shadow, unsigned int **incmd)
 {
 	 unsigned int *cmd = *incmd;
 
-	/* quad vertex buffer location (in GPU space) */
+	
 	shadow->quad_vertices.hostptr = cmd;
 	shadow->quad_vertices.gpuaddr = virt2gpu(cmd, &drawctxt->gpustate);
 
 	cmd += QUAD_LEN;
 
-	/* tex coord buffer location (in GPU space) */
+	
+	shadow->quad_vertices_restore.hostptr = cmd;
+	shadow->quad_vertices_restore.gpuaddr =
+		virt2gpu(cmd, &drawctxt->gpustate);
+
+	cmd += QUAD_RESTORE_LEN;
+
+	
 	shadow->quad_texcoords.hostptr = cmd;
 	shadow->quad_texcoords.gpuaddr = virt2gpu(cmd, &drawctxt->gpustate);
 
@@ -113,16 +115,6 @@ void build_quad_vtxbuff(struct adreno_context *drawctxt,
 	*incmd = cmd;
 }
 
-/**
- * adreno_drawctxt_create - create a new adreno draw context
- * @device - KGSL device to create the context on
- * @pagetable - Pagetable for the context
- * @context- Generic KGSL context structure
- * @flags - flags for the context (passed from user space)
- *
- * Create a new draw context for the 3D core.  Return 0 on success,
- * or error code on failure.
- */
 int adreno_drawctxt_create(struct kgsl_device *device,
 			struct kgsl_pagetable *pagetable,
 			struct kgsl_context *context, uint32_t flags)
@@ -138,6 +130,7 @@ int adreno_drawctxt_create(struct kgsl_device *device,
 
 	drawctxt->pagetable = pagetable;
 	drawctxt->bin_base_offset = 0;
+	drawctxt->id = context->id;
 
 	if (flags & KGSL_CONTEXT_PREAMBLE)
 		drawctxt->flags |= CTXT_FLAGS_PREAMBLE;
@@ -145,9 +138,16 @@ int adreno_drawctxt_create(struct kgsl_device *device,
 	if (flags & KGSL_CONTEXT_NO_GMEM_ALLOC)
 		drawctxt->flags |= CTXT_FLAGS_NOGMEMALLOC;
 
+	if (flags & KGSL_CONTEXT_PER_CONTEXT_TS)
+		drawctxt->flags |= CTXT_FLAGS_PER_CONTEXT_TS;
+
 	ret = adreno_dev->gpudev->ctxt_create(adreno_dev, drawctxt);
 	if (ret)
 		goto err;
+
+	kgsl_sharedmem_writel(&device->memstore,
+			KGSL_MEMSTORE_OFFSET(drawctxt->id, ref_wait_ts),
+			KGSL_INIT_REFTIMESTAMP);
 
 	context->devctxt = drawctxt;
 	return 0;
@@ -156,40 +156,35 @@ err:
 	return ret;
 }
 
-/**
- * adreno_drawctxt_destroy - destroy a draw context
- * @device - KGSL device that owns the context
- * @context- Generic KGSL context container for the context
- *
- * Destroy an existing context.  Return 0 on success or error
- * code on failure.
- */
 
-/* destroy a drawing context */
 
 void adreno_drawctxt_destroy(struct kgsl_device *device,
 			  struct kgsl_context *context)
 {
 	struct adreno_device *adreno_dev = ADRENO_DEVICE(device);
-	struct adreno_context *drawctxt = context->devctxt;
+	struct adreno_context *drawctxt;
 
-	if (drawctxt == NULL)
+	if (context == NULL || context->devctxt == NULL)
 		return;
 
-	/* deactivate context */
+	drawctxt = context->devctxt;
+	
 	if (adreno_dev->drawctxt_active == drawctxt) {
-		/* no need to save GMEM or shader, the context is
-		 * being destroyed.
-		 */
 		drawctxt->flags &= ~(CTXT_FLAGS_GMEM_SAVE |
 				     CTXT_FLAGS_SHADER_SAVE |
 				     CTXT_FLAGS_GMEM_SHADOW |
 				     CTXT_FLAGS_STATE_SHADOW);
-
+#ifdef CONFIG_MSM_KGSL_GPU_USAGE
+		device->current_process_priv = NULL;
+#endif
 		adreno_drawctxt_switch(adreno_dev, NULL, 0);
 	}
 
 	adreno_idle(device, KGSL_TIMEOUT_DEFAULT);
+
+	if (adreno_is_a20x(adreno_dev) && adreno_dev->drawctxt_active)
+		kgsl_setstate(&device->mmu, adreno_dev->drawctxt_active->id,
+			KGSL_MMUFLAGS_PTUPDATE);
 
 	kgsl_sharedmem_free(&drawctxt->gpustate);
 	kgsl_sharedmem_free(&drawctxt->context_gmem_shadow.gmemshadow);
@@ -198,14 +193,6 @@ void adreno_drawctxt_destroy(struct kgsl_device *device,
 	context->devctxt = NULL;
 }
 
-/**
- * adreno_drawctxt_set_bin_base_offset - set bin base offset for the context
- * @device - KGSL device that owns the context
- * @context- Generic KGSL context container for the context
- * @offset - Offset to set
- *
- * Set the bin base offset for A2XX devices.  Not valid for A3XX devices.
- */
 
 void adreno_drawctxt_set_bin_base_offset(struct kgsl_device *device,
 				      struct kgsl_context *context,
@@ -217,14 +204,6 @@ void adreno_drawctxt_set_bin_base_offset(struct kgsl_device *device,
 		drawctxt->bin_base_offset = offset;
 }
 
-/**
- * adreno_drawctxt_switch - switch the current draw context
- * @adreno_dev - The 3D device that owns the context
- * @drawctxt - the 3D context to switch to
- * @flags - Flags to accompany the switch (from user space)
- *
- * Switch the current draw context
- */
 
 void adreno_drawctxt_switch(struct adreno_device *adreno_dev,
 				struct adreno_context *drawctxt,
@@ -234,25 +213,28 @@ void adreno_drawctxt_switch(struct adreno_device *adreno_dev,
 
 	if (drawctxt) {
 		if (flags & KGSL_CONTEXT_SAVE_GMEM)
-			/* Set the flag in context so that the save is done
-			* when this context is switched out. */
 			drawctxt->flags |= CTXT_FLAGS_GMEM_SAVE;
 		else
-			/* Remove GMEM saving flag from the context */
+			
 			drawctxt->flags &= ~CTXT_FLAGS_GMEM_SAVE;
 	}
 
-	/* already current? */
-	if (adreno_dev->drawctxt_active == drawctxt)
+	
+	if (adreno_dev->drawctxt_active == drawctxt) {
+		if (adreno_dev->gpudev->ctxt_draw_workaround &&
+			adreno_is_a225(adreno_dev))
+				adreno_dev->gpudev->ctxt_draw_workaround(
+					adreno_dev, drawctxt);
 		return;
+	}
 
 	KGSL_CTXT_INFO(device, "from %p to %p flags %d\n",
 			adreno_dev->drawctxt_active, drawctxt, flags);
 
-	/* Save the old context */
+	
 	adreno_dev->gpudev->ctxt_save(adreno_dev, adreno_dev->drawctxt_active);
 
-	/* Set the new context */
-	adreno_dev->drawctxt_active = drawctxt;
+	
 	adreno_dev->gpudev->ctxt_restore(adreno_dev, drawctxt);
+	adreno_dev->drawctxt_active = drawctxt;
 }

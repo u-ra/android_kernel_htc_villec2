@@ -1,23 +1,19 @@
 #ifndef _LINUX_STRING_H_
 #define _LINUX_STRING_H_
 
-/* We don't want strings.h stuff being used by user stuff by accident */
 
 #ifndef __KERNEL__
 #include <string.h>
 #else
 
-#include <linux/compiler.h>	/* for inline */
-#include <linux/types.h>	/* for size_t */
-#include <linux/stddef.h>	/* for NULL */
+#include <linux/compiler.h>	
+#include <linux/types.h>	
+#include <linux/stddef.h>	
 #include <stdarg.h>
 
 extern char *strndup_user(const char __user *, long);
 extern void *memdup_user(const void __user *, size_t);
 
-/*
- * Include machine specific inline routines
- */
 #include <asm/string.h>
 
 #ifndef __HAVE_ARCH_STRCPY
@@ -114,6 +110,7 @@ extern int memcmp(const void *,const void *,__kernel_size_t);
 #ifndef __HAVE_ARCH_MEMCHR
 extern void * memchr(const void *,int,__kernel_size_t);
 #endif
+void *memchr_inv(const void *s, int c, size_t n);
 
 extern char *kstrdup(const char *s, gfp_t gfp);
 extern char *kstrndup(const char *s, size_t len, gfp_t gfp);
@@ -134,14 +131,9 @@ int bprintf(u32 *bin_buf, size_t size, const char *fmt, ...) __printf(3, 4);
 extern ssize_t memory_read_from_buffer(void *to, size_t count, loff_t *ppos,
 			const void *from, size_t available);
 
-/**
- * strstarts - does @str start with @prefix?
- * @str: string to examine
- * @prefix: prefix to look for.
- */
 static inline bool strstarts(const char *str, const char *prefix)
 {
 	return strncmp(str, prefix, strlen(prefix)) == 0;
 }
 #endif
-#endif /* _LINUX_STRING_H_ */
+#endif 

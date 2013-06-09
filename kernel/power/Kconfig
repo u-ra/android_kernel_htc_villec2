@@ -24,10 +24,6 @@ config HAS_WAKELOCK
 config HAS_EARLYSUSPEND
 	bool
 
-config CPU_PM
-	def_bool y
-	depends on SUSPEND || CPU_IDLE
-
 config WAKELOCK
 	bool "Wake lock"
 	depends on PM && RTC_CLASS
@@ -46,7 +42,7 @@ config WAKELOCK_STAT
 
 config USER_WAKELOCK
 	bool "Userspace wake locks"
-	depends on WAKELOCK
+	depends on PM_SLEEP
 	default y
 	---help---
 	  User-space wake lock api. Write "lockname" or "lockname timeout"
@@ -62,6 +58,14 @@ config EARLYSUSPEND
 	---help---
 	  Call early suspend handlers when the user requested sleep state
 	  changes.
+
+config EARLYSUSPEND_BOOST_CPU_SPEED
+	bool "Speed up earlysuspend and lateresume procedure"
+	depends on EARLYSUSPEND && SMP
+	default n
+	---help---
+	Speed up early_suspend and late_resume procedure by enable 2 CPUs
+	and max frequency.
 
 config NO_SUSPEND
 	bool "No suspend"
@@ -105,6 +109,7 @@ config HIBERNATION
 	select HIBERNATE_CALLBACKS
 	select LZO_COMPRESS
 	select LZO_DECOMPRESS
+	select CRC32
 	---help---
 	  Enable the suspend to disk (STD) functionality, which is usually
 	  called "hibernation" in user interfaces.  STD checkpoints the
@@ -142,6 +147,9 @@ config HIBERNATION
 	  will get corrupted in a nasty way.
 
 	  For more information take a look at <file:Documentation/power/swsusp.txt>.
+
+config ARCH_SAVE_PAGE_KEYS
+	bool
 
 config PM_STD_PARTITION
 	string "Default resume partition"
@@ -271,8 +279,8 @@ config APM_EMULATION
 	  notification of APM "events" (e.g. battery status change).
 
 	  In order to use APM, you will need supporting software. For location
-	  and more information, read <file:Documentation/power/pm.txt> and the
-	  Battery Powered Linux mini-HOWTO, available from
+	  and more information, read <file:Documentation/power/apm-acpi.txt>
+	  and the Battery Powered Linux mini-HOWTO, available from
 	  <http://www.tldp.org/docs.html#howto>.
 
 	  This driver does not spin down disk drives (see the hdparm(8)
@@ -302,9 +310,21 @@ config PM_OPP
 	  implementations a ready to use framework to manage OPPs.
 	  For more information, read <file:Documentation/power/opp.txt>
 
-config PM_RUNTIME_CLK
+config PM_CLK
 	def_bool y
-	depends on PM_RUNTIME && HAVE_CLK
+	depends on PM && HAVE_CLK
+
+config PM_GENERIC_DOMAINS
+	bool
+	depends on PM
+
+config PM_GENERIC_DOMAINS_RUNTIME
+	def_bool y
+	depends on PM_RUNTIME && PM_GENERIC_DOMAINS
+
+config CPU_PM
+	bool
+	depends on SUSPEND || CPU_IDLE
 
 config SUSPEND_TIME
 	bool "Log time spent in suspend"
@@ -312,3 +332,13 @@ config SUSPEND_TIME
 	  Prints the time spent in suspend in the kernel log, and
 	  keeps statistics on the time spent in suspend in
 	  /sys/kernel/debug/suspend_time
+
+config HTC_PNPMGR
+	bool "Htc Power and Performance manager"
+	depends on PM
+	---help---
+	  Collect the sysfs files nodes for pnpmgr usage.
+
+config ADAPTIVE_TUNING
+        bool "Detect CPU idle"
+        depends on ARCH_MSM && CPU_IDLE
