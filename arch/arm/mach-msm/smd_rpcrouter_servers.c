@@ -52,7 +52,7 @@ static void rpc_server_register(struct msm_rpc_server *server)
 	int rc;
 	rc = msm_rpc_register_server(endpoint, server->prog, server->vers);
 	if (rc < 0)
-		printk(KERN_ERR "[K] [rpcserver] error registering %p @ %08x:%d\n",
+		printk(KERN_ERR "[rpcserver] error registering %p @ %08x:%d\n",
 		       server, server->prog, server->vers);
 }
 
@@ -90,7 +90,7 @@ int msm_rpc_create_server(struct msm_rpc_server *server)
 {
 	void *buf;
 
-	/* make sure we're in a sane state first */
+	
 	server->flags = 0;
 	INIT_LIST_HEAD(&server->list);
 	mutex_init(&server->cb_req_lock);
@@ -145,7 +145,7 @@ static int rpc_send_accepted_void_reply(struct msm_rpc_endpoint *client,
 	struct rpc_reply_hdr *reply = (struct rpc_reply_hdr *)reply_buf;
 
 	reply->xid = cpu_to_be32(xid);
-	reply->type = cpu_to_be32(1); /* reply */
+	reply->type = cpu_to_be32(1); 
 	reply->reply_stat = cpu_to_be32(RPCMSG_REPLYSTAT_ACCEPTED);
 
 	reply->data.acc_hdr.accept_stat = cpu_to_be32(accept_status);
@@ -154,32 +154,17 @@ static int rpc_send_accepted_void_reply(struct msm_rpc_endpoint *client,
 
 	rc = msm_rpc_write(client, reply_buf, sizeof(reply_buf));
 	if (rc ==  -ENETRESET) {
-		/* Modem restarted, drop reply, clear state */
+		
 		msm_rpc_clear_netreset(client);
 	}
 	if (rc < 0)
 		printk(KERN_ERR
-		       "[K] %s: could not write response: %d\n",
+		       "%s: could not write response: %d\n",
 		       __FUNCTION__, rc);
 
 	return rc;
 }
 
-/*
- * Interface to be used to start accepted reply message for a
- * request.  Returns the buffer pointer to attach any payload.
- * Should call msm_rpc_server_send_accepted_reply to complete sending
- * reply.  Marshaling should be handled by user for the payload.
- *
- * server: pointer to server data structure
- *
- * xid: transaction id. Has to be same as the one in request.
- *
- * accept_status: acceptance status
- *
- * Return Value:
- *        pointer to buffer to attach the payload.
- */
 void *msm_rpc_server_start_accepted_reply(struct msm_rpc_server *server,
 					  uint32_t xid, uint32_t accept_status)
 {
@@ -190,7 +175,7 @@ void *msm_rpc_server_start_accepted_reply(struct msm_rpc_server *server,
 	reply = (struct rpc_reply_hdr *)server_xdr.out_buf;
 
 	reply->xid = cpu_to_be32(xid);
-	reply->type = cpu_to_be32(1); /* reply */
+	reply->type = cpu_to_be32(1); 
 	reply->reply_stat = cpu_to_be32(RPCMSG_REPLYSTAT_ACCEPTED);
 
 	reply->data.acc_hdr.accept_stat = cpu_to_be32(accept_status);
@@ -203,18 +188,6 @@ void *msm_rpc_server_start_accepted_reply(struct msm_rpc_server *server,
 }
 EXPORT_SYMBOL(msm_rpc_server_start_accepted_reply);
 
-/*
- * Interface to be used to send accepted reply for a request.
- * msm_rpc_server_start_accepted_reply should have been called before.
- * Marshaling should be handled by user for the payload.
- *
- * server: pointer to server data structure
- *
- * size: additional payload size
- *
- * Return Value:
- *        0 on success, otherwise returns an error code.
- */
 int msm_rpc_server_send_accepted_reply(struct msm_rpc_server *server,
 				       uint32_t size)
 {
@@ -231,36 +204,6 @@ int msm_rpc_server_send_accepted_reply(struct msm_rpc_server *server,
 }
 EXPORT_SYMBOL(msm_rpc_server_send_accepted_reply);
 
-/*
- * Interface to be used to send a server callback request.
- * If the request takes any arguments or expects any return, the user
- * should handle it in 'arg_func' and 'ret_func' respectively.
- * Marshaling and Unmarshaling should be handled by the user in argument
- * and return functions.
- *
- * server: pointer to server data sturcture
- *
- * clnt_info: pointer to client information data structure.
- *            callback will be sent to this client.
- *
- * cb_proc: callback procedure being requested
- *
- * arg_func: argument function pointer.  'buf' is where arguments needs to
- *   be filled. 'data' is arg_data.
- *
- * ret_func: return function pointer.  'buf' is where returned data should
- *   be read from. 'data' is ret_data.
- *
- * arg_data: passed as an input parameter to argument function.
- *
- * ret_data: passed as an input parameter to return function.
- *
- * timeout: timeout for reply wait in jiffies.  If negative timeout is
- *   specified a default timeout of 10s is used.
- *
- * Return Value:
- *        0 on success, otherwise an error code is returned.
- */
 int msm_rpc_server_cb_req(struct msm_rpc_server *server,
 			  struct msm_rpc_client_info *clnt_info,
 			  uint32_t cb_proc,
@@ -316,7 +259,7 @@ int msm_rpc_server_cb_req(struct msm_rpc_server *server,
 		xdr_init_input(&server->cb_xdr, buffer, rc);
 		if ((rc < ((int)(sizeof(uint32_t) * 2))) ||
 		    (be32_to_cpu(*((uint32_t *)buffer + 1)) != 1)) {
-			printk(KERN_ERR "[K] %s: Invalid reply: %d\n",
+			printk(KERN_ERR "%s: Invalid reply: %d\n",
 			       __func__, rc);
 			goto free_and_release;
 		}
@@ -328,7 +271,7 @@ int msm_rpc_server_cb_req(struct msm_rpc_server *server,
 				be32_to_cpu(rpc_rsp->xid));
 			xdr_clean_input(&server->cb_xdr);
 			rc = timeout;
-			/* timeout is not adjusted, but it is not critical */
+			
 		} else
 			rc = 0;
 	} while (rc);
@@ -360,36 +303,6 @@ release_locks:
 }
 EXPORT_SYMBOL(msm_rpc_server_cb_req);
 
-/*
- * Interface to be used to send a server callback request.
- * If the request takes any arguments or expects any return, the user
- * should handle it in 'arg_func' and 'ret_func' respectively.
- * Marshaling and Unmarshaling should be handled by the user in argument
- * and return functions.
- *
- * server: pointer to server data sturcture
- *
- * clnt_info: pointer to client information data structure.
- *            callback will be sent to this client.
- *
- * cb_proc: callback procedure being requested
- *
- * arg_func: argument function pointer.  'xdr' is the xdr being used.
- *   'data' is arg_data.
- *
- * ret_func: return function pointer.  'xdr' is the xdr being used.
- *   'data' is ret_data.
- *
- * arg_data: passed as an input parameter to argument function.
- *
- * ret_data: passed as an input parameter to return function.
- *
- * timeout: timeout for reply wait in jiffies.  If negative timeout is
- *   specified a default timeout of 10s is used.
- *
- * Return Value:
- *        0 on success, otherwise an error code is returned.
- */
 int msm_rpc_server_cb_req2(struct msm_rpc_server *server,
 			   struct msm_rpc_client_info *clnt_info,
 			   uint32_t cb_proc,
@@ -445,7 +358,7 @@ int msm_rpc_server_cb_req2(struct msm_rpc_server *server,
 		xdr_init_input(&server->cb_xdr, buffer, rc);
 		rc = xdr_recv_reply(&server->cb_xdr, &rpc_rsp);
 		if (rc || (rpc_rsp.type != 1)) {
-			printk(KERN_ERR "[K] %s: Invalid reply :%d\n",
+			printk(KERN_ERR "%s: Invalid reply :%d\n",
 			       __func__, rc);
 			rc = -EINVAL;
 			goto free_and_release;
@@ -456,7 +369,7 @@ int msm_rpc_server_cb_req2(struct msm_rpc_server *server,
 				__func__, req_xid, rpc_rsp.xid);
 			xdr_clean_input(&server->cb_xdr);
 			rc = timeout;
-			/* timeout is not adjusted, but it is not critical */
+			
 		} else
 			rc = 0;
 
@@ -521,7 +434,7 @@ static int rpc_servers_thread(void *data)
 
 		rc = msm_rpc_read(endpoint, &buffer, -1, -1);
 		if (rc < 0) {
-			printk(KERN_ERR "[K] %s: could not read: %d\n",
+			printk(KERN_ERR "%s: could not read: %d\n",
 			       __FUNCTION__, rc);
 			break;
 		}
@@ -584,12 +497,12 @@ static int rpcservers_probe(struct platform_device *pdev)
 	if (IS_ERR(endpoint))
 		return PTR_ERR(endpoint);
 
-	/* we're online -- register any servers installed beforehand */
+	
 	rpc_servers_active = 1;
 	current_xid = 0;
 	rpc_server_register_all();
 
-	/* start the kernel thread */
+	
 	server_thread = kthread_run(rpc_servers_thread, NULL, "krpcserversd");
 	if (IS_ERR(server_thread))
 		return PTR_ERR(server_thread);

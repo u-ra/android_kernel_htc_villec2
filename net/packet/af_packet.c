@@ -40,6 +40,10 @@
  *					byte arrays at the end of sockaddr_ll
  *					and packet_mreq.
  *		Johann Baudy	:	Added TX RING.
+ *		Chetan Loke	:	Implemented TPACKET_V3 block abstraction
+ *					layer.
+ *					Copyright (C) 2011, <lokec@ccs.neu.edu>
+ *
  *
  *		This program is free software; you can redistribute it and/or
  *		modify it under the terms of the GNU General Public License
@@ -69,7 +73,6 @@
 #include <net/sock.h>
 #include <linux/errno.h>
 #include <linux/timer.h>
-#include <asm/system.h>
 #include <asm/uaccess.h>
 #include <asm/ioctls.h>
 #include <asm/page.h>
@@ -90,58 +93,7 @@
 #include <net/inet_common.h>
 #endif
 
-/*
-   Assumptions:
-   - if device has no dev->hard_header routine, it adds and removes ll header
-     inside itself. In this case ll header is invisible outside of device,
-     but higher levels still should reserve dev->hard_header_len.
-     Some devices are enough clever to reallocate skb, when header
-     will not fit to reserved space (tunnel), another ones are silly
-     (PPP).
-   - packet socket receives packets with pulled ll header,
-     so that SOCK_RAW should push it back.
 
-On receive:
------------
-
-Incoming, dev->hard_header!=NULL
-   mac_header -> ll header
-   data       -> data
-
-Outgoing, dev->hard_header!=NULL
-   mac_header -> ll header
-   data       -> ll header
-
-Incoming, dev->hard_header==NULL
-   mac_header -> UNKNOWN position. It is very likely, that it points to ll
-		 header.  PPP makes it, that is wrong, because introduce
-		 assymetry between rx and tx paths.
-   data       -> data
-
-Outgoing, dev->hard_header==NULL
-   mac_header -> data. ll header is still not built!
-   data       -> data
-
-Resume
-  If dev->hard_header==NULL we are unlikely to restore sensible ll header.
-
-
-On transmit:
-------------
-
-dev->hard_header != NULL
-   mac_header -> ll header
-   data       -> ll header
-
-dev->hard_header == NULL (ll header is added by device, we cannot control it)
-   mac_header -> data
-   data       -> data
-
-   We should set nh.raw on output to correct posistion,
-   packet classifier depends on it.
- */
-
-/* Private packet socket structures. */
 
 struct packet_mclist {
 	struct packet_mclist	*next;
@@ -151,9 +103,6 @@ struct packet_mclist {
 	unsigned short		alen;
 	unsigned char		addr[MAX_ADDR_LEN];
 };
-/* identical to struct packet_mreq except it has
- * a longer address field.
- */
 struct packet_mreq_max {
 	int		mr_ifindex;
 	unsigned short	mr_type;
@@ -161,9 +110,51 @@ struct packet_mreq_max {
 	unsigned char	mr_address[MAX_ADDR_LEN];
 };
 
-static int packet_set_ring(struct sock *sk, struct tpacket_req *req,
+static int packet_set_ring(struct sock *sk, union tpacket_req_u *req_u,
 		int closing, int tx_ring);
 
+
+#define V3_ALIGNMENT	(8)
+
+#define BLK_HDR_LEN	(ALIGN(sizeof(struct tpacket_block_desc), V3_ALIGNMENT))
+
+#define BLK_PLUS_PRIV(sz_of_priv) \
+	(BLK_HDR_LEN + ALIGN((sz_of_priv), V3_ALIGNMENT))
+
+struct tpacket_kbdq_core {
+	struct pgv	*pkbdq;
+	unsigned int	feature_req_word;
+	unsigned int	hdrlen;
+	unsigned char	reset_pending_on_curr_blk;
+	unsigned char   delete_blk_timer;
+	unsigned short	kactive_blk_num;
+	unsigned short	blk_sizeof_priv;
+
+	unsigned short	last_kactive_blk_num;
+
+	char		*pkblk_start;
+	char		*pkblk_end;
+	int		kblk_size;
+	unsigned int	knum_blocks;
+	uint64_t	knxt_seq_num;
+	char		*prev;
+	char		*nxt_offset;
+	struct sk_buff	*skb;
+
+	atomic_t	blk_fill_in_prog;
+
+	
+#define DEFAULT_PRB_RETIRE_TOV	(8)
+
+	unsigned short  retire_blk_tov;
+	unsigned short  version;
+	unsigned long	tov_in_jiffies;
+
+	
+	struct timer_list retire_blk_timer;
+};
+
+#define PGV_FROM_VMALLOC 1
 struct pgv {
 	char *buffer;
 };
@@ -179,28 +170,63 @@ struct packet_ring_buffer {
 	unsigned int		pg_vec_pages;
 	unsigned int		pg_vec_len;
 
+	struct tpacket_kbdq_core	prb_bdqc;
 	atomic_t		pending;
 };
+
+#define BLOCK_STATUS(x)	((x)->hdr.bh1.block_status)
+#define BLOCK_NUM_PKTS(x)	((x)->hdr.bh1.num_pkts)
+#define BLOCK_O2FP(x)		((x)->hdr.bh1.offset_to_first_pkt)
+#define BLOCK_LEN(x)		((x)->hdr.bh1.blk_len)
+#define BLOCK_SNUM(x)		((x)->hdr.bh1.seq_num)
+#define BLOCK_O2PRIV(x)	((x)->offset_to_priv)
+#define BLOCK_PRIV(x)		((void *)((char *)(x) + BLOCK_O2PRIV(x)))
 
 struct packet_sock;
 static int tpacket_snd(struct packet_sock *po, struct msghdr *msg);
 
+static void *packet_previous_frame(struct packet_sock *po,
+		struct packet_ring_buffer *rb,
+		int status);
+static void packet_increment_head(struct packet_ring_buffer *buff);
+static int prb_curr_blk_in_use(struct tpacket_kbdq_core *,
+			struct tpacket_block_desc *);
+static void *prb_dispatch_next_block(struct tpacket_kbdq_core *,
+			struct packet_sock *);
+static void prb_retire_current_block(struct tpacket_kbdq_core *,
+		struct packet_sock *, unsigned int status);
+static int prb_queue_frozen(struct tpacket_kbdq_core *);
+static void prb_open_block(struct tpacket_kbdq_core *,
+		struct tpacket_block_desc *);
+static void prb_retire_rx_blk_timer_expired(unsigned long);
+static void _prb_refresh_rx_retire_blk_timer(struct tpacket_kbdq_core *);
+static void prb_init_blk_timer(struct packet_sock *,
+		struct tpacket_kbdq_core *,
+		void (*func) (unsigned long));
+static void prb_fill_rxhash(struct tpacket_kbdq_core *, struct tpacket3_hdr *);
+static void prb_clear_rxhash(struct tpacket_kbdq_core *,
+		struct tpacket3_hdr *);
+static void prb_fill_vlan_info(struct tpacket_kbdq_core *,
+		struct tpacket3_hdr *);
 static void packet_flush_mclist(struct sock *sk);
 
+struct packet_fanout;
 struct packet_sock {
-	/* struct sock has to be the first member of packet_sock */
+	
 	struct sock		sk;
+	struct packet_fanout	*fanout;
 	struct tpacket_stats	stats;
+	union  tpacket_stats_u	stats_u;
 	struct packet_ring_buffer	rx_ring;
 	struct packet_ring_buffer	tx_ring;
 	int			copy_thresh;
 	spinlock_t		bind_lock;
 	struct mutex		pg_vec_lock;
-	unsigned int		running:1,	/* prot_hook is attached*/
+	unsigned int		running:1,	
 				auxdata:1,
 				origdev:1,
 				has_vnet_hdr:1;
-	int			ifindex;	/* bound device		*/
+	int			ifindex;	
 	__be16			num;
 	struct packet_mclist	*mclist;
 	atomic_t		mapped;
@@ -209,6 +235,24 @@ struct packet_sock {
 	unsigned int		tp_reserve;
 	unsigned int		tp_loss:1;
 	unsigned int		tp_tstamp;
+	struct packet_type	prot_hook ____cacheline_aligned_in_smp;
+};
+
+#define PACKET_FANOUT_MAX	256
+
+struct packet_fanout {
+#ifdef CONFIG_NET_NS
+	struct net		*net;
+#endif
+	unsigned int		num_members;
+	u16			id;
+	u8			type;
+	u8			defrag;
+	atomic_t		rr_cur;
+	struct list_head	list;
+	struct sock		*arr[PACKET_FANOUT_MAX];
+	spinlock_t		lock;
+	atomic_t		sk_ref;
 	struct packet_type	prot_hook ____cacheline_aligned_in_smp;
 };
 
@@ -221,6 +265,62 @@ struct packet_skb_cb {
 };
 
 #define PACKET_SKB_CB(__skb)	((struct packet_skb_cb *)((__skb)->cb))
+
+#define GET_PBDQC_FROM_RB(x)	((struct tpacket_kbdq_core *)(&(x)->prb_bdqc))
+#define GET_PBLOCK_DESC(x, bid)	\
+	((struct tpacket_block_desc *)((x)->pkbdq[(bid)].buffer))
+#define GET_CURR_PBLOCK_DESC_FROM_CORE(x)	\
+	((struct tpacket_block_desc *)((x)->pkbdq[(x)->kactive_blk_num].buffer))
+#define GET_NEXT_PRB_BLK_NUM(x) \
+	(((x)->kactive_blk_num < ((x)->knum_blocks-1)) ? \
+	((x)->kactive_blk_num+1) : 0)
+
+static struct packet_sock *pkt_sk(struct sock *sk)
+{
+	return (struct packet_sock *)sk;
+}
+
+static void __fanout_unlink(struct sock *sk, struct packet_sock *po);
+static void __fanout_link(struct sock *sk, struct packet_sock *po);
+
+static void register_prot_hook(struct sock *sk)
+{
+	struct packet_sock *po = pkt_sk(sk);
+	if (!po->running) {
+		if (po->fanout)
+			__fanout_link(sk, po);
+		else
+			dev_add_pack(&po->prot_hook);
+		sock_hold(sk);
+		po->running = 1;
+	}
+}
+
+static void __unregister_prot_hook(struct sock *sk, bool sync)
+{
+	struct packet_sock *po = pkt_sk(sk);
+
+	po->running = 0;
+	if (po->fanout)
+		__fanout_unlink(sk, po);
+	else
+		__dev_remove_pack(&po->prot_hook);
+	__sock_put(sk);
+
+	if (sync) {
+		spin_unlock(&po->bind_lock);
+		synchronize_net();
+		spin_lock(&po->bind_lock);
+	}
+}
+
+static void unregister_prot_hook(struct sock *sk, bool sync)
+{
+	struct packet_sock *po = pkt_sk(sk);
+
+	if (po->running)
+		__unregister_prot_hook(sk, sync);
+}
 
 static inline __pure struct page *pgv_to_page(void *addr)
 {
@@ -247,8 +347,9 @@ static void __packet_set_status(struct packet_sock *po, void *frame, int status)
 		h.h2->tp_status = status;
 		flush_dcache_page(pgv_to_page(&h.h2->tp_status));
 		break;
+	case TPACKET_V3:
 	default:
-		pr_err("TPACKET version not supported\n");
+		WARN(1, "TPACKET version not supported.\n");
 		BUG();
 	}
 
@@ -273,8 +374,9 @@ static int __packet_get_status(struct packet_sock *po, void *frame)
 	case TPACKET_V2:
 		flush_dcache_page(pgv_to_page(&h.h2->tp_status));
 		return h.h2->tp_status;
+	case TPACKET_V3:
 	default:
-		pr_err("TPACKET version not supported\n");
+		WARN(1, "TPACKET version not supported.\n");
 		BUG();
 		return 0;
 	}
@@ -304,14 +406,547 @@ static void *packet_lookup_frame(struct packet_sock *po,
 	return h.raw;
 }
 
-static inline void *packet_current_frame(struct packet_sock *po,
+static void *packet_current_frame(struct packet_sock *po,
 		struct packet_ring_buffer *rb,
 		int status)
 {
 	return packet_lookup_frame(po, rb, rb->head, status);
 }
 
-static inline void *packet_previous_frame(struct packet_sock *po,
+static void prb_del_retire_blk_timer(struct tpacket_kbdq_core *pkc)
+{
+	del_timer_sync(&pkc->retire_blk_timer);
+}
+
+static void prb_shutdown_retire_blk_timer(struct packet_sock *po,
+		int tx_ring,
+		struct sk_buff_head *rb_queue)
+{
+	struct tpacket_kbdq_core *pkc;
+
+	pkc = tx_ring ? &po->tx_ring.prb_bdqc : &po->rx_ring.prb_bdqc;
+
+	spin_lock(&rb_queue->lock);
+	pkc->delete_blk_timer = 1;
+	spin_unlock(&rb_queue->lock);
+
+	prb_del_retire_blk_timer(pkc);
+}
+
+static void prb_init_blk_timer(struct packet_sock *po,
+		struct tpacket_kbdq_core *pkc,
+		void (*func) (unsigned long))
+{
+	init_timer(&pkc->retire_blk_timer);
+	pkc->retire_blk_timer.data = (long)po;
+	pkc->retire_blk_timer.function = func;
+	pkc->retire_blk_timer.expires = jiffies;
+}
+
+static void prb_setup_retire_blk_timer(struct packet_sock *po, int tx_ring)
+{
+	struct tpacket_kbdq_core *pkc;
+
+	if (tx_ring)
+		BUG();
+
+	pkc = tx_ring ? &po->tx_ring.prb_bdqc : &po->rx_ring.prb_bdqc;
+	prb_init_blk_timer(po, pkc, prb_retire_rx_blk_timer_expired);
+}
+
+static int prb_calc_retire_blk_tmo(struct packet_sock *po,
+				int blk_size_in_bytes)
+{
+	struct net_device *dev;
+	unsigned int mbits = 0, msec = 0, div = 0, tmo = 0;
+	struct ethtool_cmd ecmd;
+	int err;
+
+	rtnl_lock();
+	dev = __dev_get_by_index(sock_net(&po->sk), po->ifindex);
+	if (unlikely(!dev)) {
+		rtnl_unlock();
+		return DEFAULT_PRB_RETIRE_TOV;
+	}
+	err = __ethtool_get_settings(dev, &ecmd);
+	rtnl_unlock();
+	if (!err) {
+		switch (ecmd.speed) {
+		case SPEED_10000:
+			msec = 1;
+			div = 10000/1000;
+			break;
+		case SPEED_1000:
+			msec = 1;
+			div = 1000/1000;
+			break;
+		case SPEED_100:
+		case SPEED_10:
+		default:
+			return DEFAULT_PRB_RETIRE_TOV;
+		}
+	}
+
+	mbits = (blk_size_in_bytes * 8) / (1024 * 1024);
+
+	if (div)
+		mbits /= div;
+
+	tmo = mbits * msec;
+
+	if (div)
+		return tmo+1;
+	return tmo;
+}
+
+static void prb_init_ft_ops(struct tpacket_kbdq_core *p1,
+			union tpacket_req_u *req_u)
+{
+	p1->feature_req_word = req_u->req3.tp_feature_req_word;
+}
+
+static void init_prb_bdqc(struct packet_sock *po,
+			struct packet_ring_buffer *rb,
+			struct pgv *pg_vec,
+			union tpacket_req_u *req_u, int tx_ring)
+{
+	struct tpacket_kbdq_core *p1 = &rb->prb_bdqc;
+	struct tpacket_block_desc *pbd;
+
+	memset(p1, 0x0, sizeof(*p1));
+
+	p1->knxt_seq_num = 1;
+	p1->pkbdq = pg_vec;
+	pbd = (struct tpacket_block_desc *)pg_vec[0].buffer;
+	p1->pkblk_start	= (char *)pg_vec[0].buffer;
+	p1->kblk_size = req_u->req3.tp_block_size;
+	p1->knum_blocks	= req_u->req3.tp_block_nr;
+	p1->hdrlen = po->tp_hdrlen;
+	p1->version = po->tp_version;
+	p1->last_kactive_blk_num = 0;
+	po->stats_u.stats3.tp_freeze_q_cnt = 0;
+	if (req_u->req3.tp_retire_blk_tov)
+		p1->retire_blk_tov = req_u->req3.tp_retire_blk_tov;
+	else
+		p1->retire_blk_tov = prb_calc_retire_blk_tmo(po,
+						req_u->req3.tp_block_size);
+	p1->tov_in_jiffies = msecs_to_jiffies(p1->retire_blk_tov);
+	p1->blk_sizeof_priv = req_u->req3.tp_sizeof_priv;
+
+	prb_init_ft_ops(p1, req_u);
+	prb_setup_retire_blk_timer(po, tx_ring);
+	prb_open_block(p1, pbd);
+}
+
+static void _prb_refresh_rx_retire_blk_timer(struct tpacket_kbdq_core *pkc)
+{
+	mod_timer(&pkc->retire_blk_timer,
+			jiffies + pkc->tov_in_jiffies);
+	pkc->last_kactive_blk_num = pkc->kactive_blk_num;
+}
+
+static void prb_retire_rx_blk_timer_expired(unsigned long data)
+{
+	struct packet_sock *po = (struct packet_sock *)data;
+	struct tpacket_kbdq_core *pkc = &po->rx_ring.prb_bdqc;
+	unsigned int frozen;
+	struct tpacket_block_desc *pbd;
+
+	spin_lock(&po->sk.sk_receive_queue.lock);
+
+	frozen = prb_queue_frozen(pkc);
+	pbd = GET_CURR_PBLOCK_DESC_FROM_CORE(pkc);
+
+	if (unlikely(pkc->delete_blk_timer))
+		goto out;
+
+	if (BLOCK_NUM_PKTS(pbd)) {
+		while (atomic_read(&pkc->blk_fill_in_prog)) {
+			
+			cpu_relax();
+		}
+	}
+
+	if (pkc->last_kactive_blk_num == pkc->kactive_blk_num) {
+		if (!frozen) {
+			prb_retire_current_block(pkc, po, TP_STATUS_BLK_TMO);
+			if (!prb_dispatch_next_block(pkc, po))
+				goto refresh_timer;
+			else
+				goto out;
+		} else {
+			if (prb_curr_blk_in_use(pkc, pbd)) {
+				goto refresh_timer;
+			} else {
+				prb_open_block(pkc, pbd);
+				goto out;
+			}
+		}
+	}
+
+refresh_timer:
+	_prb_refresh_rx_retire_blk_timer(pkc);
+
+out:
+	spin_unlock(&po->sk.sk_receive_queue.lock);
+}
+
+static void prb_flush_block(struct tpacket_kbdq_core *pkc1,
+		struct tpacket_block_desc *pbd1, __u32 status)
+{
+	
+
+#if ARCH_IMPLEMENTS_FLUSH_DCACHE_PAGE == 1
+	u8 *start, *end;
+
+	start = (u8 *)pbd1;
+
+	
+	start += PAGE_SIZE;
+
+	end = (u8 *)PAGE_ALIGN((unsigned long)pkc1->pkblk_end);
+	for (; start < end; start += PAGE_SIZE)
+		flush_dcache_page(pgv_to_page(start));
+
+	smp_wmb();
+#endif
+
+	
+
+	BLOCK_STATUS(pbd1) = status;
+
+	
+
+#if ARCH_IMPLEMENTS_FLUSH_DCACHE_PAGE == 1
+	start = (u8 *)pbd1;
+	flush_dcache_page(pgv_to_page(start));
+
+	smp_wmb();
+#endif
+}
+
+static void prb_close_block(struct tpacket_kbdq_core *pkc1,
+		struct tpacket_block_desc *pbd1,
+		struct packet_sock *po, unsigned int stat)
+{
+	__u32 status = TP_STATUS_USER | stat;
+
+	struct tpacket3_hdr *last_pkt;
+	struct tpacket_hdr_v1 *h1 = &pbd1->hdr.bh1;
+
+	if (po->stats.tp_drops)
+		status |= TP_STATUS_LOSING;
+
+	last_pkt = (struct tpacket3_hdr *)pkc1->prev;
+	last_pkt->tp_next_offset = 0;
+
+	
+	if (BLOCK_NUM_PKTS(pbd1)) {
+		h1->ts_last_pkt.ts_sec = last_pkt->tp_sec;
+		h1->ts_last_pkt.ts_nsec	= last_pkt->tp_nsec;
+	} else {
+		
+		struct timespec ts;
+		getnstimeofday(&ts);
+		h1->ts_last_pkt.ts_sec = ts.tv_sec;
+		h1->ts_last_pkt.ts_nsec	= ts.tv_nsec;
+	}
+
+	smp_wmb();
+
+	
+	prb_flush_block(pkc1, pbd1, status);
+
+	pkc1->kactive_blk_num = GET_NEXT_PRB_BLK_NUM(pkc1);
+}
+
+static void prb_thaw_queue(struct tpacket_kbdq_core *pkc)
+{
+	pkc->reset_pending_on_curr_blk = 0;
+}
+
+static void prb_open_block(struct tpacket_kbdq_core *pkc1,
+	struct tpacket_block_desc *pbd1)
+{
+	struct timespec ts;
+	struct tpacket_hdr_v1 *h1 = &pbd1->hdr.bh1;
+
+	smp_rmb();
+
+	if (likely(TP_STATUS_KERNEL == BLOCK_STATUS(pbd1))) {
+
+		BLOCK_SNUM(pbd1) = pkc1->knxt_seq_num++;
+		BLOCK_NUM_PKTS(pbd1) = 0;
+		BLOCK_LEN(pbd1) = BLK_PLUS_PRIV(pkc1->blk_sizeof_priv);
+		getnstimeofday(&ts);
+		h1->ts_first_pkt.ts_sec = ts.tv_sec;
+		h1->ts_first_pkt.ts_nsec = ts.tv_nsec;
+		pkc1->pkblk_start = (char *)pbd1;
+		pkc1->nxt_offset = (char *)(pkc1->pkblk_start +
+		BLK_PLUS_PRIV(pkc1->blk_sizeof_priv));
+		BLOCK_O2FP(pbd1) = (__u32)BLK_PLUS_PRIV(pkc1->blk_sizeof_priv);
+		BLOCK_O2PRIV(pbd1) = BLK_HDR_LEN;
+		pbd1->version = pkc1->version;
+		pkc1->prev = pkc1->nxt_offset;
+		pkc1->pkblk_end = pkc1->pkblk_start + pkc1->kblk_size;
+		prb_thaw_queue(pkc1);
+		_prb_refresh_rx_retire_blk_timer(pkc1);
+
+		smp_wmb();
+
+		return;
+	}
+
+	WARN(1, "ERROR block:%p is NOT FREE status:%d kactive_blk_num:%d\n",
+		pbd1, BLOCK_STATUS(pbd1), pkc1->kactive_blk_num);
+	dump_stack();
+	BUG();
+}
+
+static void prb_freeze_queue(struct tpacket_kbdq_core *pkc,
+				  struct packet_sock *po)
+{
+	pkc->reset_pending_on_curr_blk = 1;
+	po->stats_u.stats3.tp_freeze_q_cnt++;
+}
+
+#define TOTAL_PKT_LEN_INCL_ALIGN(length) (ALIGN((length), V3_ALIGNMENT))
+
+static void *prb_dispatch_next_block(struct tpacket_kbdq_core *pkc,
+		struct packet_sock *po)
+{
+	struct tpacket_block_desc *pbd;
+
+	smp_rmb();
+
+	
+	pbd = GET_CURR_PBLOCK_DESC_FROM_CORE(pkc);
+
+	
+	if (TP_STATUS_USER & BLOCK_STATUS(pbd)) {
+		prb_freeze_queue(pkc, po);
+		return NULL;
+	}
+
+	prb_open_block(pkc, pbd);
+	return (void *)pkc->nxt_offset;
+}
+
+static void prb_retire_current_block(struct tpacket_kbdq_core *pkc,
+		struct packet_sock *po, unsigned int status)
+{
+	struct tpacket_block_desc *pbd = GET_CURR_PBLOCK_DESC_FROM_CORE(pkc);
+
+	
+	if (likely(TP_STATUS_KERNEL == BLOCK_STATUS(pbd))) {
+		if (!(status & TP_STATUS_BLK_TMO)) {
+			while (atomic_read(&pkc->blk_fill_in_prog)) {
+				
+				cpu_relax();
+			}
+		}
+		prb_close_block(pkc, pbd, po, status);
+		return;
+	}
+
+	WARN(1, "ERROR-pbd[%d]:%p\n", pkc->kactive_blk_num, pbd);
+	dump_stack();
+	BUG();
+}
+
+static int prb_curr_blk_in_use(struct tpacket_kbdq_core *pkc,
+				      struct tpacket_block_desc *pbd)
+{
+	return TP_STATUS_USER & BLOCK_STATUS(pbd);
+}
+
+static int prb_queue_frozen(struct tpacket_kbdq_core *pkc)
+{
+	return pkc->reset_pending_on_curr_blk;
+}
+
+static void prb_clear_blk_fill_status(struct packet_ring_buffer *rb)
+{
+	struct tpacket_kbdq_core *pkc  = GET_PBDQC_FROM_RB(rb);
+	atomic_dec(&pkc->blk_fill_in_prog);
+}
+
+static void prb_fill_rxhash(struct tpacket_kbdq_core *pkc,
+			struct tpacket3_hdr *ppd)
+{
+	ppd->hv1.tp_rxhash = skb_get_rxhash(pkc->skb);
+}
+
+static void prb_clear_rxhash(struct tpacket_kbdq_core *pkc,
+			struct tpacket3_hdr *ppd)
+{
+	ppd->hv1.tp_rxhash = 0;
+}
+
+static void prb_fill_vlan_info(struct tpacket_kbdq_core *pkc,
+			struct tpacket3_hdr *ppd)
+{
+	if (vlan_tx_tag_present(pkc->skb)) {
+		ppd->hv1.tp_vlan_tci = vlan_tx_tag_get(pkc->skb);
+		ppd->tp_status = TP_STATUS_VLAN_VALID;
+	} else {
+		ppd->hv1.tp_vlan_tci = ppd->tp_status = 0;
+	}
+}
+
+static void prb_run_all_ft_ops(struct tpacket_kbdq_core *pkc,
+			struct tpacket3_hdr *ppd)
+{
+	prb_fill_vlan_info(pkc, ppd);
+
+	if (pkc->feature_req_word & TP_FT_REQ_FILL_RXHASH)
+		prb_fill_rxhash(pkc, ppd);
+	else
+		prb_clear_rxhash(pkc, ppd);
+}
+
+static void prb_fill_curr_block(char *curr,
+				struct tpacket_kbdq_core *pkc,
+				struct tpacket_block_desc *pbd,
+				unsigned int len)
+{
+	struct tpacket3_hdr *ppd;
+
+	ppd  = (struct tpacket3_hdr *)curr;
+	ppd->tp_next_offset = TOTAL_PKT_LEN_INCL_ALIGN(len);
+	pkc->prev = curr;
+	pkc->nxt_offset += TOTAL_PKT_LEN_INCL_ALIGN(len);
+	BLOCK_LEN(pbd) += TOTAL_PKT_LEN_INCL_ALIGN(len);
+	BLOCK_NUM_PKTS(pbd) += 1;
+	atomic_inc(&pkc->blk_fill_in_prog);
+	prb_run_all_ft_ops(pkc, ppd);
+}
+
+static void *__packet_lookup_frame_in_block(struct packet_sock *po,
+					    struct sk_buff *skb,
+						int status,
+					    unsigned int len
+					    )
+{
+	struct tpacket_kbdq_core *pkc;
+	struct tpacket_block_desc *pbd;
+	char *curr, *end;
+
+	pkc = GET_PBDQC_FROM_RB(((struct packet_ring_buffer *)&po->rx_ring));
+	pbd = GET_CURR_PBLOCK_DESC_FROM_CORE(pkc);
+
+	
+	if (prb_queue_frozen(pkc)) {
+		if (prb_curr_blk_in_use(pkc, pbd)) {
+			
+			return NULL;
+		} else {
+			prb_open_block(pkc, pbd);
+		}
+	}
+
+	smp_mb();
+	curr = pkc->nxt_offset;
+	pkc->skb = skb;
+	end = (char *) ((char *)pbd + pkc->kblk_size);
+
+	
+	if (curr+TOTAL_PKT_LEN_INCL_ALIGN(len) < end) {
+		prb_fill_curr_block(curr, pkc, pbd, len);
+		return (void *)curr;
+	}
+
+	
+	prb_retire_current_block(pkc, po, 0);
+
+	
+	curr = (char *)prb_dispatch_next_block(pkc, po);
+	if (curr) {
+		pbd = GET_CURR_PBLOCK_DESC_FROM_CORE(pkc);
+		prb_fill_curr_block(curr, pkc, pbd, len);
+		return (void *)curr;
+	}
+
+	return NULL;
+}
+
+static void *packet_current_rx_frame(struct packet_sock *po,
+					    struct sk_buff *skb,
+					    int status, unsigned int len)
+{
+	char *curr = NULL;
+	switch (po->tp_version) {
+	case TPACKET_V1:
+	case TPACKET_V2:
+		curr = packet_lookup_frame(po, &po->rx_ring,
+					po->rx_ring.head, status);
+		return curr;
+	case TPACKET_V3:
+		return __packet_lookup_frame_in_block(po, skb, status, len);
+	default:
+		WARN(1, "TPACKET version not supported\n");
+		BUG();
+		return 0;
+	}
+}
+
+static void *prb_lookup_block(struct packet_sock *po,
+				     struct packet_ring_buffer *rb,
+				     unsigned int previous,
+				     int status)
+{
+	struct tpacket_kbdq_core *pkc  = GET_PBDQC_FROM_RB(rb);
+	struct tpacket_block_desc *pbd = GET_PBLOCK_DESC(pkc, previous);
+
+	if (status != BLOCK_STATUS(pbd))
+		return NULL;
+	return pbd;
+}
+
+static int prb_previous_blk_num(struct packet_ring_buffer *rb)
+{
+	unsigned int prev;
+	if (rb->prb_bdqc.kactive_blk_num)
+		prev = rb->prb_bdqc.kactive_blk_num-1;
+	else
+		prev = rb->prb_bdqc.knum_blocks-1;
+	return prev;
+}
+
+static void *__prb_previous_block(struct packet_sock *po,
+					 struct packet_ring_buffer *rb,
+					 int status)
+{
+	unsigned int previous = prb_previous_blk_num(rb);
+	return prb_lookup_block(po, rb, previous, status);
+}
+
+static void *packet_previous_rx_frame(struct packet_sock *po,
+					     struct packet_ring_buffer *rb,
+					     int status)
+{
+	if (po->tp_version <= TPACKET_V2)
+		return packet_previous_frame(po, rb, status);
+
+	return __prb_previous_block(po, rb, status);
+}
+
+static void packet_increment_rx_head(struct packet_sock *po,
+					    struct packet_ring_buffer *rb)
+{
+	switch (po->tp_version) {
+	case TPACKET_V1:
+	case TPACKET_V2:
+		return packet_increment_head(rb);
+	case TPACKET_V3:
+	default:
+		WARN(1, "TPACKET version not supported.\n");
+		BUG();
+		return;
+	}
+}
+
+static void *packet_previous_frame(struct packet_sock *po,
 		struct packet_ring_buffer *rb,
 		int status)
 {
@@ -319,14 +954,9 @@ static inline void *packet_previous_frame(struct packet_sock *po,
 	return packet_lookup_frame(po, rb, previous, status);
 }
 
-static inline void packet_increment_head(struct packet_ring_buffer *buff)
+static void packet_increment_head(struct packet_ring_buffer *buff)
 {
 	buff->head = buff->head != buff->frame_max ? buff->head+1 : 0;
-}
-
-static inline struct packet_sock *pkt_sk(struct sock *sk)
-{
-	return (struct packet_sock *)sk;
 }
 
 static void packet_sock_destruct(struct sock *sk)
@@ -344,6 +974,203 @@ static void packet_sock_destruct(struct sock *sk)
 	sk_refcnt_debug_dec(sk);
 }
 
+static int fanout_rr_next(struct packet_fanout *f, unsigned int num)
+{
+	int x = atomic_read(&f->rr_cur) + 1;
+
+	if (x >= num)
+		x = 0;
+
+	return x;
+}
+
+static struct sock *fanout_demux_hash(struct packet_fanout *f, struct sk_buff *skb, unsigned int num)
+{
+	u32 idx, hash = skb->rxhash;
+
+	idx = ((u64)hash * num) >> 32;
+
+	return f->arr[idx];
+}
+
+static struct sock *fanout_demux_lb(struct packet_fanout *f, struct sk_buff *skb, unsigned int num)
+{
+	int cur, old;
+
+	cur = atomic_read(&f->rr_cur);
+	while ((old = atomic_cmpxchg(&f->rr_cur, cur,
+				     fanout_rr_next(f, num))) != cur)
+		cur = old;
+	return f->arr[cur];
+}
+
+static struct sock *fanout_demux_cpu(struct packet_fanout *f, struct sk_buff *skb, unsigned int num)
+{
+	unsigned int cpu = smp_processor_id();
+
+	return f->arr[cpu % num];
+}
+
+static int packet_rcv_fanout(struct sk_buff *skb, struct net_device *dev,
+			     struct packet_type *pt, struct net_device *orig_dev)
+{
+	struct packet_fanout *f = pt->af_packet_priv;
+	unsigned int num = f->num_members;
+	struct packet_sock *po;
+	struct sock *sk;
+
+	if (!net_eq(dev_net(dev), read_pnet(&f->net)) ||
+	    !num) {
+		kfree_skb(skb);
+		return 0;
+	}
+
+	switch (f->type) {
+	case PACKET_FANOUT_HASH:
+	default:
+		if (f->defrag) {
+			skb = ip_check_defrag(skb, IP_DEFRAG_AF_PACKET);
+			if (!skb)
+				return 0;
+		}
+		skb_get_rxhash(skb);
+		sk = fanout_demux_hash(f, skb, num);
+		break;
+	case PACKET_FANOUT_LB:
+		sk = fanout_demux_lb(f, skb, num);
+		break;
+	case PACKET_FANOUT_CPU:
+		sk = fanout_demux_cpu(f, skb, num);
+		break;
+	}
+
+	po = pkt_sk(sk);
+
+	return po->prot_hook.func(skb, dev, &po->prot_hook, orig_dev);
+}
+
+static DEFINE_MUTEX(fanout_mutex);
+static LIST_HEAD(fanout_list);
+
+static void __fanout_link(struct sock *sk, struct packet_sock *po)
+{
+	struct packet_fanout *f = po->fanout;
+
+	spin_lock(&f->lock);
+	f->arr[f->num_members] = sk;
+	smp_wmb();
+	f->num_members++;
+	spin_unlock(&f->lock);
+}
+
+static void __fanout_unlink(struct sock *sk, struct packet_sock *po)
+{
+	struct packet_fanout *f = po->fanout;
+	int i;
+
+	spin_lock(&f->lock);
+	for (i = 0; i < f->num_members; i++) {
+		if (f->arr[i] == sk)
+			break;
+	}
+	BUG_ON(i >= f->num_members);
+	f->arr[i] = f->arr[f->num_members - 1];
+	f->num_members--;
+	spin_unlock(&f->lock);
+}
+
+static int fanout_add(struct sock *sk, u16 id, u16 type_flags)
+{
+	struct packet_sock *po = pkt_sk(sk);
+	struct packet_fanout *f, *match;
+	u8 type = type_flags & 0xff;
+	u8 defrag = (type_flags & PACKET_FANOUT_FLAG_DEFRAG) ? 1 : 0;
+	int err;
+
+	switch (type) {
+	case PACKET_FANOUT_HASH:
+	case PACKET_FANOUT_LB:
+	case PACKET_FANOUT_CPU:
+		break;
+	default:
+		return -EINVAL;
+	}
+
+	if (!po->running)
+		return -EINVAL;
+
+	if (po->fanout)
+		return -EALREADY;
+
+	mutex_lock(&fanout_mutex);
+	match = NULL;
+	list_for_each_entry(f, &fanout_list, list) {
+		if (f->id == id &&
+		    read_pnet(&f->net) == sock_net(sk)) {
+			match = f;
+			break;
+		}
+	}
+	err = -EINVAL;
+	if (match && match->defrag != defrag)
+		goto out;
+	if (!match) {
+		err = -ENOMEM;
+		match = kzalloc(sizeof(*match), GFP_KERNEL);
+		if (!match)
+			goto out;
+		write_pnet(&match->net, sock_net(sk));
+		match->id = id;
+		match->type = type;
+		match->defrag = defrag;
+		atomic_set(&match->rr_cur, 0);
+		INIT_LIST_HEAD(&match->list);
+		spin_lock_init(&match->lock);
+		atomic_set(&match->sk_ref, 0);
+		match->prot_hook.type = po->prot_hook.type;
+		match->prot_hook.dev = po->prot_hook.dev;
+		match->prot_hook.func = packet_rcv_fanout;
+		match->prot_hook.af_packet_priv = match;
+		dev_add_pack(&match->prot_hook);
+		list_add(&match->list, &fanout_list);
+	}
+	err = -EINVAL;
+	if (match->type == type &&
+	    match->prot_hook.type == po->prot_hook.type &&
+	    match->prot_hook.dev == po->prot_hook.dev) {
+		err = -ENOSPC;
+		if (atomic_read(&match->sk_ref) < PACKET_FANOUT_MAX) {
+			__dev_remove_pack(&po->prot_hook);
+			po->fanout = match;
+			atomic_inc(&match->sk_ref);
+			__fanout_link(sk, po);
+			err = 0;
+		}
+	}
+out:
+	mutex_unlock(&fanout_mutex);
+	return err;
+}
+
+static void fanout_release(struct sock *sk)
+{
+	struct packet_sock *po = pkt_sk(sk);
+	struct packet_fanout *f;
+
+	f = po->fanout;
+	if (!f)
+		return;
+
+	po->fanout = NULL;
+
+	mutex_lock(&fanout_mutex);
+	if (atomic_dec_and_test(&f->sk_ref)) {
+		list_del(&f->list);
+		dev_remove_pack(&f->prot_hook);
+		kfree(f);
+	}
+	mutex_unlock(&fanout_mutex);
+}
 
 static const struct proto_ops packet_ops;
 
@@ -355,23 +1182,9 @@ static int packet_rcv_spkt(struct sk_buff *skb, struct net_device *dev,
 	struct sock *sk;
 	struct sockaddr_pkt *spkt;
 
-	/*
-	 *	When we registered the protocol we saved the socket in the data
-	 *	field for just this event.
-	 */
 
 	sk = pt->af_packet_priv;
 
-	/*
-	 *	Yank back the headers [hope the device set this
-	 *	right or kerboom...]
-	 *
-	 *	Incoming packets have ll header pulled,
-	 *	push it back.
-	 *
-	 *	For outgoing ones skb->data == skb_mac_header(skb)
-	 *	so that this procedure is noop.
-	 */
 
 	if (skb->pkt_type == PACKET_LOOPBACK)
 		goto out;
@@ -383,28 +1196,21 @@ static int packet_rcv_spkt(struct sk_buff *skb, struct net_device *dev,
 	if (skb == NULL)
 		goto oom;
 
-	/* drop any routing info */
+	
 	skb_dst_drop(skb);
 
-	/* drop conntrack reference */
+	
 	nf_reset(skb);
 
 	spkt = &PACKET_SKB_CB(skb)->sa.pkt;
 
 	skb_push(skb, skb->data - skb_mac_header(skb));
 
-	/*
-	 *	The SOCK_PACKET socket receives _all_ frames.
-	 */
 
 	spkt->spkt_family = dev->type;
 	strlcpy(spkt->spkt_device, dev->name, sizeof(spkt->spkt_device));
 	spkt->spkt_protocol = skb->protocol;
 
-	/*
-	 *	Charge the memory to the socket. This is done specifically
-	 *	to prevent sockets using all the memory up.
-	 */
 
 	if (sock_queue_rcv_skb(sk, skb) == 0)
 		return 0;
@@ -416,10 +1222,6 @@ oom:
 }
 
 
-/*
- *	Output a raw packet to a device layer. This bypasses all the other
- *	protocol layers and you must therefore supply it with a complete frame
- */
 
 static int packet_sendmsg_spkt(struct kiocb *iocb, struct socket *sock,
 			       struct msghdr *msg, size_t len)
@@ -430,10 +1232,8 @@ static int packet_sendmsg_spkt(struct kiocb *iocb, struct socket *sock,
 	struct net_device *dev;
 	__be16 proto = 0;
 	int err;
+	int extra_len = 0;
 
-	/*
-	 *	Get and verify the address.
-	 */
 
 	if (saddr) {
 		if (msg->msg_namelen < sizeof(struct sockaddr))
@@ -441,11 +1241,8 @@ static int packet_sendmsg_spkt(struct kiocb *iocb, struct socket *sock,
 		if (msg->msg_namelen == sizeof(struct sockaddr_pkt))
 			proto = saddr->spkt_protocol;
 	} else
-		return -ENOTCONN;	/* SOCK_PACKET must be sent giving an address */
+		return -ENOTCONN;	
 
-	/*
-	 *	Find the device first to size check it
-	 */
 
 	saddr->spkt_device[13] = 0;
 retry:
@@ -459,31 +1256,32 @@ retry:
 	if (!(dev->flags & IFF_UP))
 		goto out_unlock;
 
-	/*
-	 * You may not queue a frame bigger than the mtu. This is the lowest level
-	 * raw protocol and you must do your own fragmentation at this level.
-	 */
+
+	if (unlikely(sock_flag(sk, SOCK_NOFCS))) {
+		if (!netif_supports_nofcs(dev)) {
+			err = -EPROTONOSUPPORT;
+			goto out_unlock;
+		}
+		extra_len = 4; 
+	}
 
 	err = -EMSGSIZE;
-	if (len > dev->mtu + dev->hard_header_len + VLAN_HLEN)
+	if (len > dev->mtu + dev->hard_header_len + VLAN_HLEN + extra_len)
 		goto out_unlock;
 
 	if (!skb) {
 		size_t reserved = LL_RESERVED_SPACE(dev);
+		int tlen = dev->needed_tailroom;
 		unsigned int hhlen = dev->header_ops ? dev->hard_header_len : 0;
 
 		rcu_read_unlock();
-		skb = sock_wmalloc(sk, len + reserved, 0, GFP_KERNEL);
+		skb = sock_wmalloc(sk, len + reserved + tlen, 0, GFP_KERNEL);
 		if (skb == NULL)
 			return -ENOBUFS;
-		/* FIXME: Save some space for broken drivers that write a hard
-		 * header at transmission time by themselves. PPP is the notable
-		 * one here. This should really be fixed at the driver level.
-		 */
 		skb_reserve(skb, reserved);
 		skb_reset_network_header(skb);
 
-		/* Try to align data part correctly */
+		
 		if (hhlen) {
 			skb->data -= hhlen;
 			skb->tail -= hhlen;
@@ -496,11 +1294,7 @@ retry:
 		goto retry;
 	}
 
-	if (len > (dev->mtu + dev->hard_header_len)) {
-		/* Earlier code assumed this would be a VLAN pkt,
-		 * double-check this now that we have the actual
-		 * packet in hand.
-		 */
+	if (len > (dev->mtu + dev->hard_header_len + extra_len)) {
 		struct ethhdr *ehdr;
 		skb_reset_mac_header(skb);
 		ehdr = eth_hdr(skb);
@@ -517,6 +1311,9 @@ retry:
 	err = sock_tx_timestamp(sk, &skb_shinfo(skb)->tx_flags);
 	if (err < 0)
 		goto out_unlock;
+
+	if (unlikely(extra_len == 4))
+		skb->no_fcs = 1;
 
 	dev_queue_xmit(skb);
 	rcu_read_unlock();
@@ -535,7 +1332,7 @@ out_free:
 	return err;
 }
 
-static inline unsigned int run_filter(const struct sk_buff *skb,
+static unsigned int run_filter(const struct sk_buff *skb,
 				      const struct sock *sk,
 				      unsigned int res)
 {
@@ -550,17 +1347,6 @@ static inline unsigned int run_filter(const struct sk_buff *skb,
 	return res;
 }
 
-/*
- * This function makes lazy skb cloning in hope that most of packets
- * are discarded by BPF.
- *
- * Note tricky part: we DO mangle shared skb! skb->data, skb->len
- * and skb->cb are mangled. It works because (and until) packets
- * falling here are owned by current CPU. Output packets are cloned
- * by dev_queue_xmit_nit(), input packets are processed by net_bh
- * sequencially, so that if we return skb to original state on exit,
- * we will not harm anyone.
- */
 
 static int packet_rcv(struct sk_buff *skb, struct net_device *dev,
 		      struct packet_type *pt, struct net_device *orig_dev)
@@ -584,17 +1370,10 @@ static int packet_rcv(struct sk_buff *skb, struct net_device *dev,
 	skb->dev = dev;
 
 	if (dev->header_ops) {
-		/* The device has an explicit notion of ll header,
-		 * exported to higher levels.
-		 *
-		 * Otherwise, the device hides details of its frame
-		 * structure, so that corresponding packet head is
-		 * never delivered to user.
-		 */
 		if (sk->sk_type != SOCK_DGRAM)
 			skb_push(skb, skb->data - skb_mac_header(skb));
 		else if (skb->pkt_type == PACKET_OUTGOING) {
-			/* Special case: outgoing packets have ll header at head */
+			
 			skb_pull(skb, skb_network_offset(skb));
 		}
 	}
@@ -607,8 +1386,7 @@ static int packet_rcv(struct sk_buff *skb, struct net_device *dev,
 	if (snaplen > res)
 		snaplen = res;
 
-	if (atomic_read(&sk->sk_rmem_alloc) + skb->truesize >=
-	    (unsigned)sk->sk_rcvbuf)
+	if (atomic_read(&sk->sk_rmem_alloc) >= sk->sk_rcvbuf)
 		goto drop_n_acct;
 
 	if (skb_shared(skb)) {
@@ -648,7 +1426,7 @@ static int packet_rcv(struct sk_buff *skb, struct net_device *dev,
 	skb->dev = NULL;
 	skb_dst_drop(skb);
 
-	/* drop conntrack reference */
+	
 	nf_reset(skb);
 
 	spin_lock(&sk->sk_receive_queue.lock);
@@ -684,12 +1462,13 @@ static int tpacket_rcv(struct sk_buff *skb, struct net_device *dev,
 	union {
 		struct tpacket_hdr *h1;
 		struct tpacket2_hdr *h2;
+		struct tpacket3_hdr *h3;
 		void *raw;
 	} h;
 	u8 *skb_head = skb->data;
 	int skb_len = skb->len;
 	unsigned int snaplen, res;
-	unsigned long status = TP_STATUS_LOSING|TP_STATUS_USER;
+	unsigned long status = TP_STATUS_USER;
 	unsigned short macoff, netoff, hdrlen;
 	struct sk_buff *copy_skb = NULL;
 	struct timeval tv;
@@ -709,7 +1488,7 @@ static int tpacket_rcv(struct sk_buff *skb, struct net_device *dev,
 		if (sk->sk_type != SOCK_DGRAM)
 			skb_push(skb, skb->data - skb_mac_header(skb));
 		else if (skb->pkt_type == PACKET_OUTGOING) {
-			/* Special case: outgoing packets have ll header at head */
+			
 			skb_pull(skb, skb_network_offset(skb));
 		}
 	}
@@ -735,37 +1514,39 @@ static int tpacket_rcv(struct sk_buff *skb, struct net_device *dev,
 			po->tp_reserve;
 		macoff = netoff - maclen;
 	}
-
-	if (macoff + snaplen > po->rx_ring.frame_size) {
-		if (po->copy_thresh &&
-		    atomic_read(&sk->sk_rmem_alloc) + skb->truesize <
-		    (unsigned)sk->sk_rcvbuf) {
-			if (skb_shared(skb)) {
-				copy_skb = skb_clone(skb, GFP_ATOMIC);
-			} else {
-				copy_skb = skb_get(skb);
-				skb_head = skb->data;
+	if (po->tp_version <= TPACKET_V2) {
+		if (macoff + snaplen > po->rx_ring.frame_size) {
+			if (po->copy_thresh &&
+			    atomic_read(&sk->sk_rmem_alloc) < sk->sk_rcvbuf) {
+				if (skb_shared(skb)) {
+					copy_skb = skb_clone(skb, GFP_ATOMIC);
+				} else {
+					copy_skb = skb_get(skb);
+					skb_head = skb->data;
+				}
+				if (copy_skb)
+					skb_set_owner_r(copy_skb, sk);
 			}
-			if (copy_skb)
-				skb_set_owner_r(copy_skb, sk);
+			snaplen = po->rx_ring.frame_size - macoff;
+			if ((int)snaplen < 0)
+				snaplen = 0;
 		}
-		snaplen = po->rx_ring.frame_size - macoff;
-		if ((int)snaplen < 0)
-			snaplen = 0;
 	}
-
 	spin_lock(&sk->sk_receive_queue.lock);
-	h.raw = packet_current_frame(po, &po->rx_ring, TP_STATUS_KERNEL);
+	h.raw = packet_current_rx_frame(po, skb,
+					TP_STATUS_KERNEL, (macoff+snaplen));
 	if (!h.raw)
 		goto ring_is_full;
-	packet_increment_head(&po->rx_ring);
+	if (po->tp_version <= TPACKET_V2) {
+		packet_increment_rx_head(po, &po->rx_ring);
+		if (po->stats.tp_drops)
+			status |= TP_STATUS_LOSING;
+	}
 	po->stats.tp_packets++;
 	if (copy_skb) {
 		status |= TP_STATUS_COPY;
 		__skb_queue_tail(&sk->sk_receive_queue, copy_skb);
 	}
-	if (!po->stats.tp_drops)
-		status &= ~TP_STATUS_LOSING;
 	spin_unlock(&sk->sk_receive_queue.lock);
 
 	skb_copy_bits(skb, 0, h.raw + macoff, snaplen);
@@ -816,6 +1597,26 @@ static int tpacket_rcv(struct sk_buff *skb, struct net_device *dev,
 		h.h2->tp_padding = 0;
 		hdrlen = sizeof(*h.h2);
 		break;
+	case TPACKET_V3:
+		h.h3->tp_status |= status;
+		h.h3->tp_len = skb->len;
+		h.h3->tp_snaplen = snaplen;
+		h.h3->tp_mac = macoff;
+		h.h3->tp_net = netoff;
+		if ((po->tp_tstamp & SOF_TIMESTAMPING_SYS_HARDWARE)
+				&& shhwtstamps->syststamp.tv64)
+			ts = ktime_to_timespec(shhwtstamps->syststamp);
+		else if ((po->tp_tstamp & SOF_TIMESTAMPING_RAW_HARDWARE)
+				&& shhwtstamps->hwtstamp.tv64)
+			ts = ktime_to_timespec(shhwtstamps->hwtstamp);
+		else if (skb->tstamp.tv64)
+			ts = ktime_to_timespec(skb->tstamp);
+		else
+			getnstimeofday(&ts);
+		h.h3->tp_sec  = ts.tv_sec;
+		h.h3->tp_nsec = ts.tv_nsec;
+		hdrlen = sizeof(*h.h3);
+		break;
 	default:
 		BUG();
 	}
@@ -831,17 +1632,24 @@ static int tpacket_rcv(struct sk_buff *skb, struct net_device *dev,
 	else
 		sll->sll_ifindex = dev->ifindex;
 
-	__packet_set_status(po, h.raw, status);
 	smp_mb();
 #if ARCH_IMPLEMENTS_FLUSH_DCACHE_PAGE == 1
 	{
 		u8 *start, *end;
 
-		end = (u8 *)PAGE_ALIGN((unsigned long)h.raw + macoff + snaplen);
-		for (start = h.raw; start < end; start += PAGE_SIZE)
-			flush_dcache_page(pgv_to_page(start));
+		if (po->tp_version <= TPACKET_V2) {
+			end = (u8 *)PAGE_ALIGN((unsigned long)h.raw
+				+ macoff + snaplen);
+			for (start = h.raw; start < end; start += PAGE_SIZE)
+				flush_dcache_page(pgv_to_page(start));
+		}
+		smp_wmb();
 	}
 #endif
+	if (po->tp_version <= TPACKET_V2)
+		__packet_set_status(po, h.raw, status);
+	else
+		prb_clear_blk_fill_status(&po->rx_ring);
 
 	sk->sk_data_ready(sk, 0);
 
@@ -875,10 +1683,9 @@ static void tpacket_destruct_skb(struct sk_buff *skb)
 	struct packet_sock *po = pkt_sk(skb->sk);
 	void *ph;
 
-	BUG_ON(skb == NULL);
-
 	if (likely(po->tx_ring.pg_vec)) {
 		ph = skb_shinfo(skb)->destructor_arg;
+		BUG_ON(__packet_get_status(po, ph) != TP_STATUS_SENDING);
 		BUG_ON(atomic_read(&po->tx_ring.pending) == 0);
 		atomic_dec(&po->tx_ring.pending);
 		__packet_set_status(po, ph, TP_STATUS_AVAILABLE);
@@ -889,7 +1696,7 @@ static void tpacket_destruct_skb(struct sk_buff *skb)
 
 static int tpacket_fill_skb(struct packet_sock *po, struct sk_buff *skb,
 		void *frame, struct net_device *dev, int size_max,
-		__be16 proto, unsigned char *addr)
+		__be16 proto, unsigned char *addr, int hlen)
 {
 	union {
 		struct tpacket_hdr *h1;
@@ -923,7 +1730,7 @@ static int tpacket_fill_skb(struct packet_sock *po, struct sk_buff *skb,
 		return -EMSGSIZE;
 	}
 
-	skb_reserve(skb, LL_RESERVED_SPACE(dev));
+	skb_reserve(skb, hlen);
 	skb_reset_network_header(skb);
 
 	data = ph.raw + po->tp_hdrlen - sizeof(struct sockaddr_ll);
@@ -935,7 +1742,7 @@ static int tpacket_fill_skb(struct packet_sock *po, struct sk_buff *skb,
 		if (unlikely(err < 0))
 			return -EINVAL;
 	} else if (dev->hard_header_len) {
-		/* net device doesn't like empty head */
+		
 		if (unlikely(tp_len <= dev->hard_header_len)) {
 			pr_err("packet size is too short (%d < %d)\n",
 			       tp_len, dev->hard_header_len);
@@ -990,19 +1797,21 @@ static int tpacket_snd(struct packet_sock *po, struct msghdr *msg)
 	struct sk_buff *skb;
 	struct net_device *dev;
 	__be16 proto;
-	int ifindex, err, reserve = 0;
+	bool need_rls_dev = false;
+	int err, reserve = 0;
 	void *ph;
 	struct sockaddr_ll *saddr = (struct sockaddr_ll *)msg->msg_name;
 	int tp_len, size_max;
 	unsigned char *addr;
 	int len_sum = 0;
 	int status = 0;
+	int hlen, tlen;
 
 	mutex_lock(&po->pg_vec_lock);
 
 	err = -EBUSY;
 	if (saddr == NULL) {
-		ifindex	= po->ifindex;
+		dev = po->prot_hook.dev;
 		proto	= po->num;
 		addr	= NULL;
 	} else {
@@ -1013,12 +1822,12 @@ static int tpacket_snd(struct packet_sock *po, struct msghdr *msg)
 					+ offsetof(struct sockaddr_ll,
 						sll_addr)))
 			goto out;
-		ifindex	= saddr->sll_ifindex;
 		proto	= saddr->sll_protocol;
 		addr	= saddr->sll_addr;
+		dev = dev_get_by_index(sock_net(&po->sk), saddr->sll_ifindex);
+		need_rls_dev = true;
 	}
 
-	dev = dev_get_by_index(sock_net(&po->sk), ifindex);
 	err = -ENXIO;
 	if (unlikely(dev == NULL))
 		goto out;
@@ -1045,16 +1854,17 @@ static int tpacket_snd(struct packet_sock *po, struct msghdr *msg)
 		}
 
 		status = TP_STATUS_SEND_REQUEST;
+		hlen = LL_RESERVED_SPACE(dev);
+		tlen = dev->needed_tailroom;
 		skb = sock_alloc_send_skb(&po->sk,
-				LL_ALLOCATED_SPACE(dev)
-				+ sizeof(struct sockaddr_ll),
+				hlen + tlen + sizeof(struct sockaddr_ll),
 				0, &err);
 
 		if (unlikely(skb == NULL))
 			goto out_status;
 
 		tp_len = tpacket_fill_skb(po, skb, ph, dev, size_max, proto,
-				addr);
+				addr, hlen);
 
 		if (unlikely(tp_len < 0)) {
 			if (po->tp_loss) {
@@ -1080,14 +1890,10 @@ static int tpacket_snd(struct packet_sock *po, struct msghdr *msg)
 			err = net_xmit_errno(err);
 			if (err && __packet_get_status(po, ph) ==
 				   TP_STATUS_AVAILABLE) {
-				/* skb was destructed already */
+				
 				skb = NULL;
 				goto out_status;
 			}
-			/*
-			 * skb was dropped but not destructed yet;
-			 * let's treat it like congestion or err < 0
-			 */
 			err = 0;
 		}
 		packet_increment_head(&po->tx_ring);
@@ -1111,20 +1917,21 @@ out_status:
 #endif
 
 out_put:
-	dev_put(dev);
+	if (need_rls_dev)
+		dev_put(dev);
 out:
 	mutex_unlock(&po->pg_vec_lock);
 	return err;
 }
 
-static inline struct sk_buff *packet_alloc_skb(struct sock *sk, size_t prepad,
-					       size_t reserve, size_t len,
-					       size_t linear, int noblock,
-					       int *err)
+static struct sk_buff *packet_alloc_skb(struct sock *sk, size_t prepad,
+				        size_t reserve, size_t len,
+				        size_t linear, int noblock,
+				        int *err)
 {
 	struct sk_buff *skb;
 
-	/* Under a page?  Don't bother with paged skb. */
+	
 	if (prepad + len < PAGE_SIZE || !linear)
 		linear = len;
 
@@ -1149,20 +1956,20 @@ static int packet_snd(struct socket *sock,
 	struct sk_buff *skb;
 	struct net_device *dev;
 	__be16 proto;
+	bool need_rls_dev = false;
 	unsigned char *addr;
-	int ifindex, err, reserve = 0;
+	int err, reserve = 0;
 	struct virtio_net_hdr vnet_hdr = { 0 };
 	int offset = 0;
 	int vnet_hdr_len;
 	struct packet_sock *po = pkt_sk(sk);
 	unsigned short gso_type = 0;
+	int hlen, tlen;
+	int extra_len = 0;
 
-	/*
-	 *	Get and verify the address.
-	 */
 
 	if (saddr == NULL) {
-		ifindex	= po->ifindex;
+		dev = po->prot_hook.dev;
 		proto	= po->num;
 		addr	= NULL;
 	} else {
@@ -1171,13 +1978,12 @@ static int packet_snd(struct socket *sock,
 			goto out;
 		if (msg->msg_namelen < (saddr->sll_halen + offsetof(struct sockaddr_ll, sll_addr)))
 			goto out;
-		ifindex	= saddr->sll_ifindex;
 		proto	= saddr->sll_protocol;
 		addr	= saddr->sll_addr;
+		dev = dev_get_by_index(sock_net(sk), saddr->sll_ifindex);
+		need_rls_dev = true;
 	}
 
-
-	dev = dev_get_by_index(sock_net(sk), ifindex);
 	err = -ENXIO;
 	if (dev == NULL)
 		goto out_unlock;
@@ -1236,13 +2042,22 @@ static int packet_snd(struct socket *sock,
 		}
 	}
 
+	if (unlikely(sock_flag(sk, SOCK_NOFCS))) {
+		if (!netif_supports_nofcs(dev)) {
+			err = -EPROTONOSUPPORT;
+			goto out_unlock;
+		}
+		extra_len = 4; 
+	}
+
 	err = -EMSGSIZE;
-	if (!gso_type && (len > dev->mtu + reserve + VLAN_HLEN))
+	if (!gso_type && (len > dev->mtu + reserve + VLAN_HLEN + extra_len))
 		goto out_unlock;
 
 	err = -ENOBUFS;
-	skb = packet_alloc_skb(sk, LL_ALLOCATED_SPACE(dev),
-			       LL_RESERVED_SPACE(dev), len, vnet_hdr.hdr_len,
+	hlen = LL_RESERVED_SPACE(dev);
+	tlen = dev->needed_tailroom;
+	skb = packet_alloc_skb(sk, hlen + tlen, hlen, len, vnet_hdr.hdr_len,
 			       msg->msg_flags & MSG_DONTWAIT, &err);
 	if (skb == NULL)
 		goto out_unlock;
@@ -1254,7 +2069,7 @@ static int packet_snd(struct socket *sock,
 	    (offset = dev_hard_header(skb, dev, ntohs(proto), addr, NULL, len)) < 0)
 		goto out_free;
 
-	/* Returns -EFAULT on error */
+	
 	err = skb_copy_datagram_from_iovec(skb, offset, msg->msg_iov, 0, len);
 	if (err)
 		goto out_free;
@@ -1262,11 +2077,7 @@ static int packet_snd(struct socket *sock,
 	if (err < 0)
 		goto out_free;
 
-	if (!gso_type && (len > dev->mtu + reserve)) {
-		/* Earlier code assumed this would be a VLAN pkt,
-		 * double-check this now that we have the actual
-		 * packet in hand.
-		 */
+	if (!gso_type && (len > dev->mtu + reserve + extra_len)) {
 		struct ethhdr *ehdr;
 		skb_reset_mac_header(skb);
 		ehdr = eth_hdr(skb);
@@ -1293,29 +2104,30 @@ static int packet_snd(struct socket *sock,
 		skb_shinfo(skb)->gso_size = vnet_hdr.gso_size;
 		skb_shinfo(skb)->gso_type = gso_type;
 
-		/* Header must be checked, and gso_segs computed. */
+		
 		skb_shinfo(skb)->gso_type |= SKB_GSO_DODGY;
 		skb_shinfo(skb)->gso_segs = 0;
 
 		len += vnet_hdr_len;
 	}
 
-	/*
-	 *	Now send it
-	 */
+	if (unlikely(extra_len == 4))
+		skb->no_fcs = 1;
+
 
 	err = dev_queue_xmit(skb);
 	if (err > 0 && (err = net_xmit_errno(err)) != 0)
 		goto out_unlock;
 
-	dev_put(dev);
+	if (need_rls_dev)
+		dev_put(dev);
 
 	return len;
 
 out_free:
 	kfree_skb(skb);
 out_unlock:
-	if (dev)
+	if (dev && need_rls_dev)
 		dev_put(dev);
 out:
 	return err;
@@ -1332,17 +2144,13 @@ static int packet_sendmsg(struct kiocb *iocb, struct socket *sock,
 		return packet_snd(sock, msg, len);
 }
 
-/*
- *	Close a PACKET socket. This is fairly simple. We immediately go
- *	to 'closed' state and remove our protocol entry in the device list.
- */
 
 static int packet_release(struct socket *sock)
 {
 	struct sock *sk = sock->sk;
 	struct packet_sock *po;
 	struct net *net;
-	struct tpacket_req req;
+	union tpacket_req_u req_u;
 
 	if (!sk)
 		return 0;
@@ -1356,37 +2164,30 @@ static int packet_release(struct socket *sock)
 	spin_unlock_bh(&net->packet.sklist_lock);
 
 	spin_lock(&po->bind_lock);
-	if (po->running) {
-		/*
-		 * Remove from protocol table
-		 */
-		po->running = 0;
-		po->num = 0;
-		__dev_remove_pack(&po->prot_hook);
-		__sock_put(sk);
+	unregister_prot_hook(sk, false);
+	if (po->prot_hook.dev) {
+		dev_put(po->prot_hook.dev);
+		po->prot_hook.dev = NULL;
 	}
 	spin_unlock(&po->bind_lock);
 
 	packet_flush_mclist(sk);
 
-	if (po->rx_ring.pg_vec) {
-		memset(&req, 0, sizeof(req));
-		packet_set_ring(sk, &req, 1, 0);
-	}
+	memset(&req_u, 0, sizeof(req_u));
 
-	if (po->tx_ring.pg_vec) {
-		memset(&req, 0, sizeof(req));
-		packet_set_ring(sk, &req, 1, 1);
-	}
+	if (po->rx_ring.pg_vec)
+		packet_set_ring(sk, &req_u, 1, 0);
+
+	if (po->tx_ring.pg_vec)
+		packet_set_ring(sk, &req_u, 1, 1);
+
+	fanout_release(sk);
 
 	synchronize_net();
-	/*
-	 *	Now the socket is dead. No more input will appear.
-	 */
 	sock_orphan(sk);
 	sock->sk = NULL;
 
-	/* Purge queues */
+	
 
 	skb_queue_purge(&sk->sk_receive_queue);
 	sk_refcnt_debug_release(sk);
@@ -1395,31 +2196,26 @@ static int packet_release(struct socket *sock)
 	return 0;
 }
 
-/*
- *	Attach a packet hook.
- */
 
 static int packet_do_bind(struct sock *sk, struct net_device *dev, __be16 protocol)
 {
 	struct packet_sock *po = pkt_sk(sk);
-	/*
-	 *	Detach an existing hook if present.
-	 */
+
+	if (po->fanout) {
+		if (dev)
+			dev_put(dev);
+
+		return -EINVAL;
+	}
 
 	lock_sock(sk);
 
 	spin_lock(&po->bind_lock);
-	if (po->running) {
-		__sock_put(sk);
-		po->running = 0;
-		po->num = 0;
-		spin_unlock(&po->bind_lock);
-		dev_remove_pack(&po->prot_hook);
-		spin_lock(&po->bind_lock);
-	}
-
+	unregister_prot_hook(sk, true);
 	po->num = protocol;
 	po->prot_hook.type = protocol;
+	if (po->prot_hook.dev)
+		dev_put(po->prot_hook.dev);
 	po->prot_hook.dev = dev;
 
 	po->ifindex = dev ? dev->ifindex : 0;
@@ -1428,9 +2224,7 @@ static int packet_do_bind(struct sock *sk, struct net_device *dev, __be16 protoc
 		goto out_unlock;
 
 	if (!dev || (dev->flags & IFF_UP)) {
-		dev_add_pack(&po->prot_hook);
-		sock_hold(sk);
-		po->running = 1;
+		register_prot_hook(sk);
 	} else {
 		sk->sk_err = ENETDOWN;
 		if (!sock_flag(sk, SOCK_DEAD))
@@ -1443,9 +2237,6 @@ out_unlock:
 	return 0;
 }
 
-/*
- *	Bind a packet socket to a device
- */
 
 static int packet_bind_spkt(struct socket *sock, struct sockaddr *uaddr,
 			    int addr_len)
@@ -1455,19 +2246,14 @@ static int packet_bind_spkt(struct socket *sock, struct sockaddr *uaddr,
 	struct net_device *dev;
 	int err = -ENODEV;
 
-	/*
-	 *	Check legality
-	 */
 
 	if (addr_len != sizeof(struct sockaddr))
 		return -EINVAL;
 	strlcpy(name, uaddr->sa_data, sizeof(name));
 
 	dev = dev_get_by_name(sock_net(sk), name);
-	if (dev) {
+	if (dev)
 		err = packet_do_bind(sk, dev, pkt_sk(sk)->num);
-		dev_put(dev);
-	}
 	return err;
 }
 
@@ -1479,9 +2265,6 @@ static int packet_bind(struct socket *sock, struct sockaddr *uaddr, int addr_len
 	int err;
 
 
-	/*
-	 *	Check legality
-	 */
 
 	if (addr_len < sizeof(struct sockaddr_ll))
 		return -EINVAL;
@@ -1495,8 +2278,6 @@ static int packet_bind(struct socket *sock, struct sockaddr *uaddr, int addr_len
 			goto out;
 	}
 	err = packet_do_bind(sk, dev, sll->sll_protocol ? : pkt_sk(sk)->num);
-	if (dev)
-		dev_put(dev);
 
 out:
 	return err;
@@ -1508,16 +2289,13 @@ static struct proto packet_proto = {
 	.obj_size = sizeof(struct packet_sock),
 };
 
-/*
- *	Create a packet of type SOCK_PACKET.
- */
 
 static int packet_create(struct net *net, struct socket *sock, int protocol,
 			 int kern)
 {
 	struct sock *sk;
 	struct packet_sock *po;
-	__be16 proto = (__force __be16)protocol; /* weird, but documented */
+	__be16 proto = (__force __be16)protocol; 
 	int err;
 
 	if (!capable(CAP_NET_RAW))
@@ -1546,9 +2324,6 @@ static int packet_create(struct net *net, struct socket *sock, int protocol,
 	sk->sk_destruct = packet_sock_destruct;
 	sk_refcnt_debug_inc(sk);
 
-	/*
-	 *	Attach a protocol block
-	 */
 
 	spin_lock_init(&po->bind_lock);
 	mutex_init(&po->pg_vec_lock);
@@ -1561,9 +2336,7 @@ static int packet_create(struct net *net, struct socket *sock, int protocol,
 
 	if (proto) {
 		po->prot_hook.type = proto;
-		dev_add_pack(&po->prot_hook);
-		sock_hold(sk);
-		po->running = 1;
+		register_prot_hook(sk);
 	}
 
 	spin_lock_bh(&net->packet.sklist_lock);
@@ -1605,7 +2378,7 @@ static int packet_recv_error(struct sock *sk, struct msghdr *msg, int len)
 	msg->msg_flags |= MSG_ERRQUEUE;
 	err = copied;
 
-	/* Reset and regenerate socket error */
+	
 	spin_lock_bh(&sk->sk_error_queue.lock);
 	sk->sk_err = 0;
 	if ((skb2 = skb_peek(&sk->sk_error_queue)) != NULL) {
@@ -1621,10 +2394,6 @@ out:
 	return err;
 }
 
-/*
- *	Pull a packet from our receive queue and hand it to the user.
- *	If necessary we block.
- */
 
 static int packet_recvmsg(struct kiocb *iocb, struct socket *sock,
 			  struct msghdr *msg, size_t len, int flags)
@@ -1640,7 +2409,7 @@ static int packet_recvmsg(struct kiocb *iocb, struct socket *sock,
 		goto out;
 
 #if 0
-	/* What error should we return now? EUNATTACH? */
+	
 	if (pkt_sk(sk)->ifindex < 0)
 		return -ENODEV;
 #endif
@@ -1650,22 +2419,9 @@ static int packet_recvmsg(struct kiocb *iocb, struct socket *sock,
 		goto out;
 	}
 
-	/*
-	 *	Call the generic datagram receiver. This handles all sorts
-	 *	of horrible races and re-entrancy so we can forget about it
-	 *	in the protocol layers.
-	 *
-	 *	Now it will return ENETDOWN, if device have just gone down,
-	 *	but then it will block.
-	 */
 
 	skb = skb_recv_datagram(sk, flags, flags & MSG_DONTWAIT, &err);
 
-	/*
-	 *	An error occurred so return it. Because skb_recv_datagram()
-	 *	handles the blocking we don't see and worry about blocking
-	 *	retries.
-	 */
 
 	if (skb == NULL)
 		goto out;
@@ -1683,7 +2439,7 @@ static int packet_recvmsg(struct kiocb *iocb, struct socket *sock,
 		if (skb_is_gso(skb)) {
 			struct skb_shared_info *sinfo = skb_shinfo(skb);
 
-			/* This is a hint as to how much should be linear. */
+			
 			vnet_hdr.hdr_len = skb_headlen(skb);
 			vnet_hdr.gso_size = sinfo->gso_size;
 			if (sinfo->gso_type & SKB_GSO_TCPV4)
@@ -1705,7 +2461,9 @@ static int packet_recvmsg(struct kiocb *iocb, struct socket *sock,
 			vnet_hdr.flags = VIRTIO_NET_HDR_F_NEEDS_CSUM;
 			vnet_hdr.csum_start = skb_checksum_start_offset(skb);
 			vnet_hdr.csum_offset = skb->csum_offset;
-		} /* else everything is zero */
+		} else if (skb->ip_summed == CHECKSUM_UNNECESSARY) {
+			vnet_hdr.flags = VIRTIO_NET_HDR_F_DATA_VALID;
+		} 
 
 		err = memcpy_toiovec(msg->msg_iov, (void *)&vnet_hdr,
 				     vnet_hdr_len);
@@ -1713,10 +2471,6 @@ static int packet_recvmsg(struct kiocb *iocb, struct socket *sock,
 			goto out_free;
 	}
 
-	/*
-	 *	If the address length field is there to be filled in, we fill
-	 *	it in now.
-	 */
 
 	sll = &PACKET_SKB_CB(skb)->sa.ll;
 	if (sock->type == SOCK_PACKET)
@@ -1724,10 +2478,6 @@ static int packet_recvmsg(struct kiocb *iocb, struct socket *sock,
 	else
 		msg->msg_namelen = sll->sll_halen + offsetof(struct sockaddr_ll, sll_addr);
 
-	/*
-	 *	You lose any data beyond the buffer you gave. If it worries a
-	 *	user program they can ask the device for its MTU anyway.
-	 */
 
 	copied = skb->len;
 	if (copied > len) {
@@ -1765,10 +2515,6 @@ static int packet_recvmsg(struct kiocb *iocb, struct socket *sock,
 		put_cmsg(msg, SOL_PACKET, PACKET_AUXDATA, sizeof(aux), &aux);
 	}
 
-	/*
-	 *	Free or return the buffer as appropriate. Again this
-	 *	hides all the races and re-entrancy issues from us.
-	 */
 	err = vnet_hdr_len + ((flags&MSG_TRUNC) ? skb->len : copied);
 
 out_free:
@@ -1821,7 +2567,7 @@ static int packet_getname(struct socket *sock, struct sockaddr *uaddr,
 		sll->sll_halen = dev->addr_len;
 		memcpy(sll->sll_addr, dev->dev_addr, dev->addr_len);
 	} else {
-		sll->sll_hatype = 0;	/* Bad: we have no ARPHRD_UNSPEC */
+		sll->sll_hatype = 0;	
 		sll->sll_halen = 0;
 	}
 	rcu_read_unlock();
@@ -1900,7 +2646,7 @@ static int packet_mc_add(struct sock *sk, struct packet_mreq_max *mreq)
 		    ml->alen == mreq->mr_alen &&
 		    memcmp(ml->addr, mreq->mr_address, ml->alen) == 0) {
 			ml->count++;
-			/* Free the new element ... */
+			
 			kfree(i);
 			goto done;
 		}
@@ -2007,15 +2753,27 @@ packet_setsockopt(struct socket *sock, int level, int optname, char __user *optv
 	case PACKET_RX_RING:
 	case PACKET_TX_RING:
 	{
-		struct tpacket_req req;
+		union tpacket_req_u req_u;
+		int len;
 
-		if (optlen < sizeof(req))
+		switch (po->tp_version) {
+		case TPACKET_V1:
+		case TPACKET_V2:
+			len = sizeof(req_u.req);
+			break;
+		case TPACKET_V3:
+		default:
+			len = sizeof(req_u.req3);
+			break;
+		}
+		if (optlen < len)
 			return -EINVAL;
 		if (pkt_sk(sk)->has_vnet_hdr)
 			return -EINVAL;
-		if (copy_from_user(&req, optval, sizeof(req)))
+		if (copy_from_user(&req_u.req, optval, len))
 			return -EFAULT;
-		return packet_set_ring(sk, &req, 0, optname == PACKET_TX_RING);
+		return packet_set_ring(sk, &req_u, 0,
+			optname == PACKET_TX_RING);
 	}
 	case PACKET_COPY_THRESH:
 	{
@@ -2042,6 +2800,7 @@ packet_setsockopt(struct socket *sock, int level, int optname, char __user *optv
 		switch (val) {
 		case TPACKET_V1:
 		case TPACKET_V2:
+		case TPACKET_V3:
 			po->tp_version = val;
 			return 0;
 		default:
@@ -2126,6 +2885,17 @@ packet_setsockopt(struct socket *sock, int level, int optname, char __user *optv
 		po->tp_tstamp = val;
 		return 0;
 	}
+	case PACKET_FANOUT:
+	{
+		int val;
+
+		if (optlen != sizeof(val))
+			return -EINVAL;
+		if (copy_from_user(&val, optval, sizeof(val)))
+			return -EFAULT;
+
+		return fanout_add(sk, val & 0xffff, val >> 16);
+	}
 	default:
 		return -ENOPROTOOPT;
 	}
@@ -2140,6 +2910,7 @@ static int packet_getsockopt(struct socket *sock, int level, int optname,
 	struct packet_sock *po = pkt_sk(sk);
 	void *data;
 	struct tpacket_stats st;
+	union tpacket_stats_u st_u;
 
 	if (level != SOL_PACKET)
 		return -ENOPROTOOPT;
@@ -2152,15 +2923,27 @@ static int packet_getsockopt(struct socket *sock, int level, int optname,
 
 	switch (optname) {
 	case PACKET_STATISTICS:
-		if (len > sizeof(struct tpacket_stats))
-			len = sizeof(struct tpacket_stats);
+		if (po->tp_version == TPACKET_V3) {
+			len = sizeof(struct tpacket_stats_v3);
+		} else {
+			if (len > sizeof(struct tpacket_stats))
+				len = sizeof(struct tpacket_stats);
+		}
 		spin_lock_bh(&sk->sk_receive_queue.lock);
-		st = po->stats;
+		if (po->tp_version == TPACKET_V3) {
+			memcpy(&st_u.stats3, &po->stats,
+			sizeof(struct tpacket_stats));
+			st_u.stats3.tp_freeze_q_cnt =
+			po->stats_u.stats3.tp_freeze_q_cnt;
+			st_u.stats3.tp_packets += po->stats.tp_drops;
+			data = &st_u.stats3;
+		} else {
+			st = po->stats;
+			st.tp_packets += st.tp_drops;
+			data = &st;
+		}
 		memset(&po->stats, 0, sizeof(st));
 		spin_unlock_bh(&sk->sk_receive_queue.lock);
-		st.tp_packets += st.tp_drops;
-
-		data = &st;
 		break;
 	case PACKET_AUXDATA:
 		if (len > sizeof(int))
@@ -2201,6 +2984,9 @@ static int packet_getsockopt(struct socket *sock, int level, int optname,
 		case TPACKET_V2:
 			val = sizeof(struct tpacket2_hdr);
 			break;
+		case TPACKET_V3:
+			val = sizeof(struct tpacket3_hdr);
+			break;
 		default:
 			return -EINVAL;
 		}
@@ -2222,6 +3008,15 @@ static int packet_getsockopt(struct socket *sock, int level, int optname,
 		if (len > sizeof(int))
 			len = sizeof(int);
 		val = po->tp_tstamp;
+		data = &val;
+		break;
+	case PACKET_FANOUT:
+		if (len > sizeof(int))
+			len = sizeof(int);
+		val = (po->fanout ?
+		       ((u32)po->fanout->id |
+			((u32)po->fanout->type << 16)) :
+		       0);
 		data = &val;
 		break;
 	default:
@@ -2251,21 +3046,21 @@ static int packet_notifier(struct notifier_block *this, unsigned long msg, void 
 		case NETDEV_UNREGISTER:
 			if (po->mclist)
 				packet_dev_mclist(dev, po->mclist, -1);
-			/* fallthrough */
+			
 
 		case NETDEV_DOWN:
 			if (dev->ifindex == po->ifindex) {
 				spin_lock(&po->bind_lock);
 				if (po->running) {
-					__dev_remove_pack(&po->prot_hook);
-					__sock_put(sk);
-					po->running = 0;
+					__unregister_prot_hook(sk, false);
 					sk->sk_err = ENETDOWN;
 					if (!sock_flag(sk, SOCK_DEAD))
 						sk->sk_error_report(sk);
 				}
 				if (msg == NETDEV_UNREGISTER) {
 					po->ifindex = -1;
+					if (po->prot_hook.dev)
+						dev_put(po->prot_hook.dev);
 					po->prot_hook.dev = NULL;
 				}
 				spin_unlock(&po->bind_lock);
@@ -2274,11 +3069,8 @@ static int packet_notifier(struct notifier_block *this, unsigned long msg, void 
 		case NETDEV_UP:
 			if (dev->ifindex == po->ifindex) {
 				spin_lock(&po->bind_lock);
-				if (po->num && !po->running) {
-					dev_add_pack(&po->prot_hook);
-					sock_hold(sk);
-					po->running = 1;
-				}
+				if (po->num)
+					register_prot_hook(sk);
 				spin_unlock(&po->bind_lock);
 			}
 			break;
@@ -2351,7 +3143,8 @@ static unsigned int packet_poll(struct file *file, struct socket *sock,
 
 	spin_lock_bh(&sk->sk_receive_queue.lock);
 	if (po->rx_ring.pg_vec) {
-		if (!packet_previous_frame(po, &po->rx_ring, TP_STATUS_KERNEL))
+		if (!packet_previous_rx_frame(po, &po->rx_ring,
+			TP_STATUS_KERNEL))
 			mask |= POLLIN | POLLRDNORM;
 	}
 	spin_unlock_bh(&sk->sk_receive_queue.lock);
@@ -2365,9 +3158,6 @@ static unsigned int packet_poll(struct file *file, struct socket *sock,
 }
 
 
-/* Dirty? Well, I still did not learn better way to account
- * for user mmaps.
- */
 
 static void packet_mm_open(struct vm_area_struct *vma)
 {
@@ -2412,7 +3202,7 @@ static void free_pg_vec(struct pgv *pg_vec, unsigned int order,
 	kfree(pg_vec);
 }
 
-static inline char *alloc_one_pg_vec_page(unsigned long order)
+static char *alloc_one_pg_vec_page(unsigned long order)
 {
 	char *buffer = NULL;
 	gfp_t gfp_flags = GFP_KERNEL | __GFP_COMP |
@@ -2423,25 +3213,16 @@ static inline char *alloc_one_pg_vec_page(unsigned long order)
 	if (buffer)
 		return buffer;
 
-	/*
-	 * __get_free_pages failed, fall back to vmalloc
-	 */
 	buffer = vzalloc((1 << order) * PAGE_SIZE);
 
 	if (buffer)
 		return buffer;
 
-	/*
-	 * vmalloc failed, lets dig into swap here
-	 */
 	gfp_flags &= ~__GFP_NORETRY;
 	buffer = (char *)__get_free_pages(gfp_flags, order);
 	if (buffer)
 		return buffer;
 
-	/*
-	 * complete and utter failure
-	 */
 	return NULL;
 }
 
@@ -2470,7 +3251,7 @@ out_free_pgvec:
 	goto out;
 }
 
-static int packet_set_ring(struct sock *sk, struct tpacket_req *req,
+static int packet_set_ring(struct sock *sk, union tpacket_req_u *req_u,
 		int closing, int tx_ring)
 {
 	struct pgv *pg_vec = NULL;
@@ -2479,7 +3260,15 @@ static int packet_set_ring(struct sock *sk, struct tpacket_req *req,
 	struct packet_ring_buffer *rb;
 	struct sk_buff_head *rb_queue;
 	__be16 num;
-	int err;
+	int err = -EINVAL;
+	
+	struct tpacket_req *req = &req_u->req;
+
+	
+	if (!closing && tx_ring && (po->tp_version > TPACKET_V2)) {
+		WARN(1, "Tx-ring is not supported.\n");
+		goto out;
+	}
 
 	rb = tx_ring ? &po->tx_ring : &po->rx_ring;
 	rb_queue = tx_ring ? &sk->sk_write_queue : &sk->sk_receive_queue;
@@ -2493,7 +3282,7 @@ static int packet_set_ring(struct sock *sk, struct tpacket_req *req,
 	}
 
 	if (req->tp_block_nr) {
-		/* Sanity tests and some calculations */
+		
 		err = -EBUSY;
 		if (unlikely(rb->pg_vec))
 			goto out;
@@ -2504,6 +3293,9 @@ static int packet_set_ring(struct sock *sk, struct tpacket_req *req,
 			break;
 		case TPACKET_V2:
 			po->tp_hdrlen = TPACKET2_HDRLEN;
+			break;
+		case TPACKET_V3:
+			po->tp_hdrlen = TPACKET3_HDRLEN;
 			break;
 		}
 
@@ -2530,8 +3322,16 @@ static int packet_set_ring(struct sock *sk, struct tpacket_req *req,
 		pg_vec = alloc_pg_vec(req, order);
 		if (unlikely(!pg_vec))
 			goto out;
+		switch (po->tp_version) {
+		case TPACKET_V3:
+			if (!tx_ring)
+				init_prb_bdqc(po, rb, pg_vec, req_u, tx_ring);
+				break;
+		default:
+			break;
+		}
 	}
-	/* Done */
+	
 	else {
 		err = -EINVAL;
 		if (unlikely(req->tp_frame_nr))
@@ -2540,15 +3340,13 @@ static int packet_set_ring(struct sock *sk, struct tpacket_req *req,
 
 	lock_sock(sk);
 
-	/* Detach socket from network */
+	
 	spin_lock(&po->bind_lock);
 	was_running = po->running;
 	num = po->num;
 	if (was_running) {
-		__dev_remove_pack(&po->prot_hook);
 		po->num = 0;
-		po->running = 0;
-		__sock_put(sk);
+		__unregister_prot_hook(sk, false);
 	}
 	spin_unlock(&po->bind_lock);
 
@@ -2579,14 +3377,16 @@ static int packet_set_ring(struct sock *sk, struct tpacket_req *req,
 	mutex_unlock(&po->pg_vec_lock);
 
 	spin_lock(&po->bind_lock);
-	if (was_running && !po->running) {
-		sock_hold(sk);
-		po->running = 1;
+	if (was_running) {
 		po->num = num;
-		dev_add_pack(&po->prot_hook);
+		register_prot_hook(sk);
 	}
 	spin_unlock(&po->bind_lock);
-
+	if (closing && (po->tp_version > TPACKET_V2)) {
+		
+		if (!tx_ring)
+			prb_shutdown_retire_blk_timer(po, tx_ring, rb_queue);
+	}
 	release_sock(sk);
 
 	if (pg_vec)

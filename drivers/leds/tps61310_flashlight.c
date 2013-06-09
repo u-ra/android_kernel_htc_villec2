@@ -22,6 +22,7 @@
 #include <linux/slab.h>
 #include <linux/gpio.h>
 #include <linux/htc_flashlight.h>
+#include <linux/module.h>
 
 #define FLT_DBG_LOG(fmt, ...) \
 		printk(KERN_DEBUG "[FLT]TPS " fmt, ##__VA_ARGS__)
@@ -40,7 +41,12 @@ struct tps61310_data {
 	struct mutex 			tps61310_data_mutex;
 	uint32_t			strb0;
 	uint32_t			strb1;
+	uint32_t			reset;
 	uint8_t 			led_count;
+	uint8_t 			mode_pin_suspend_state_low;
+	uint8_t				enable_FLT_1500mA;
+	uint8_t				disable_tx_mask;
+	uint32_t			power_save;
 };
 
 static struct i2c_client *this_client;
@@ -48,6 +54,32 @@ static struct tps61310_data *this_tps61310;
 struct delayed_work tps61310_delayed_work;
 static struct workqueue_struct *tps61310_work_queue;
 static struct mutex tps61310_mutex;
+
+static int switch_state = 1;
+static int retry = 0;
+static int reg_init_fail = 0;
+
+static int tps61310_i2c_command(uint8_t, uint8_t);
+
+static ssize_t switch_show(struct device *dev, struct device_attribute *attr,
+		char *buf)
+{
+	return sprintf(buf, "switch status:%d \n", switch_state);
+}
+
+static ssize_t switch_store(
+		struct device *dev, struct device_attribute *attr,
+		const char *buf, size_t size)
+{
+	int switch_status;
+	switch_status = -1;
+	sscanf(buf, "%d ",&switch_status);
+	FLT_INFO_LOG("%s: %d\n",__func__,switch_status);
+	switch_state = switch_status;
+	return size;
+}
+
+static DEVICE_ATTR(function_switch, S_IRUGO | S_IWUSR, switch_show, switch_store);
 
 static int TPS61310_I2C_TxData(char *txData, int length)
 {
@@ -81,12 +113,32 @@ static int tps61310_i2c_command(uint8_t address, uint8_t data)
 {
 	uint8_t buffer[2];
 	int ret;
+	int err = 0;
 
 	buffer[0] = address;
 	buffer[1] = data;
 	ret = TPS61310_I2C_TxData(buffer, 2);
 	if (ret < 0) {
 		FLT_ERR_LOG("%s error\n", __func__);
+		if (this_tps61310->reset) {
+			FLT_INFO_LOG("reset register");
+			gpio_set_value_cansleep(this_tps61310->reset, 0);
+			mdelay(10);
+			gpio_set_value_cansleep(this_tps61310->reset, 1);
+			if (address!=0x07 && address!=0x04) {
+				if (this_tps61310->enable_FLT_1500mA) {
+					err |= tps61310_i2c_command(0x07, 0x46);
+					err |= tps61310_i2c_command(0x04, 0x10);
+				} else {
+					
+					err |= tps61310_i2c_command(0x07, 0xF6);
+				}
+				if (err)
+					reg_init_fail++;
+			} else {
+				reg_init_fail++;
+			}
+		}
 		return ret;
 	}
 	return 0;
@@ -94,139 +146,296 @@ static int tps61310_i2c_command(uint8_t address, uint8_t data)
 
 static int flashlight_turn_off(void)
 {
+	int status;
 	FLT_INFO_LOG("%s\n", __func__);
-	gpio_set_value(this_tps61310->strb0, 0);
-	gpio_set_value(this_tps61310->strb1, 1);
+	gpio_set_value_cansleep(this_tps61310->strb0, 0);
+	gpio_set_value_cansleep(this_tps61310->strb1, 1);
+	tps61310_i2c_command(0x02, 0x08);
 	tps61310_i2c_command(0x01, 0x00);
+	FLT_INFO_LOG("%s %d\n", __func__,this_tps61310->mode_status);
+	if (this_tps61310->power_save) {
+		status = this_tps61310->mode_status;
+		if (status == 2 || (status >= 10 && status <=16)) {
+			FLT_INFO_LOG("Disable power saving\n");
+			gpio_set_value_cansleep(this_tps61310->power_save, 0);
+		} else if (status == FL_MODE_PRE_FLASH) {
+			FLT_INFO_LOG("Enable power saving\n");
+			gpio_set_value_cansleep(this_tps61310->power_save, 1);
+		}
+	}
 	this_tps61310->mode_status = FL_MODE_OFF;
 	return 0;
+}
+
+void retry_flashlight_control(int err, int mode)
+{
+	if (err && !retry) {
+		FLT_INFO_LOG("%s error once\n", __func__);
+		retry++;
+		mutex_unlock(&tps61310_mutex);
+		tps61310_flashlight_control(mode);
+		mutex_lock(&tps61310_mutex);
+	} else if(err) {
+		FLT_INFO_LOG("%s error twice\n", __func__);
+		retry = 0;
+	}
 }
 
 int tps61310_flashlight_control(int mode)
 {
 	int ret = 0;
+	int err = 0;
 
 	mutex_lock(&tps61310_mutex);
-	if (this_tps61310->led_count == 1) {
-	switch (mode) {
-	case FL_MODE_OFF:
-		flashlight_turn_off();
-	break;
-	case FL_MODE_FLASH:
-		tps61310_i2c_command(0x05, 0x6A);
-		tps61310_i2c_command(0x00, 0x00);
-		tps61310_i2c_command(0x01, 0x9E);
-		gpio_set_value(this_tps61310->strb1, 0);
-		gpio_set_value(this_tps61310->strb0, 1);
-		queue_delayed_work(tps61310_work_queue, &tps61310_delayed_work,
-			msecs_to_jiffies(this_tps61310->flash_sw_timeout));
-	break;
-	case FL_MODE_FLASH_LEVEL1:
-		tps61310_i2c_command(0x05, 0x6A);
-		tps61310_i2c_command(0x00, 0x00);
-#if defined(CONFIG_MACH_PRIMOU)
-		tps61310_i2c_command(0x01, 0x86);
-#else
-		tps61310_i2c_command(0x01, 0x88);
-#endif
-		gpio_set_value(this_tps61310->strb1, 0);
-		gpio_set_value(this_tps61310->strb0, 1);
-		queue_delayed_work(tps61310_work_queue, &tps61310_delayed_work,
-			msecs_to_jiffies(this_tps61310->flash_sw_timeout));
-	break;
-	case FL_MODE_FLASH_LEVEL2:
-		tps61310_i2c_command(0x05, 0x6A);
-		tps61310_i2c_command(0x00, 0x00);
-#if defined(CONFIG_MACH_PRIMOU)
-		tps61310_i2c_command(0x01, 0x88);
-#else
-		tps61310_i2c_command(0x01, 0x90);
-#endif
-		gpio_set_value(this_tps61310->strb1, 0);
-		gpio_set_value(this_tps61310->strb0, 1);
-		queue_delayed_work(tps61310_work_queue, &tps61310_delayed_work,
-			msecs_to_jiffies(this_tps61310->flash_sw_timeout));
-	break;
-	case FL_MODE_FLASH_LEVEL3:
-		tps61310_i2c_command(0x05, 0x6A);
-		tps61310_i2c_command(0x00, 0x00);
-		tps61310_i2c_command(0x01, 0x8C);
-		gpio_set_value(this_tps61310->strb1, 0);
-		gpio_set_value(this_tps61310->strb0, 1);
-		queue_delayed_work(tps61310_work_queue, &tps61310_delayed_work,
-			msecs_to_jiffies(this_tps61310->flash_sw_timeout));
-	break;
-	case FL_MODE_FLASH_LEVEL4:
-		tps61310_i2c_command(0x05, 0x6A);
-		tps61310_i2c_command(0x00, 0x00);
-		tps61310_i2c_command(0x01, 0x90);
-		gpio_set_value(this_tps61310->strb1, 0);
-		gpio_set_value(this_tps61310->strb0, 1);
-		queue_delayed_work(tps61310_work_queue, &tps61310_delayed_work,
-			msecs_to_jiffies(this_tps61310->flash_sw_timeout));
-	break;
-	case FL_MODE_FLASH_LEVEL5:
-		tps61310_i2c_command(0x05, 0x6A);
-		tps61310_i2c_command(0x00, 0x00);
-		tps61310_i2c_command(0x01, 0x94);
-		gpio_set_value(this_tps61310->strb1, 0);
-		gpio_set_value(this_tps61310->strb0, 1);
-		queue_delayed_work(tps61310_work_queue, &tps61310_delayed_work,
-			msecs_to_jiffies(this_tps61310->flash_sw_timeout));
-	break;
-	case FL_MODE_FLASH_LEVEL6:
-		tps61310_i2c_command(0x05, 0x6A);
-		tps61310_i2c_command(0x00, 0x00);
-		tps61310_i2c_command(0x01, 0x98);
-		gpio_set_value(this_tps61310->strb1, 0);
-		gpio_set_value(this_tps61310->strb0, 1);
-		queue_delayed_work(tps61310_work_queue, &tps61310_delayed_work,
-			msecs_to_jiffies(this_tps61310->flash_sw_timeout));
-	break;
-	case FL_MODE_FLASH_LEVEL7:
-		tps61310_i2c_command(0x05, 0x6A);
-		tps61310_i2c_command(0x00, 0x00);
-		tps61310_i2c_command(0x01, 0x9C);
-		gpio_set_value(this_tps61310->strb1, 0);
-		gpio_set_value(this_tps61310->strb0, 1);
-		queue_delayed_work(tps61310_work_queue, &tps61310_delayed_work,
-			msecs_to_jiffies(this_tps61310->flash_sw_timeout));
-	break;
-	case FL_MODE_PRE_FLASH:
-		tps61310_i2c_command(0x05, 0x6A);
-		tps61310_i2c_command(0x00, 0x04);
-		gpio_set_value(this_tps61310->strb0, 0);
-		gpio_set_value(this_tps61310->strb1, 1);
-		tps61310_i2c_command(0x01, 0x40);
-	break;
-	case FL_MODE_TORCH:
-		tps61310_i2c_command(0x05, 0x6A);
-		tps61310_i2c_command(0x00, 0x05);
-		gpio_set_value(this_tps61310->strb0, 0);
-		gpio_set_value(this_tps61310->strb1, 1);
-		tps61310_i2c_command(0x01, 0x40);
-	break;
-	case FL_MODE_TORCH_LEVEL_1:
-		tps61310_i2c_command(0x05, 0x6A);
-		tps61310_i2c_command(0x00, 0x01);
-		gpio_set_value(this_tps61310->strb0, 0);
-		gpio_set_value(this_tps61310->strb1, 1);
-		tps61310_i2c_command(0x01, 0x40);
-	break;
-	case FL_MODE_TORCH_LEVEL_2:
-		tps61310_i2c_command(0x05, 0x6A);
-		tps61310_i2c_command(0x00, 0x03);
-		gpio_set_value(this_tps61310->strb0, 0);
-		gpio_set_value(this_tps61310->strb1, 1);
-		tps61310_i2c_command(0x01, 0x40);
-	break;
-	default:
-		FLT_ERR_LOG("%s: unknown flash_light flags: %d\n",
-							__func__, mode);
-		ret = -EINVAL;
-	break;
+	if (this_tps61310->reset && reg_init_fail) {
+		reg_init_fail = 0;
+		if (this_tps61310->enable_FLT_1500mA) {
+			err |= tps61310_i2c_command(0x07, 0x46);
+			err |= tps61310_i2c_command(0x04, 0x10);
+		} else {
+			
+			err |= tps61310_i2c_command(0x07, 0xF6);
+		}
 	}
-		} else if (this_tps61310->led_count == 2) {
+	if (err) {
+		FLT_ERR_LOG("%s error init register\n", __func__);
+		reg_init_fail = 0;
+		mutex_unlock(&tps61310_mutex);
+		return -err;
+	}
+	if (this_tps61310->led_count == 1) {
+		if (this_tps61310->enable_FLT_1500mA) {
+			switch (mode) {
+			case FL_MODE_OFF:
+				flashlight_turn_off();
+			break;
+			case FL_MODE_FLASH:
+				FLT_INFO_LOG("flash 1.5A\n");
+				tps61310_i2c_command(0x05, 0x6F);
+				tps61310_i2c_command(0x00, 0x00);
+				tps61310_i2c_command(0x01, 0x9E);
+				tps61310_i2c_command(0x02, 0x8F);
+				gpio_set_value_cansleep(this_tps61310->strb1, 0);
+				gpio_set_value_cansleep(this_tps61310->strb0, 1);
+				queue_delayed_work(tps61310_work_queue, &tps61310_delayed_work,
+						   msecs_to_jiffies(this_tps61310->flash_sw_timeout));
+			break;
+			case FL_MODE_FLASH_LEVEL1:
+					tps61310_i2c_command(0x05, 0x6A);
+					tps61310_i2c_command(0x00, 0x00);
+					tps61310_i2c_command(0x01, 0x86);
+					gpio_set_value_cansleep(this_tps61310->strb1, 0);
+					gpio_set_value_cansleep(this_tps61310->strb0, 1);
+					queue_delayed_work(tps61310_work_queue, &tps61310_delayed_work,
+							   msecs_to_jiffies(this_tps61310->flash_sw_timeout));
+			break;
+			case FL_MODE_FLASH_LEVEL2:
+					tps61310_i2c_command(0x05, 0x6A);
+					tps61310_i2c_command(0x00, 0x00);
+					tps61310_i2c_command(0x01, 0x88);
+					gpio_set_value_cansleep(this_tps61310->strb1, 0);
+					gpio_set_value_cansleep(this_tps61310->strb0, 1);
+					queue_delayed_work(tps61310_work_queue, &tps61310_delayed_work,
+							   msecs_to_jiffies(this_tps61310->flash_sw_timeout));
+			break;
+			case FL_MODE_FLASH_LEVEL3:
+					tps61310_i2c_command(0x05, 0x6A);
+					tps61310_i2c_command(0x00, 0x00);
+					tps61310_i2c_command(0x01, 0x8C);
+					gpio_set_value_cansleep(this_tps61310->strb1, 0);
+					gpio_set_value_cansleep(this_tps61310->strb0, 1);
+					queue_delayed_work(tps61310_work_queue, &tps61310_delayed_work,
+							   msecs_to_jiffies(this_tps61310->flash_sw_timeout));
+			break;
+			case FL_MODE_FLASH_LEVEL4:
+					tps61310_i2c_command(0x05, 0x6A);
+					tps61310_i2c_command(0x00, 0x00);
+					tps61310_i2c_command(0x01, 0x90);
+					gpio_set_value_cansleep(this_tps61310->strb1, 0);
+					gpio_set_value_cansleep(this_tps61310->strb0, 1);
+					queue_delayed_work(tps61310_work_queue, &tps61310_delayed_work,
+							   msecs_to_jiffies(this_tps61310->flash_sw_timeout));
+			break;
+			case FL_MODE_FLASH_LEVEL5:
+					tps61310_i2c_command(0x05, 0x6A);
+					tps61310_i2c_command(0x00, 0x00);
+					tps61310_i2c_command(0x01, 0x94);
+					gpio_set_value_cansleep(this_tps61310->strb1, 0);
+					gpio_set_value_cansleep(this_tps61310->strb0, 1);
+					queue_delayed_work(tps61310_work_queue, &tps61310_delayed_work,
+							   msecs_to_jiffies(this_tps61310->flash_sw_timeout));
+			break;
+			case FL_MODE_FLASH_LEVEL6:
+					tps61310_i2c_command(0x05, 0x6A);
+					tps61310_i2c_command(0x00, 0x00);
+					tps61310_i2c_command(0x01, 0x98);
+					gpio_set_value_cansleep(this_tps61310->strb1, 0);
+					gpio_set_value_cansleep(this_tps61310->strb0, 1);
+					queue_delayed_work(tps61310_work_queue, &tps61310_delayed_work,
+							   msecs_to_jiffies(this_tps61310->flash_sw_timeout));
+			break;
+			case FL_MODE_FLASH_LEVEL7:
+					tps61310_i2c_command(0x05, 0x6A);
+					tps61310_i2c_command(0x00, 0x00);
+					tps61310_i2c_command(0x01, 0x9C);
+					gpio_set_value_cansleep(this_tps61310->strb1, 0);
+					gpio_set_value_cansleep(this_tps61310->strb0, 1);
+					queue_delayed_work(tps61310_work_queue, &tps61310_delayed_work,
+							   msecs_to_jiffies(this_tps61310->flash_sw_timeout));
+			break;
+			case FL_MODE_PRE_FLASH:
+				tps61310_i2c_command(0x05, 0x6A);
+				tps61310_i2c_command(0x00, 0x04);
+				gpio_set_value_cansleep(this_tps61310->strb0, 0);
+				gpio_set_value_cansleep(this_tps61310->strb1, 1);
+				tps61310_i2c_command(0x01, 0x40);
+			break;
+			case FL_MODE_TORCH:
+				gpio_set_value_cansleep(this_tps61310->strb0, 0);
+				gpio_set_value_cansleep(this_tps61310->strb1, 1);
+				err |= tps61310_i2c_command(0x05, 0x6A);
+				err |= tps61310_i2c_command(0x00, 0x05);
+				err |= tps61310_i2c_command(0x01, 0x40);
+				if (this_tps61310->reset)
+					retry_flashlight_control(err, mode);
+			break;
+			case FL_MODE_TORCH_LEVEL_1:
+				gpio_set_value_cansleep(this_tps61310->strb0, 0);
+				gpio_set_value_cansleep(this_tps61310->strb1, 1);
+				err |= tps61310_i2c_command(0x05, 0x6A);
+				err |= tps61310_i2c_command(0x00, 0x01);
+				err |= tps61310_i2c_command(0x01, 0x40);
+				if (this_tps61310->reset)
+					retry_flashlight_control(err, mode);
+			break;
+			case FL_MODE_TORCH_LEVEL_2:
+				gpio_set_value_cansleep(this_tps61310->strb0, 0);
+				gpio_set_value_cansleep(this_tps61310->strb1, 1);
+				err |= tps61310_i2c_command(0x05, 0x6A);
+				err |= tps61310_i2c_command(0x00, 0x03);
+				err |= tps61310_i2c_command(0x01, 0x40);
+				if (this_tps61310->reset)
+					retry_flashlight_control(err, mode);
+			break;
+			default:
+				FLT_ERR_LOG("%s: unknown flash_light flags: %d\n",
+									__func__, mode);
+				ret = -EINVAL;
+			break;
+			}
+		} else {
+			switch (mode) {
+			case FL_MODE_OFF:
+				flashlight_turn_off();
+			break;
+			case FL_MODE_FLASH:
+				tps61310_i2c_command(0x05, 0x6A);
+				tps61310_i2c_command(0x00, 0x00);
+				tps61310_i2c_command(0x01, 0x9E);
+				gpio_set_value_cansleep(this_tps61310->strb1, 0);
+				gpio_set_value_cansleep(this_tps61310->strb0, 1);
+				queue_delayed_work(tps61310_work_queue, &tps61310_delayed_work,
+						   msecs_to_jiffies(this_tps61310->flash_sw_timeout));
+			break;
+			case FL_MODE_FLASH_LEVEL1:
+					tps61310_i2c_command(0x05, 0x6A);
+					tps61310_i2c_command(0x00, 0x00);
+					tps61310_i2c_command(0x01, 0x86);
+					gpio_set_value_cansleep(this_tps61310->strb1, 0);
+					gpio_set_value_cansleep(this_tps61310->strb0, 1);
+					queue_delayed_work(tps61310_work_queue, &tps61310_delayed_work,
+							   msecs_to_jiffies(this_tps61310->flash_sw_timeout));
+			break;
+			case FL_MODE_FLASH_LEVEL2:
+					tps61310_i2c_command(0x05, 0x6A);
+					tps61310_i2c_command(0x00, 0x00);
+					tps61310_i2c_command(0x01, 0x88);
+					gpio_set_value_cansleep(this_tps61310->strb1, 0);
+					gpio_set_value_cansleep(this_tps61310->strb0, 1);
+					queue_delayed_work(tps61310_work_queue, &tps61310_delayed_work,
+							   msecs_to_jiffies(this_tps61310->flash_sw_timeout));
+			break;
+			case FL_MODE_FLASH_LEVEL3:
+					tps61310_i2c_command(0x05, 0x6A);
+					tps61310_i2c_command(0x00, 0x00);
+					tps61310_i2c_command(0x01, 0x8C);
+					gpio_set_value_cansleep(this_tps61310->strb1, 0);
+					gpio_set_value_cansleep(this_tps61310->strb0, 1);
+					queue_delayed_work(tps61310_work_queue, &tps61310_delayed_work,
+							   msecs_to_jiffies(this_tps61310->flash_sw_timeout));
+			break;
+			case FL_MODE_FLASH_LEVEL4:
+					tps61310_i2c_command(0x05, 0x6A);
+					tps61310_i2c_command(0x00, 0x00);
+					tps61310_i2c_command(0x01, 0x90);
+					gpio_set_value_cansleep(this_tps61310->strb1, 0);
+					gpio_set_value_cansleep(this_tps61310->strb0, 1);
+					queue_delayed_work(tps61310_work_queue, &tps61310_delayed_work,
+							   msecs_to_jiffies(this_tps61310->flash_sw_timeout));
+			break;
+			case FL_MODE_FLASH_LEVEL5:
+					tps61310_i2c_command(0x05, 0x6A);
+					tps61310_i2c_command(0x00, 0x00);
+					tps61310_i2c_command(0x01, 0x94);
+					gpio_set_value_cansleep(this_tps61310->strb1, 0);
+					gpio_set_value_cansleep(this_tps61310->strb0, 1);
+					queue_delayed_work(tps61310_work_queue, &tps61310_delayed_work,
+							   msecs_to_jiffies(this_tps61310->flash_sw_timeout));
+			break;
+			case FL_MODE_FLASH_LEVEL6:
+					tps61310_i2c_command(0x05, 0x6A);
+					tps61310_i2c_command(0x00, 0x00);
+					tps61310_i2c_command(0x01, 0x98);
+					gpio_set_value_cansleep(this_tps61310->strb1, 0);
+					gpio_set_value_cansleep(this_tps61310->strb0, 1);
+					queue_delayed_work(tps61310_work_queue, &tps61310_delayed_work,
+							   msecs_to_jiffies(this_tps61310->flash_sw_timeout));
+			break;
+			case FL_MODE_FLASH_LEVEL7:
+					tps61310_i2c_command(0x05, 0x6A);
+					tps61310_i2c_command(0x00, 0x00);
+					tps61310_i2c_command(0x01, 0x9C);
+					gpio_set_value_cansleep(this_tps61310->strb1, 0);
+					gpio_set_value_cansleep(this_tps61310->strb0, 1);
+					queue_delayed_work(tps61310_work_queue, &tps61310_delayed_work,
+							   msecs_to_jiffies(this_tps61310->flash_sw_timeout));
+			break;
+			case FL_MODE_PRE_FLASH:
+				tps61310_i2c_command(0x05, 0x6A);
+				tps61310_i2c_command(0x00, 0x04);
+				gpio_set_value_cansleep(this_tps61310->strb0, 0);
+				gpio_set_value_cansleep(this_tps61310->strb1, 1);
+				tps61310_i2c_command(0x01, 0x40);
+			break;
+			case FL_MODE_TORCH:
+				tps61310_i2c_command(0x05, 0x6A);
+				tps61310_i2c_command(0x00, 0x05);
+				gpio_set_value_cansleep(this_tps61310->strb0, 0);
+				gpio_set_value_cansleep(this_tps61310->strb1, 1);
+				tps61310_i2c_command(0x01, 0x40);
+			break;
+			case FL_MODE_TORCH_LEVEL_1:
+				tps61310_i2c_command(0x05, 0x6A);
+				tps61310_i2c_command(0x00, 0x01);
+				gpio_set_value_cansleep(this_tps61310->strb0, 0);
+				gpio_set_value_cansleep(this_tps61310->strb1, 1);
+				tps61310_i2c_command(0x01, 0x40);
+			break;
+			case FL_MODE_TORCH_LEVEL_2:
+				tps61310_i2c_command(0x05, 0x6A);
+				tps61310_i2c_command(0x00, 0x03);
+				gpio_set_value_cansleep(this_tps61310->strb0, 0);
+				gpio_set_value_cansleep(this_tps61310->strb1, 1);
+				tps61310_i2c_command(0x01, 0x40);
+			break;
+			default:
+				FLT_ERR_LOG("%s: unknown flash_light flags: %d\n",
+									__func__, mode);
+				ret = -EINVAL;
+			break;
+			}
+		}
+	} else if (this_tps61310->led_count == 2) {
 	switch (mode) {
 	case FL_MODE_OFF:
 		flashlight_turn_off();
@@ -236,131 +445,121 @@ int tps61310_flashlight_control(int mode)
 		tps61310_i2c_command(0x00, 0x00);
 		tps61310_i2c_command(0x02, 0x90);
 		tps61310_i2c_command(0x01, 0x90);
-		gpio_set_value(this_tps61310->strb1, 0);
-		gpio_set_value(this_tps61310->strb0, 1);
+		gpio_set_value_cansleep(this_tps61310->strb1, 0);
+		gpio_set_value_cansleep(this_tps61310->strb0, 1);
 		queue_delayed_work(tps61310_work_queue, &tps61310_delayed_work,
 				   msecs_to_jiffies(this_tps61310->flash_sw_timeout));
 	break;
 	case FL_MODE_FLASH_LEVEL1:
-		tps61310_i2c_command(0x05, 0x6B);
-		tps61310_i2c_command(0x00, 0x00);
-#if defined(CONFIG_MACH_PRIMOU)
-		tps61310_i2c_command(0x02, 0x83);
-		tps61310_i2c_command(0x01, 0x83);
-#else
-		tps61310_i2c_command(0x02, 0x84);
-		tps61310_i2c_command(0x01, 0x84);
-#endif
-		gpio_set_value(this_tps61310->strb1, 0);
-		gpio_set_value(this_tps61310->strb0, 1);
-		queue_delayed_work(tps61310_work_queue, &tps61310_delayed_work,
-			msecs_to_jiffies(this_tps61310->flash_sw_timeout));
+			tps61310_i2c_command(0x05, 0x6B);
+			tps61310_i2c_command(0x00, 0x00);
+			tps61310_i2c_command(0x02, 0x83);
+			tps61310_i2c_command(0x01, 0x83);
+			gpio_set_value_cansleep(this_tps61310->strb1, 0);
+			gpio_set_value_cansleep(this_tps61310->strb0, 1);
+			queue_delayed_work(tps61310_work_queue, &tps61310_delayed_work,
+					   msecs_to_jiffies(this_tps61310->flash_sw_timeout));
 	break;
 	case FL_MODE_FLASH_LEVEL2:
-		tps61310_i2c_command(0x05, 0x6B);
-		tps61310_i2c_command(0x00, 0x00);
-#if defined(CONFIG_MACH_PRIMOU)
-		tps61310_i2c_command(0x02, 0x84);
-		tps61310_i2c_command(0x01, 0x84);
-#else
-		tps61310_i2c_command(0x02, 0x88);
-		tps61310_i2c_command(0x01, 0x88);
-#endif
-		gpio_set_value(this_tps61310->strb1, 0);
-		gpio_set_value(this_tps61310->strb0, 1);
-		queue_delayed_work(tps61310_work_queue, &tps61310_delayed_work,
-			msecs_to_jiffies(this_tps61310->flash_sw_timeout));
+			tps61310_i2c_command(0x05, 0x6B);
+			tps61310_i2c_command(0x00, 0x00);
+			tps61310_i2c_command(0x02, 0x84);
+			tps61310_i2c_command(0x01, 0x84);
+			gpio_set_value_cansleep(this_tps61310->strb1, 0);
+			gpio_set_value_cansleep(this_tps61310->strb0, 1);
+			queue_delayed_work(tps61310_work_queue, &tps61310_delayed_work,
+					   msecs_to_jiffies(this_tps61310->flash_sw_timeout));
 	break;
 	case FL_MODE_FLASH_LEVEL3:
-		tps61310_i2c_command(0x05, 0x6B);
-		tps61310_i2c_command(0x00, 0x00);
-		tps61310_i2c_command(0x02, 0x86);
-		tps61310_i2c_command(0x01, 0x86);
-		gpio_set_value(this_tps61310->strb1, 0);
-		gpio_set_value(this_tps61310->strb0, 1);
-		queue_delayed_work(tps61310_work_queue, &tps61310_delayed_work,
-			msecs_to_jiffies(this_tps61310->flash_sw_timeout));
+			tps61310_i2c_command(0x05, 0x6B);
+			tps61310_i2c_command(0x00, 0x00);
+			tps61310_i2c_command(0x02, 0x86);
+			tps61310_i2c_command(0x01, 0x86);
+			gpio_set_value_cansleep(this_tps61310->strb1, 0);
+			gpio_set_value_cansleep(this_tps61310->strb0, 1);
+			queue_delayed_work(tps61310_work_queue, &tps61310_delayed_work,
+					   msecs_to_jiffies(this_tps61310->flash_sw_timeout));
 	break;
 	case FL_MODE_FLASH_LEVEL4:
-		tps61310_i2c_command(0x05, 0x6B);
-		tps61310_i2c_command(0x00, 0x00);
-		tps61310_i2c_command(0x02, 0x88);
-		tps61310_i2c_command(0x01, 0x88);
-		gpio_set_value(this_tps61310->strb1, 0);
-		gpio_set_value(this_tps61310->strb0, 1);
-		queue_delayed_work(tps61310_work_queue, &tps61310_delayed_work,
-			msecs_to_jiffies(this_tps61310->flash_sw_timeout));
+			tps61310_i2c_command(0x05, 0x6B);
+			tps61310_i2c_command(0x00, 0x00);
+			tps61310_i2c_command(0x02, 0x88);
+			tps61310_i2c_command(0x01, 0x88);
+			gpio_set_value_cansleep(this_tps61310->strb1, 0);
+			gpio_set_value_cansleep(this_tps61310->strb0, 1);
+			queue_delayed_work(tps61310_work_queue, &tps61310_delayed_work,
+					   msecs_to_jiffies(this_tps61310->flash_sw_timeout));
 	break;
 	case FL_MODE_FLASH_LEVEL5:
-		tps61310_i2c_command(0x05, 0x6B);
-		tps61310_i2c_command(0x00, 0x00);
-		tps61310_i2c_command(0x02, 0x8A);
-		tps61310_i2c_command(0x01, 0x8A);
-		gpio_set_value(this_tps61310->strb1, 0);
-		gpio_set_value(this_tps61310->strb0, 1);
-		queue_delayed_work(tps61310_work_queue, &tps61310_delayed_work,
-			msecs_to_jiffies(this_tps61310->flash_sw_timeout));
+			tps61310_i2c_command(0x05, 0x6B);
+			tps61310_i2c_command(0x00, 0x00);
+			tps61310_i2c_command(0x02, 0x8A);
+			tps61310_i2c_command(0x01, 0x8A);
+			gpio_set_value_cansleep(this_tps61310->strb1, 0);
+			gpio_set_value_cansleep(this_tps61310->strb0, 1);
+			queue_delayed_work(tps61310_work_queue, &tps61310_delayed_work,
+					   msecs_to_jiffies(this_tps61310->flash_sw_timeout));
 	break;
 	case FL_MODE_FLASH_LEVEL6:
-		tps61310_i2c_command(0x05, 0x6B);
-		tps61310_i2c_command(0x00, 0x00);
-		tps61310_i2c_command(0x02, 0x8C);
-		tps61310_i2c_command(0x01, 0x8C);
-		gpio_set_value(this_tps61310->strb1, 0);
-		gpio_set_value(this_tps61310->strb0, 1);
-		queue_delayed_work(tps61310_work_queue, &tps61310_delayed_work,
-			msecs_to_jiffies(this_tps61310->flash_sw_timeout));
+			tps61310_i2c_command(0x05, 0x6B);
+			tps61310_i2c_command(0x00, 0x00);
+			tps61310_i2c_command(0x02, 0x8C);
+			tps61310_i2c_command(0x01, 0x8C);
+			gpio_set_value_cansleep(this_tps61310->strb1, 0);
+			gpio_set_value_cansleep(this_tps61310->strb0, 1);
+			queue_delayed_work(tps61310_work_queue, &tps61310_delayed_work,
+					   msecs_to_jiffies(this_tps61310->flash_sw_timeout));
 	break;
 	case FL_MODE_FLASH_LEVEL7:
-		tps61310_i2c_command(0x05, 0x6B);
-		tps61310_i2c_command(0x00, 0x00);
-		tps61310_i2c_command(0x02, 0x8E);
-		tps61310_i2c_command(0x01, 0x8E);
-		gpio_set_value(this_tps61310->strb1, 0);
-		gpio_set_value(this_tps61310->strb0, 1);
-		queue_delayed_work(tps61310_work_queue, &tps61310_delayed_work,
-			msecs_to_jiffies(this_tps61310->flash_sw_timeout));
+			tps61310_i2c_command(0x05, 0x6B);
+			tps61310_i2c_command(0x00, 0x00);
+			tps61310_i2c_command(0x02, 0x8E);
+			tps61310_i2c_command(0x01, 0x8E);
+			gpio_set_value_cansleep(this_tps61310->strb1, 0);
+			gpio_set_value_cansleep(this_tps61310->strb0, 1);
+			queue_delayed_work(tps61310_work_queue, &tps61310_delayed_work,
+					   msecs_to_jiffies(this_tps61310->flash_sw_timeout));
 	break;
 	case FL_MODE_PRE_FLASH:
 		tps61310_i2c_command(0x05, 0x6B);
 		tps61310_i2c_command(0x00, 0x12);
-		gpio_set_value(this_tps61310->strb0, 0);
-		gpio_set_value(this_tps61310->strb1, 1);
+		gpio_set_value_cansleep(this_tps61310->strb0, 0);
+		gpio_set_value_cansleep(this_tps61310->strb1, 1);
 		tps61310_i2c_command(0x01, 0x40);
 	break;
 	case FL_MODE_TORCH:
 		tps61310_i2c_command(0x05, 0x6B);
 		tps61310_i2c_command(0x00, 0x1B);
-		gpio_set_value(this_tps61310->strb0, 0);
-		gpio_set_value(this_tps61310->strb1, 1);
+		gpio_set_value_cansleep(this_tps61310->strb0, 0);
+		gpio_set_value_cansleep(this_tps61310->strb1, 1);
 		tps61310_i2c_command(0x01, 0x40);
 	break;
 	case FL_MODE_TORCH_LEVEL_1:
 		tps61310_i2c_command(0x05, 0x6B);
 		tps61310_i2c_command(0x00, 0x09);
-		gpio_set_value(this_tps61310->strb0, 0);
-		gpio_set_value(this_tps61310->strb1, 1);
+		gpio_set_value_cansleep(this_tps61310->strb0, 0);
+		gpio_set_value_cansleep(this_tps61310->strb1, 1);
 		tps61310_i2c_command(0x01, 0x40);
 	break;
 	case FL_MODE_TORCH_LEVEL_2:
 		tps61310_i2c_command(0x05, 0x6B);
 		tps61310_i2c_command(0x00, 0x12);
-		gpio_set_value(this_tps61310->strb0, 0);
-		gpio_set_value(this_tps61310->strb1, 1);
+		gpio_set_value_cansleep(this_tps61310->strb0, 0);
+		gpio_set_value_cansleep(this_tps61310->strb1, 1);
 		tps61310_i2c_command(0x01, 0x40);
 	break;
 	case FL_MODE_TORCH_LED_A:
 		tps61310_i2c_command(0x05, 0x69);
 		tps61310_i2c_command(0x00, 0x09);
-		gpio_set_value(this_tps61310->strb0, 0);
-		gpio_set_value(this_tps61310->strb1, 1);
+		gpio_set_value_cansleep(this_tps61310->strb0, 0);
+		gpio_set_value_cansleep(this_tps61310->strb1, 1);
 		tps61310_i2c_command(0x01, 0x40);
 	break;
 	case FL_MODE_TORCH_LED_B:
 		tps61310_i2c_command(0x05, 0x6A);
 		tps61310_i2c_command(0x00, 0x09);
-		gpio_set_value(this_tps61310->strb0, 0);
-		gpio_set_value(this_tps61310->strb1, 1);
+		gpio_set_value_cansleep(this_tps61310->strb0, 0);
+		gpio_set_value_cansleep(this_tps61310->strb1, 1);
 		tps61310_i2c_command(0x01, 0x40);
 	break;
 
@@ -398,27 +597,33 @@ static void fl_lcdev_brightness_set(struct led_classdev *led_cdev,
 			mode = FL_MODE_TORCH;
 	} else if (brightness > LED_HALF && brightness <= LED_FULL) {
 		if (brightness == (LED_HALF + 1))
-			mode = FL_MODE_PRE_FLASH; /* pre-flash mode */
+			mode = FL_MODE_PRE_FLASH; 
 		else if (brightness == (LED_HALF + 3))
-			mode = FL_MODE_FLASH_LEVEL1; /* Flashlight mode LEVEL1*/
+			mode = FL_MODE_FLASH_LEVEL1; 
 		else if (brightness == (LED_HALF + 4))
-			mode = FL_MODE_FLASH_LEVEL2; /* Flashlight mode LEVEL2*/
+			mode = FL_MODE_FLASH_LEVEL2; 
 		else if (brightness == (LED_HALF + 5))
-			mode = FL_MODE_FLASH_LEVEL3; /* Flashlight mode LEVEL3*/
+			mode = FL_MODE_FLASH_LEVEL3; 
 		else if (brightness == (LED_HALF + 6))
-			mode = FL_MODE_FLASH_LEVEL4; /* Flashlight mode LEVEL4*/
+			mode = FL_MODE_FLASH_LEVEL4; 
 		else if (brightness == (LED_HALF + 7))
-			mode = FL_MODE_FLASH_LEVEL5; /* Flashlight mode LEVEL5*/
+			mode = FL_MODE_FLASH_LEVEL5; 
 		else if (brightness == (LED_HALF + 8))
-			mode = FL_MODE_FLASH_LEVEL6; /* Flashlight mode LEVEL6*/
+			mode = FL_MODE_FLASH_LEVEL6; 
 		else if (brightness == (LED_HALF + 9))
-			mode = FL_MODE_FLASH_LEVEL7; /* Flashlight mode LEVEL7*/
+			mode = FL_MODE_FLASH_LEVEL7; 
 		else
-			mode = FL_MODE_FLASH; /* Flashlight mode */
+			mode = FL_MODE_FLASH; 
 	} else
-		/* off and else */
+		
 		mode = FL_MODE_OFF;
 
+	if ((mode != FL_MODE_OFF) && switch_state == 0){
+		FLT_INFO_LOG("%s flashlight is disabled by switch, mode = %d\n",__func__, mode);
+		return;
+	}
+
+	retry = 0;
 	ret = tps61310_flashlight_control(mode);
 	if (ret) {
 		FLT_ERR_LOG("%s: control failure rc:%d\n", __func__, ret);
@@ -479,19 +684,23 @@ static int tps61310_probe(struct i2c_client *client,
 	if (!tps61310_work_queue)
 		goto err_create_tps61310_work_queue;
 
-	/* Register led class device */
+	
 	tps61310->fl_lcdev.name           = FLASHLIGHT_NAME;
 	tps61310->fl_lcdev.brightness_set = fl_lcdev_brightness_set;
 	tps61310->strb0                   = pdata->tps61310_strb0;
 	tps61310->strb1                   = pdata->tps61310_strb1;
+	tps61310->reset                   = pdata->tps61310_reset;
 	tps61310->flash_sw_timeout	  = pdata->flash_duration_ms;
 	tps61310->led_count = (pdata->led_count) ? pdata->led_count : 1;
+	tps61310->mode_pin_suspend_state_low = pdata->mode_pin_suspend_state_low;
+	tps61310->enable_FLT_1500mA = pdata->enable_FLT_1500mA;
+	tps61310->disable_tx_mask     = pdata->disable_tx_mask;
+	tps61310->power_save              = pdata->power_save;
 
 	if (tps61310->flash_sw_timeout <= 0)
 		tps61310->flash_sw_timeout = 600;
 
 	mutex_init(&tps61310_mutex);
-
 	err = led_classdev_register(&client->dev, &tps61310->fl_lcdev);
 	if (err < 0) {
 		FLT_ERR_LOG("%s: failed on led_classdev_register\n", __func__);
@@ -505,6 +714,32 @@ static int tps61310_probe(struct i2c_client *client,
 #endif
 	this_tps61310 = tps61310;
 
+	err = device_create_file(tps61310->fl_lcdev.dev, &dev_attr_function_switch);
+	if (err < 0) {
+		FLT_ERR_LOG("%s, create function_switch sysfs fail\n", __func__);
+	}
+	
+	tps61310_i2c_command(0x01, 0x00);
+
+	if (this_tps61310->enable_FLT_1500mA) {
+		FLT_INFO_LOG("Flashlight with 1.5A\n");
+		tps61310_i2c_command(0x07, 0x46);
+		tps61310_i2c_command(0x04, 0x10);
+	} else {
+		
+		tps61310_i2c_command(0x07, 0xF6);
+	}
+	
+	if (this_tps61310->disable_tx_mask)
+		tps61310_i2c_command(0x03, 0xC0);
+	if (this_tps61310->reset)
+		FLT_INFO_LOG("%s reset pin exist\n", __func__);
+	else
+		FLT_INFO_LOG("%s no reset pin\n", __func__);
+	if (this_tps61310->power_save)
+		FLT_INFO_LOG("%s power save pin exist\n", __func__);
+	else
+		FLT_INFO_LOG("%s no power save pin\n", __func__);
 	FLT_INFO_LOG("%s -\n", __func__);
 	return 0;
 
@@ -536,10 +771,29 @@ static const struct i2c_device_id tps61310_id[] = {
 	{ "TPS61310_FLASHLIGHT", 0 },
 	{ }
 };
+static int tps61310_resume(struct i2c_client *client)
+{
+
+		FLT_INFO_LOG("%s:\n", __func__);
+		if (this_tps61310->mode_pin_suspend_state_low)
+			gpio_set_value_cansleep(this_tps61310->strb1, 1);
+		return 0;
+}
+static int tps61310_suspend(struct i2c_client *client, pm_message_t state)
+{
+
+		FLT_INFO_LOG("%s:\n", __func__);
+		if (this_tps61310->mode_pin_suspend_state_low)
+			gpio_set_value_cansleep(this_tps61310->strb1, 0);
+
+		return 0;
+}
 
 static struct i2c_driver tps61310_driver = {
 	.probe		= tps61310_probe,
 	.remove		= tps61310_remove,
+	.suspend	= tps61310_suspend,
+	.resume		= tps61310_resume,
 	.id_table	= tps61310_id,
 	.driver		= {
 		.name = "TPS61310_FLASHLIGHT",

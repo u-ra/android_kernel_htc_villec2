@@ -15,7 +15,6 @@
 #ifndef __HTC_INFO__
 #define __HTC_INFO__
 
-#ifndef CONFIG_USB_MSM_72K
 #include <mach/board.h>
 struct usb_info {
 	int *phy_init_seq;
@@ -31,14 +30,13 @@ struct usb_info {
 	int (*ldo_enable) (int enable);
 	void (*usb_mhl_switch)(bool);
 
-	/* for notification when USB is connected or disconnected */
+	
 	int connect_type_ready;
 	void (*usb_connected)(int);
 
 	enum usb_connect_type connect_type;
 	struct delayed_work chg_stop;
 };
-#endif
 
 extern ssize_t otg_show_usb_phy_setting(char *buf);
 extern ssize_t otg_store_usb_phy_setting(const char *buf, size_t count);
@@ -52,7 +50,7 @@ extern int htc_usb_enable_function(char *name, int ebl);
 
 extern void htc_mode_enable(int enable);
 extern int check_htc_mode_status(void);
-extern void android_switch_adb_ums(void);
+extern void android_switch_default(void);
 extern void android_switch_htc_mode(void);
 
 #ifdef err
@@ -119,5 +117,5 @@ extern void android_switch_htc_mode(void);
 #define pr_info(fmt, args...) \
 	printk(KERN_INFO "[USB] " pr_fmt(fmt), ## args)
 
-#endif /* __HTC_INFO__ */
+#endif 
 

@@ -21,6 +21,8 @@
 #include <linux/sched.h>
 #include <linux/slab.h>
 #include <linux/seq_file.h>
+#include <linux/cryptouser.h>
+#include <net/netlink.h>
 
 #include "internal.h"
 
@@ -109,6 +111,35 @@ static int crypto_init_aead_ops(struct crypto_tfm *tfm, u32 type, u32 mask)
 	return 0;
 }
 
+#ifdef CONFIG_NET
+static int crypto_aead_report(struct sk_buff *skb, struct crypto_alg *alg)
+{
+	struct crypto_report_aead raead;
+	struct aead_alg *aead = &alg->cra_aead;
+
+	snprintf(raead.type, CRYPTO_MAX_ALG_NAME, "%s", "aead");
+	snprintf(raead.geniv, CRYPTO_MAX_ALG_NAME, "%s",
+		 aead->geniv ?: "<built-in>");
+
+	raead.blocksize = alg->cra_blocksize;
+	raead.maxauthsize = aead->maxauthsize;
+	raead.ivsize = aead->ivsize;
+
+	NLA_PUT(skb, CRYPTOCFGA_REPORT_AEAD,
+		sizeof(struct crypto_report_aead), &raead);
+
+	return 0;
+
+nla_put_failure:
+	return -EMSGSIZE;
+}
+#else
+static int crypto_aead_report(struct sk_buff *skb, struct crypto_alg *alg)
+{
+	return -ENOSYS;
+}
+#endif
+
 static void crypto_aead_show(struct seq_file *m, struct crypto_alg *alg)
 	__attribute__ ((unused));
 static void crypto_aead_show(struct seq_file *m, struct crypto_alg *alg)
@@ -130,6 +161,7 @@ const struct crypto_type crypto_aead_type = {
 #ifdef CONFIG_PROC_FS
 	.show = crypto_aead_show,
 #endif
+	.report = crypto_aead_report,
 };
 EXPORT_SYMBOL_GPL(crypto_aead_type);
 
@@ -165,6 +197,35 @@ static int crypto_init_nivaead_ops(struct crypto_tfm *tfm, u32 type, u32 mask)
 	return 0;
 }
 
+#ifdef CONFIG_NET
+static int crypto_nivaead_report(struct sk_buff *skb, struct crypto_alg *alg)
+{
+	struct crypto_report_aead raead;
+	struct aead_alg *aead = &alg->cra_aead;
+
+	snprintf(raead.type, CRYPTO_MAX_ALG_NAME, "%s", "nivaead");
+	snprintf(raead.geniv, CRYPTO_MAX_ALG_NAME, "%s", aead->geniv);
+
+	raead.blocksize = alg->cra_blocksize;
+	raead.maxauthsize = aead->maxauthsize;
+	raead.ivsize = aead->ivsize;
+
+	NLA_PUT(skb, CRYPTOCFGA_REPORT_AEAD,
+		sizeof(struct crypto_report_aead), &raead);
+
+	return 0;
+
+nla_put_failure:
+	return -EMSGSIZE;
+}
+#else
+static int crypto_nivaead_report(struct sk_buff *skb, struct crypto_alg *alg)
+{
+	return -ENOSYS;
+}
+#endif
+
+
 static void crypto_nivaead_show(struct seq_file *m, struct crypto_alg *alg)
 	__attribute__ ((unused));
 static void crypto_nivaead_show(struct seq_file *m, struct crypto_alg *alg)
@@ -186,6 +247,7 @@ const struct crypto_type crypto_nivaead_type = {
 #ifdef CONFIG_PROC_FS
 	.show = crypto_nivaead_show,
 #endif
+	.report = crypto_nivaead_report,
 };
 EXPORT_SYMBOL_GPL(crypto_nivaead_type);
 
@@ -239,7 +301,7 @@ struct crypto_instance *aead_geniv_alloc(struct crypto_template *tmpl,
 
 	spawn = crypto_instance_ctx(inst);
 
-	/* Ignore async algorithms if necessary. */
+	
 	mask |= crypto_requires_sync(algt->type, algt->mask);
 
 	crypto_set_aead_spawn(spawn, inst);
@@ -253,11 +315,6 @@ struct crypto_instance *aead_geniv_alloc(struct crypto_template *tmpl,
 	if (!alg->cra_aead.ivsize)
 		goto err_drop_alg;
 
-	/*
-	 * This is only true if we're constructing an algorithm with its
-	 * default IV generator.  For the default generator we elide the
-	 * template name and double-check the IV generator.
-	 */
 	if (algt->mask & CRYPTO_ALG_GENIV) {
 		if (strcmp(tmpl->name, alg->cra_aead.geniv))
 			goto err_drop_alg;
@@ -365,13 +422,13 @@ static int crypto_nivaead_default(struct crypto_alg *alg, u32 type, u32 mask)
 	ptype.attr.rta_len = sizeof(ptype);
 	ptype.attr.rta_type = CRYPTOA_TYPE;
 	ptype.data.type = type | CRYPTO_ALG_GENIV;
-	/* GENIV tells the template that we're making a default geniv. */
+	
 	ptype.data.mask = mask | CRYPTO_ALG_GENIV;
 	tb[0] = &ptype.attr;
 
 	palg.attr.rta_len = sizeof(palg);
 	palg.attr.rta_type = CRYPTOA_ALG;
-	/* Must use the exact name to locate ourselves. */
+	
 	memcpy(palg.data.name, alg->cra_driver_name, CRYPTO_MAX_ALG_NAME);
 	tb[1] = &palg.attr;
 
@@ -394,7 +451,7 @@ static int crypto_nivaead_default(struct crypto_alg *alg, u32 type, u32 mask)
 		goto put_tmpl;
 	}
 
-	/* Redo the lookup to use the instance we just registered. */
+	
 	err = -EAGAIN;
 
 put_tmpl:
@@ -408,8 +465,7 @@ out:
 	return err;
 }
 
-static struct crypto_alg *crypto_lookup_aead(const char *name, u32 type,
-					     u32 mask)
+struct crypto_alg *crypto_lookup_aead(const char *name, u32 type, u32 mask)
 {
 	struct crypto_alg *alg;
 
@@ -441,6 +497,7 @@ static struct crypto_alg *crypto_lookup_aead(const char *name, u32 type,
 
 	return ERR_PTR(crypto_nivaead_default(alg, type, mask));
 }
+EXPORT_SYMBOL_GPL(crypto_lookup_aead);
 
 int crypto_grab_aead(struct crypto_aead_spawn *spawn, const char *name,
 		     u32 type, u32 mask)

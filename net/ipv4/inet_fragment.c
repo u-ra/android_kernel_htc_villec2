@@ -21,7 +21,6 @@
 #include <linux/rtnetlink.h>
 #include <linux/slab.h>
 
-#include <net/sock.h>
 #include <net/inet_frag.h>
 
 static void inet_frag_secret_rebuild(unsigned long dummy)
@@ -42,7 +41,7 @@ static void inet_frag_secret_rebuild(unsigned long dummy)
 			if (hval != i) {
 				hlist_del(&q->list);
 
-				/* Relink to new hash chain. */
+				
 				hlist_add_head(&q->list, &f->hash[hval]);
 			}
 		}
@@ -138,7 +137,7 @@ void inet_frag_destroy(struct inet_frag_queue *q, struct inet_frags *f,
 	WARN_ON(!(q->last_in & INET_FRAG_COMPLETE));
 	WARN_ON(del_timer(&q->timer) != 0);
 
-	/* Release all fragment data. */
+	
 	fp = q->fragments;
 	nf = q->net;
 	while (fp) {
@@ -202,17 +201,8 @@ static struct inet_frag_queue *inet_frag_intern(struct netns_frags *nf,
 	unsigned int hash;
 
 	write_lock(&f->lock);
-	/*
-	 * While we stayed w/o the lock other CPU could update
-	 * the rnd seed, so we need to re-calculate the hash
-	 * chain. Fortunatelly the qp_in can be used to get one.
-	 */
 	hash = f->hashfn(qp_in);
 #ifdef CONFIG_SMP
-	/* With SMP race we have to recheck hash table, because
-	 * such entry could be created on other cpu, while we
-	 * promoted read lock to write lock.
-	 */
 	hlist_for_each_entry(qp, n, &f->hash[hash], list) {
 		if (qp->net == nf && f->match(qp, arg)) {
 			atomic_inc(&qp->refcnt);
@@ -272,7 +262,6 @@ struct inet_frag_queue *inet_frag_find(struct netns_frags *nf,
 {
 	struct inet_frag_queue *q;
 	struct hlist_node *n;
-	int depth = 0;
 
 	hlist_for_each_entry(q, n, &f->hash[hash], list) {
 		if (q->net == nf && f->match(q, key)) {
@@ -280,25 +269,9 @@ struct inet_frag_queue *inet_frag_find(struct netns_frags *nf,
 			read_unlock(&f->lock);
 			return q;
 		}
-		depth++;
 	}
 	read_unlock(&f->lock);
 
-	if (depth <= INETFRAGS_MAXDEPTH)
-		return inet_frag_create(nf, f, key);
-	else
-		return ERR_PTR(-ENOBUFS);
+	return inet_frag_create(nf, f, key);
 }
 EXPORT_SYMBOL(inet_frag_find);
-
-void inet_frag_maybe_warn_overflow(struct inet_frag_queue *q,
-				   const char *prefix)
-{
-	static const char msg[] = "inet_frag_find: Fragment hash bucket"
-		" list length grew over limit " __stringify(INETFRAGS_MAXDEPTH)
-		". Dropping fragment.\n";
-
-	if (PTR_ERR(q) == -ENOBUFS)
-		LIMIT_NETDEBUG(KERN_WARNING "%s%s", prefix, msg);
-}
-EXPORT_SYMBOL(inet_frag_maybe_warn_overflow);

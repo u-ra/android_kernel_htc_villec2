@@ -13,9 +13,6 @@ struct snd_soc_platform;
 struct snd_soc_card;
 struct snd_soc_dapm_widget;
 
-/*
- * Log register events
- */
 DECLARE_EVENT_CLASS(snd_soc_reg,
 
 	TP_PROTO(struct snd_soc_codec *codec, unsigned int reg,
@@ -216,6 +213,31 @@ DEFINE_EVENT(snd_soc_dapm_widget, snd_soc_dapm_widget_event_done,
 
 );
 
+TRACE_EVENT(snd_soc_dapm_walk_done,
+
+	TP_PROTO(struct snd_soc_card *card),
+
+	TP_ARGS(card),
+
+	TP_STRUCT__entry(
+		__string(	name,	card->name		)
+		__field(	int,	power_checks		)
+		__field(	int,	path_checks		)
+		__field(	int,	neighbour_checks	)
+	),
+
+	TP_fast_assign(
+		__assign_str(name, card->name);
+		__entry->power_checks = card->dapm_stats.power_checks;
+		__entry->path_checks = card->dapm_stats.path_checks;
+		__entry->neighbour_checks = card->dapm_stats.neighbour_checks;
+	),
+
+	TP_printk("%s: checks %d power, %d path, %d neighbour",
+		  __get_str(name), (int)__entry->power_checks,
+		  (int)__entry->path_checks, (int)__entry->neighbour_checks)
+);
+
 TRACE_EVENT(snd_soc_jack_irq,
 
 	TP_PROTO(const char *name),
@@ -299,7 +321,6 @@ TRACE_EVENT(snd_soc_cache_sync,
 		  (int)__entry->id, __get_str(type), __get_str(status))
 );
 
-#endif /* _TRACE_ASOC_H */
+#endif 
 
-/* This part must be outside protection */
 #include <trace/define_trace.h>

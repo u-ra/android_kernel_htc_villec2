@@ -10,7 +10,7 @@ menuconfig NET
 	  The reason is that some programs need kernel networking support even
 	  when running on a stand-alone machine that isn't connected to any
 	  other computer.
-	  
+
 	  If you are upgrading from an older kernel, you
 	  should consider updating your networking tools too because changes
 	  in the kernel and the tools often go hand in hand. The tools are
@@ -229,6 +229,7 @@ source "net/sched/Kconfig"
 source "net/dcb/Kconfig"
 source "net/dns_resolver/Kconfig"
 source "net/batman-adv/Kconfig"
+source "net/openvswitch/Kconfig"
 
 config RPS
 	boolean "RPS"
@@ -239,12 +240,25 @@ config RFS_ACCEL
 	boolean
 	depends on RPS && GENERIC_HARDIRQS
 	select CPU_RMAP
-	default n
+	default y
 
 config XPS
 	boolean
 	depends on SMP && SYSFS && USE_GENERIC_SMP_HELPERS
-	default n
+	default y
+
+config NETPRIO_CGROUP
+	tristate "Network priority cgroup"
+	depends on CGROUPS
+	---help---
+	  Cgroup subsystem for use in assigning processes to network priorities on
+	  a per-interface basis
+
+config BQL
+	boolean
+	depends on SYSFS
+	select DQL
+	default y
 
 config HAVE_BPF_JIT
 	bool
@@ -288,7 +302,7 @@ config NET_TCPPROBE
 
 	Documentation on how to use TCP connection probing can be found
 	at:
-	
+
 	  http://www.linuxfoundation.org/collaborate/workgroups/networking/tcpprobe
 
 	To compile this code as a module, choose M here: the
@@ -304,6 +318,11 @@ config NET_DROP_MONITOR
 	process.  If you don't need network drop alerts, or if you are ok
 	just checking the various proc files and other utilities for
 	drop statistics, say N here.
+
+config HTC_NETWORK_MODIFY
+    tristate "HTC_NETWORK_MODIFY"
+	---help---
+	HTC_NETWORK_MODIFY
 
 endmenu
 
@@ -336,6 +355,7 @@ source "net/rfkill/Kconfig"
 source "net/9p/Kconfig"
 source "net/caif/Kconfig"
 source "net/ceph/Kconfig"
+source "net/nfc/Kconfig"
 
 
 endif   # if NET

@@ -116,9 +116,6 @@ int msm_gpiomux_init(size_t ngpio)
 	if (!msm_gpiomux_recs)
 		return -ENOMEM;
 
-	/* There is no need to zero this memory, as clients will be blindly
-	 * installing settings on top of it.
-	 */
 	msm_gpiomux_sets = kmalloc(sizeof(struct gpiomux_setting) * ngpio *
 		GPIOMUX_NSETTINGS, GFP_KERNEL);
 	if (!msm_gpiomux_sets) {

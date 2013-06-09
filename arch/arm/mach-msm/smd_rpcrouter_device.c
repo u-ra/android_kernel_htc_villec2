@@ -37,13 +37,10 @@
 #include <mach/peripheral-loader.h>
 #include "smd_rpcrouter.h"
 
-/* Support 64KB of data plus some space for headers */
 #define SAFETY_MEM_SIZE (65536 + sizeof(struct rpc_request_hdr))
 
-/* modem load timeout */
 #define MODEM_LOAD_TIMEOUT (10 * HZ)
 
-/* Next minor # available for a remote server */
 static int next_minor = 1;
 static DEFINE_SPINLOCK(server_cdev_lock);
 
@@ -71,7 +68,7 @@ static void *msm_rpcrouter_load_modem(void)
 
 	pil = pil_get("modem");
 	if (IS_ERR(pil))
-		pr_err("[K] %s: modem load failed\n", __func__);
+		pr_err("%s: modem load failed\n", __func__);
 	else {
 		rc = wait_for_completion_interruptible_timeout(
 						&rpc_remote_router_up,
@@ -79,7 +76,7 @@ static void *msm_rpcrouter_load_modem(void)
 		if (!rc)
 			rc = -ETIMEDOUT;
 		if (rc < 0) {
-			pr_err("[K] %s: wait for remote router failed %d\n",
+			pr_err("%s: wait for remote router failed %d\n",
 			       __func__, rc);
 			msm_rpcrouter_unload_modem(pil);
 			pil = ERR_PTR(rc);
@@ -111,7 +108,7 @@ static int rpcrouter_open(struct inode *inode, struct file *filp)
 	}
 	file_info->ept = ept;
 
-	/* if router device, load the modem */
+	
 	if (inode->i_rdev == msm_rpcrouter_devno) {
 		pil = msm_rpcrouter_load_modem();
 		if (IS_ERR(pil)) {
@@ -134,16 +131,10 @@ static int rpcrouter_release(struct inode *inode, struct file *filp)
 
 	ept = (struct msm_rpc_endpoint *) file_info->ept;
 
-	/* A user program with many files open when ends abruptly,
-	 * will cause a flood of REMOVE_CLIENT messages to the
-	 * remote processor.  This will cause remote processors
-	 * internal queue to overflow. Inserting a sleep here
-	 * regularly is the effecient option.
-	 */
 	if (rpcrouter_release_cnt++ % 2)
 		msleep(1);
 
-	/* if router device, unload the modem */
+	
 	if (inode->i_rdev == msm_rpcrouter_devno)
 		msm_rpcrouter_unload_modem(file_info->modem_pil);
 
@@ -170,7 +161,7 @@ static ssize_t rpcrouter_read(struct file *filp, char __user *buf,
 	while (frag != NULL) {		
 		if (copy_to_user(buf, frag->data, frag->length)) {
 			printk(KERN_ERR
-			       "[K] rpcrouter: could not copy all read data to user!\n");
+			       "rpcrouter: could not copy all read data to user!\n");
 			rc = -EFAULT;
 		}
 		buf += frag->length;
@@ -192,7 +183,7 @@ static ssize_t rpcrouter_write(struct file *filp, const char __user *buf,
 
 	ept = (struct msm_rpc_endpoint *) file_info->ept;
 
-	/* A check for safety, this seems non-standard */
+	
 	if (count > SAFETY_MEM_SIZE)
 		return -EINVAL;
 
@@ -215,28 +206,6 @@ write_out_free:
 	return rc;
 }
 
-/* RPC VFS Poll Implementation
- *
- * POLLRDHUP - restart in progress
- * POLLOUT - writes accepted (without blocking)
- * POLLIN - data ready to read
- *
- * The restart state consists of several different phases including a client
- * notification and a server restart.  If the server has been restarted, then
- * reads and writes can be performed and the POLLOUT bit will be set.  If a
- * restart is in progress, but the server hasn't been restarted, then only the
- * POLLRDHUP is active and reads and writes will block.  See the table
- * below for a summary.  POLLRDHUP is cleared once a call to msm_rpc_write_pkt
- * or msm_rpc_read_pkt returns ENETRESET.
- *
- * POLLOUT	POLLRDHUP
- *    1         0       Normal operation
- *    0         1       Restart in progress and server hasn't restarted yet
- *    1         1       Server has been restarted, but client has
- *                      not been notified of a restart by a return code
- *                      of ENETRESET from msm_rpc_write_pkt or
- *                      msm_rpc_read_pkt.
- */
 static unsigned int rpcrouter_poll(struct file *filp,
 				   struct poll_table_struct *wait)
 {
@@ -277,9 +246,6 @@ static long rpcrouter_ioctl(struct file *filp, unsigned int cmd,
 		break;
 
 	case RPC_ROUTER_IOCTL_GET_MTU:
-		/* the pacmark word reduces the actual payload
-		 * possible per message
-		 */
 		n = RPCROUTER_MSGSIZE_MAX - sizeof(uint32_t);
 		rc = put_user(n, (unsigned int *) arg);
 		break;
@@ -351,17 +317,11 @@ int msm_rpcrouter_create_server_cdev(struct rr_server *server)
 	if (next_minor == RPCROUTER_MAX_REMOTE_SERVERS) {
 		spin_unlock_irqrestore(&server_cdev_lock, flags);
 		printk(KERN_ERR
-		       "[K] rpcrouter: Minor numbers exhausted - Increase "
+		       "rpcrouter: Minor numbers exhausted - Increase "
 		       "RPCROUTER_MAX_REMOTE_SERVERS\n");
 		return -ENOBUFS;
 	}
 
-	/* Servers with bit 31 set are remote msm servers with hashkey version.
-	 * Servers with bit 31 not set are remote msm servers with
-	 * backwards compatible version type in which case the minor number
-	 * (lower 16 bits) is set to zero.
-	 *
-	 */
 	if ((server->vers & 0x80000000))
 		dev_vers = server->vers;
 	else
@@ -377,7 +337,7 @@ int msm_rpcrouter_create_server_cdev(struct rr_server *server)
 			      server->prog, dev_vers);
 	if (IS_ERR(server->device)) {
 		printk(KERN_ERR
-		       "[K] rpcrouter: Unable to create device (%ld)\n",
+		       "rpcrouter: Unable to create device (%ld)\n",
 		       PTR_ERR(server->device));
 		return PTR_ERR(server->device);;
 	}
@@ -388,17 +348,13 @@ int msm_rpcrouter_create_server_cdev(struct rr_server *server)
 	rc = cdev_add(&server->cdev, server->device_number, 1);
 	if (rc < 0) {
 		printk(KERN_ERR
-		       "[K] rpcrouter: Unable to add chrdev (%d)\n", rc);
+		       "rpcrouter: Unable to add chrdev (%d)\n", rc);
 		device_destroy(msm_rpcrouter_class, server->device_number);
 		return rc;
 	}
 	return 0;
 }
 
-/* for backward compatible version type (31st bit cleared)
- * clearing minor number (lower 16 bits) in device name
- * is neccessary for driver binding
- */
 int msm_rpcrouter_create_server_pdev(struct rr_server *server)
 {
 	server->p_device.base.id = (server->vers & RPC_VERSION_MODE_MASK) ?
@@ -418,12 +374,12 @@ int msm_rpcrouter_init_devices(void)
 	int rc;
 	int major;
 
-	/* Create the device nodes */
+	
 	msm_rpcrouter_class = class_create(THIS_MODULE, "oncrpc");
 	if (IS_ERR(msm_rpcrouter_class)) {
 		rc = -ENOMEM;
 		printk(KERN_ERR
-		       "[K] rpcrouter: failed to create oncrpc class\n");
+		       "rpcrouter: failed to create oncrpc class\n");
 		goto fail;
 	}
 
@@ -432,7 +388,7 @@ int msm_rpcrouter_init_devices(void)
 				 "oncrpc");
 	if (rc < 0) {
 		printk(KERN_ERR
-		       "[K] rpcrouter: Failed to alloc chardev region (%d)\n", rc);
+		       "rpcrouter: Failed to alloc chardev region (%d)\n", rc);
 		goto fail_destroy_class;
 	}
 

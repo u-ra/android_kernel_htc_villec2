@@ -27,4 +27,4 @@
 
 #define DSPS_IOCTL_RESET _IO(DSPS_IOCTL_MAGIC, 5)
 
-#endif	/* _DSPS_H_ */
+#endif	

@@ -10,10 +10,6 @@
  * GNU General Public License for more details.
  *
  */
-/*
- * Qualcomm PMIC8058 driver header file
- *
- */
 
 #ifndef __MFD_PMIC8058_H__
 #define __MFD_PMIC8058_H__
@@ -50,13 +46,11 @@
 
 #define PM8058_IRQ_BLOCK_BIT(block, bit) ((block) * 8 + (bit))
 
-/* MPPs and GPIOs [0,N) */
 #define PM8058_MPP_IRQ(base, mpp)	((base) + \
 					PM8058_IRQ_BLOCK_BIT(16, (mpp)))
 #define PM8058_GPIO_IRQ(base, gpio)	((base) + \
 					PM8058_IRQ_BLOCK_BIT(24, (gpio)))
 
-/* PM8058 IRQ's */
 #define PM8058_VCP_IRQ			PM8058_IRQ_BLOCK_BIT(1, 0)
 #define PM8058_CHGILIM_IRQ		PM8058_IRQ_BLOCK_BIT(1, 3)
 #define PM8058_VBATDET_LOW_IRQ		PM8058_IRQ_BLOCK_BIT(1, 4)
@@ -108,20 +102,6 @@ struct pmic8058_charger_data {
 	bool charger_data_valid;
 };
 
-enum pon_config{
-	DISABLE_HARD_RESET = 0,
-	SHUTDOWN_ON_HARD_RESET,
-	RESTART_ON_HARD_RESET,
-	MAX_PON_CONFIG,
-};
-
-enum pm8058_smpl_delay {
-	PM8058_SMPL_DELAY_0p5,
-	PM8058_SMPL_DELAY_1p0,
-	PM8058_SMPL_DELAY_1p5,
-	PM8058_SMPL_DELAY_2p0,
-};
-
 struct pm8058_platform_data {
 	struct pm8xxx_mpp_platform_data		*mpp_pdata;
 	struct pm8xxx_keypad_platform_data      *keypad_pdata;
@@ -142,67 +122,9 @@ struct pm8058_platform_data {
 	struct pm8058_xo_pdata			*xo_buffer_pdata;
 	int					num_xo_buffers;
 	struct pmic8058_charger_data		*charger_pdata;
-	int					hardreset_config; /* HTC added  */
+	int					hardreset_config; 
 };
 
-#ifdef CONFIG_PMIC8058
-int pm8058_reset_pwr_off(int reset);
-#else
-static inline int pm8058_reset_pwr_off(int reset) { return 0; }
-#endif
+int pm8058_dump_irq_status(int irq);
 
-
-int pm8058_hard_reset_config(enum pon_config config);
-
-/**
- * pm8058_smpl_control - enables/disables SMPL detection
- * @enable: 0 = shutdown PMIC on power loss, 1 = reset PMIC on power loss
- *
- * This function enables or disables the Sudden Momentary Power Loss detection
- * module.  If SMPL detection is enabled, then when a sufficiently long power
- * loss event occurs, the PMIC will automatically reset itself.  If SMPL
- * detection is disabled, then the PMIC will shutdown when power loss occurs.
- *
- * RETURNS: an appropriate -ERRNO error value on error, or zero for success.
- */
-int pm8058_smpl_control(int enable);
-
-/**
- * pm8058_smpl_set_delay - sets the SMPL detection time delay
- * @delay: enum value corresponding to delay time
- *
- * This function sets the time delay of the SMPL detection module.  If power
- * is reapplied within this interval, then the PMIC reset automatically.  The
- * SMPL detection module must be enabled for this delay time to take effect.
- *
- * RETURNS: an appropriate -ERRNO error value on error, or zero for success.
- */
-int pm8058_smpl_set_delay(enum pm8058_smpl_delay delay);
-
-/**
- * pm8058_watchdog_reset_control - enables/disables watchdog reset detection
- * @enable: 0 = shutdown when PS_HOLD goes low, 1 = reset when PS_HOLD goes low
- *
- * This function enables or disables the PMIC watchdog reset detection feature.
- * If watchdog reset detection is enabled, then the PMIC will reset itself
- * when PS_HOLD goes low.  If it is not enabled, then the PMIC will shutdown
- * when PS_HOLD goes low.
- *
- * RETURNS: an appropriate -ERRNO error value on error, or zero for success.
- */
-int pm8058_watchdog_reset_control(int enable);
-
-/**
- * pm8058_stay_on - enables stay_on feature
- *
- * PMIC stay-on feature allows PMIC to ignore MSM PS_HOLD=low
- * signal so that some special functions like debugging could be
- * performed.
- *
- * This feature should not be used in any product release.
- *
- * RETURNS: an appropriate -ERRNO error value on error, or zero for success.
- */
-int pm8058_stay_on(void);
-
-#endif  /* __MFD_PMIC8058_H__ */
+#endif  

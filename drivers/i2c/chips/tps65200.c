@@ -37,7 +37,7 @@
 #if defined(CONFIG_MACH_HOLIDAY)
 #define AC_CURRENT_SWTICH_DELAY_200MS		200
 #define AC_CURRENT_SWTICH_DELAY_100MS		100
-#endif	/* CONFIG_MACH_HOLIDAY */
+#endif	
 #define pr_tps_fmt(fmt) "[BATT][tps65200] " fmt
 #define pr_tps_err_fmt(fmt) "[BATT][tps65200] err:" fmt
 #define pr_tps_info(fmt, ...) \
@@ -45,9 +45,7 @@
 #define pr_tps_err(fmt, ...) \
 	printk(KERN_ERR pr_tps_err_fmt(fmt), ##__VA_ARGS__)
 
-/* there is a 32 seconds hw safety timer for boost mode */
 #define TPS65200_CHECK_INTERVAL (15)
-/* Delay 200ms to set original VDPM for preventing vbus voltage dropped & pass MHL spec */
 #define DELAY_MHL_INIT	msecs_to_jiffies(200)
 #define DELAY_KICK_TPS	msecs_to_jiffies(10)
 #define SET_VDPM_AS_476	1
@@ -94,10 +92,6 @@ static void tps65200_set_check_alarm(void)
 	alarm_start_range(&tps65200_check_alarm, next_alarm, next_alarm);
 }
 
-/**
- * Insmod parameters
- */
-/* I2C_CLIENT_INSMOD_1(tps65200); */
 
 static int tps65200_probe(struct i2c_client *client,
 			const struct i2c_device_id *id);
@@ -107,27 +101,16 @@ static int tps65200_detect(struct i2c_client *client, int kind,
 #endif
 static int tps65200_remove(struct i2c_client *client);
 
-/* Supersonic for Switch charger */
 struct tps65200_i2c_client {
 	struct i2c_client *client;
 	u8 address;
-	/* max numb of i2c_msg required is for read =2 */
+	
 	struct i2c_msg xfer_msg[2];
-	/* To lock access to xfer_msg */
+	
 	struct mutex xfer_lock;
 };
 static struct tps65200_i2c_client tps65200_i2c_module;
 
-/**
-Function:tps65200_i2c_write
-Target:	Write a byte to Switch charger
-Timing:	TBD
-INPUT: 	value-> write value
-		reg  -> reg offset
-		num-> number of byte to write
-return :TRUE-->OK
-		FALSE-->Fail
- */
 static int tps65200_i2c_write(u8 *value, u8 reg, u8 num_bytes)
 {
 	int ret;
@@ -137,37 +120,23 @@ static int tps65200_i2c_write(u8 *value, u8 reg, u8 num_bytes)
 	tps = &tps65200_i2c_module;
 
 	mutex_lock(&tps->xfer_lock);
-	/*
-	 * [MSG1]: fill the register address data
-	 * fill the data Tx buffer
-	 */
 	msg = &tps->xfer_msg[0];
 	msg->addr = tps->address;
 	msg->len = num_bytes + 1;
 	msg->flags = 0;
 	msg->buf = value;
-	/* over write the first byte of buffer with the register address */
+	
 	*value = reg;
 	ret = i2c_transfer(tps->client->adapter, tps->xfer_msg, 1);
 	mutex_unlock(&tps->xfer_lock);
 
-	/* i2cTransfer returns num messages.translate it pls.. */
+	
 	if (ret >= 0)
 		ret = 0;
 	return ret;
 }
 
 
-/**
-Function:tps65200_i2c_read
-Target:	Read a byte from Switch charger
-Timing:	TBD
-INPUT: 	value-> store buffer
-		reg  -> reg offset to read
-		num-> number of byte to read
-return :TRUE-->OK
-		FALSE-->Fail
- */
 static int tps65200_i2c_read(u8 *value, u8 reg, u8 num_bytes)
 {
 	int ret;
@@ -178,52 +147,37 @@ static int tps65200_i2c_read(u8 *value, u8 reg, u8 num_bytes)
 	tps = &tps65200_i2c_module;
 
 	mutex_lock(&tps->xfer_lock);
-	/* [MSG1] fill the register address data */
+	
 	msg = &tps->xfer_msg[0];
 	msg->addr = tps->address;
 	msg->len = 1;
-	msg->flags = 0; /* Read the register value */
+	msg->flags = 0; 
 	val = reg;
 	msg->buf = &val;
-	/* [MSG2] fill the data rx buffer */
+	
 	msg = &tps->xfer_msg[1];
 	msg->addr = tps->address;
-	msg->flags = I2C_M_RD;  /* Read the register value */
-	msg->len = num_bytes;   /* only n bytes */
+	msg->flags = I2C_M_RD;  
+	msg->len = num_bytes;   
 	msg->buf = value;
 	ret = i2c_transfer(tps->client->adapter, tps->xfer_msg, 2);
 	mutex_unlock(&tps->xfer_lock);
 
-	/* i2cTransfer returns num messages.translate it pls.. */
+	
 	if (ret >= 0)
 		ret = 0;
 	return ret;
 }
 
 
-/**
-Function:tps65200_i2c_write_byte
-Target:	Write a byte from Switch charger
-Timing:	TBD
-INPUT: 	value-> store buffer
-		reg  -> reg offset to read
-return :TRUE-->OK
-		FALSE-->Fail
- */
 static int tps65200_i2c_write_byte(u8 value, u8 reg)
 {
-	/* 2 bytes offset 1 contains the data offset 0 is used by i2c_write */
+	
 	int result;
 	int i;
 	u8 temp_buffer[2] = { 0 };
-	/* offset 1 contains the data */
+	
 	temp_buffer[1] = value;
-	/*  There is workaround here to retry when returns fail since of
-	    I2C resume order changed in kernel 3.0
-
-	    Max retry times : 10
-	    Will break when writing byte successfully (return 0)
-	*/
 	for (i = 0; i < 10; i++) {
 		result = tps65200_i2c_write(temp_buffer, reg, 1);
 		if (result == 0)
@@ -237,24 +191,10 @@ static int tps65200_i2c_write_byte(u8 value, u8 reg)
 	return result;
 }
 
-/**
-Function:tps65200_i2c_read_byte
-Target:	Read a byte from Switch charger
-Timing:	TBD
-INPUT: 	value-> store buffer
-		reg  -> reg offset to read
-return :TRUE-->OK
-		FALSE-->Fail
- */
 static int tps65200_i2c_read_byte(u8 *value, u8 reg)
 {
 	int result = 0;
 	int i;
-	/*  Similar to the case of tps65200_i2c_write_byte
-
-	    Max retry times : 10
-	    Will break when reading byte successfully (return 0)
-	*/
 	for (i = 0; i < 10; i++) {
 		result = tps65200_i2c_read(value, reg, 1);
 		if (result == 0)
@@ -349,7 +289,7 @@ u32 htc_fake_charger_for_testing(u32 ctl)
 #if defined(CONFIG_MACH_VERDI_LTE)
 	new_ctl = POWER_SUPPLY_ENABLE_9VAC_CHARGE;
 #else
-	/* set charger to 1A AC  by default */
+	
 #endif
 
 	pr_tps_info("[BATT] %s(%d -> %d)\n", __func__, ctl , new_ctl);
@@ -366,11 +306,11 @@ static void set_vdpm(struct work_struct *work)
 #if (defined(CONFIG_TPS65200) && (defined(CONFIG_MACH_PRIMODS) || defined(CONFIG_MACH_PROTOU)))
 int tps65200_mask_interrupt_register(int status)
 {
-	if (status == CHARGER_USB) {	// Vbus in
+	if (status == CHARGER_USB) {	
 		tps65200_i2c_write_byte(0x7F, 0x0C);
 	} else if (status == CHARGER_BATTERY) {
 		tps65200_i2c_write_byte(0xFF, 0x0C);
-		/* Clear reverse protection counter when cable out*/
+		
 		reverse_protection_handler(REVERSE_PROTECTION_CONTER_CLEAR);
 	}
 	return 0;
@@ -390,7 +330,7 @@ int tps_set_hv_battery(int hv)
 		else
 			pr_tps_info("normal battery is detected. From the id3 faking of Villec2\n");
 
-		/* reset charger parameters */
+		
 		if(tps_last_charge)
 			tps_set_charger_ctrl(tps_last_charge);
 
@@ -437,10 +377,10 @@ int tps_set_charger_ctrl(u32 ctl)
 #if SET_VDPM_AS_476
 		cancel_delayed_work_sync(&set_vdpm_work);
 		tps65200_vdpm_chg = 0;
-		tps65200_i2c_write_byte(0x87, 0x03); /* VDPM = 4.76V */
-#endif /* SET_VDPM_AS_476 */
+		tps65200_i2c_write_byte(0x87, 0x03); 
+#endif 
 
-		/* cancel CHECK_CHG alarm */
+		
 		alarm_cancel(&tps65200_check_alarm);
 		break;
 	case POWER_SUPPLY_ENABLE_SLOW_CHARGE:
@@ -449,18 +389,18 @@ int tps_set_charger_ctrl(u32 ctl)
 		tps65200_i2c_write_byte(0x29, 0x01);
 		tps65200_i2c_write_byte(0x2A, 0x00);
 #if SET_VDPM_AS_476
-		regh = 0x87; /* VDPM = 4.76V */
+		regh = 0x87; 
 #else
-		/* set DPM regulation voltage to 4.44V */
+		
 		regh = 0x83;
 #ifdef CONFIG_SUPPORT_DQ_BATTERY
 		if (htc_is_dq_pass)
-			/* set DPM regulation voltage to 4.6V */
+			
 			regh = 0x85;
 #endif
-#endif /* SET_VDPM_AS_476 */
+#endif 
 		if (tps65200_low_chg)
-			regh |= 0x08;	/* enable low charge curent */
+			regh |= 0x08;	
 		tps65200_i2c_write_byte(regh, 0x03);
 
 		regh = 0x63;
@@ -481,7 +421,7 @@ int tps_set_charger_ctrl(u32 ctl)
 			cancel_delayed_work(&set_vdpm_work);
 			schedule_delayed_work(&set_vdpm_work, DELAY_MHL_INIT);
 		}
-#endif /* SET_VDPM_AS_476 */
+#endif 
 		break;
 	case POWER_SUPPLY_ENABLE_FAST_CHARGE:
 		tps65200_dump_register();
@@ -491,17 +431,17 @@ int tps_set_charger_ctrl(u32 ctl)
 #if SET_VDPM_AS_476
 		regh = 0x87;
 #else
-		/* set DPM regulation voltage to 4.44V */
+		
 		regh = 0x83;
 #ifdef CONFIG_SUPPORT_DQ_BATTERY
 		if (htc_is_dq_pass)
-			/* set DPM regulation voltage to 4.6V */
+			
 			regh = 0x85;
 #endif
-#endif /* SET_VDPM_AS_476 */
+#endif 
 
 		if (tps65200_low_chg)
-			regh |= 0x08;	/* enable low charge current */
+			regh |= 0x08;	
 		tps65200_i2c_write_byte(regh, 0x03);
 		regh = 0xA3;
 #ifdef CONFIG_SUPPORT_DQ_BATTERY
@@ -525,7 +465,7 @@ int tps_set_charger_ctrl(u32 ctl)
 			cancel_delayed_work(&set_vdpm_work);
 			schedule_delayed_work(&set_vdpm_work, DELAY_MHL_INIT);
 		}
-#endif /* SET_VDPM_AS_476 */
+#endif 
 		break;
 	case POWER_SUPPLY_ENABLE_SLOW_HV_CHARGE:
 		tps65200_i2c_write_byte(0x29, 0x01);
@@ -636,13 +576,13 @@ int tps_set_charger_ctrl(u32 ctl)
 		pr_tps_info("Switch charger NORMALTEMP_VREG_4200: regh 0x02=%x\n", regh);
 		break;
 	case POWER_SUPPLY_ENABLE_INTERNAL:
-		/* Boost Mode */
+		
 		tps65200_i2c_read_byte(&regh, 0x00);
 		pr_tps_info("regh 0x00=%x\n", regh);
 		regh |= 0x01;
 		regh &= 0xfd;
 		tps65200_i2c_write_byte(regh, 0x00);
-		/* set alarm for CHECK_CHG */
+		
 		tps65200_set_check_alarm();
 		tps65200_i2c_read_byte(&regh, 0x00);
 		pr_tps_info("Switch charger to Boost mode: regh 0x00=%x\n", regh);
@@ -651,11 +591,11 @@ int tps_set_charger_ctrl(u32 ctl)
 		tps65200_i2c_read_byte(&regh, 0x03);
 #ifdef CONFIG_SUPPORT_DQ_BATTERY
 		if (htc_is_dq_pass)
-			regh = (regh & 0xF8) | 0x05; /* set VDPM as 4.6V */
+			regh = (regh & 0xF8) | 0x05; 
 		else
-			regh = (regh & 0xF8) | 0x03; /* set VDPM as 4.4V */
+			regh = (regh & 0xF8) | 0x03; 
 #else
-		regh = (regh & 0xF8) | 0x03; /* set VDPM as 4.4V */
+		regh = (regh & 0xF8) | 0x03; 
 #endif
 		tps65200_i2c_write_byte(regh, 0x03);
 		tps65200_i2c_read_byte(&regh, 0x03);
@@ -721,9 +661,6 @@ static void tps65200_int_func(struct work_struct *work)
 
 	switch (chg_int_data->tps65200_reg) {
 	case CHECK_INT1:
-		/*  read twice. First read to trigger TPS65200 clear fault bit
-		    on INT1. Second read to make sure that fault bit is cleared
-		    and call off ovp function.	*/
 		fault_bit = tps_set_charger_ctrl(CHECK_INT1);
 		fault_bit = tps_set_charger_ctrl(CHECK_INT1);
 
@@ -854,7 +791,7 @@ static int tps65200_probe(struct i2c_client *client,
 		return -ENOMEM;
 	}
 
-	/* for boost mode safety timer */
+	
 	INIT_WORK(&check_alarm_work, check_alarm_work_func);
 	alarm_init(&tps65200_check_alarm,
 			ANDROID_ALARM_ELAPSED_REALTIME_WAKEUP,
@@ -868,7 +805,7 @@ static int tps65200_probe(struct i2c_client *client,
 		pr_tps_info("not HV battery.\n");
 
 #endif
-	/*  For chg_stat interrupt initialization. */
+	
 	chg_stat_int = 0;
 	if (pdata->gpio_chg_stat > 0) {
 		rc = request_any_context_irq(pdata->gpio_chg_stat,
@@ -884,7 +821,7 @@ static int tps65200_probe(struct i2c_client *client,
 		}
 	}
 
-	/*  For chg_int interrupt initialization. */
+	
 	if (pdata->gpio_chg_int > 0) {
 		chg_int_data = (struct tps65200_chg_int_data *)
 				kmalloc(sizeof(struct tps65200_chg_int_data),
@@ -932,6 +869,8 @@ static int tps65200_probe(struct i2c_client *client,
 	tps_set_charger_ctrl(VDPM_476V);
 #endif
 	pr_tps_info("[TPS65200]: Driver registration done\n");
+
+
 	return 0;
 }
 
@@ -953,7 +892,7 @@ static void tps65200_shutdown(struct i2c_client *client)
 
 	pr_tps_info("TPS65200 shutdown\n");
 	tps65200_i2c_read_byte(&regh, 0x00);
-	/* disable shunt monitor to decrease 0.035mA of current */
+	
 	regh &= 0xDF;
 	tps65200_i2c_write_byte(regh, 0x00);
 }

@@ -19,7 +19,7 @@
 	Copyright 2000,2001 Philipp Rumpf <prumpf@mandrakesoft.com>
 
 	Added generic RNG API
-	Copyright 2006 Michael Buesch <mbuesch@freenet.de>
+	Copyright 2006 Michael Buesch <m@bues.ch>
 	Copyright 2005 (c) MontaVista Software, Inc.
 
 	Please read Documentation/hw_random.txt for details on use.
@@ -40,25 +40,20 @@
 #include <linux/init.h>
 #include <linux/miscdevice.h>
 #include <linux/delay.h>
-#include <linux/slab.h>
 #include <asm/uaccess.h>
 
 
 #define RNG_MODULE_NAME		"hw_random"
 #define PFX			RNG_MODULE_NAME ": "
-#define RNG_MISCDEV_MINOR	183 /* official */
+#define RNG_MISCDEV_MINOR	183 
 
 
 static struct hwrng *current_rng;
 static LIST_HEAD(rng_list);
 static DEFINE_MUTEX(rng_mutex);
 static int data_avail;
-static u8 *rng_buffer;
-
-static size_t rng_buffer_size(void)
-{
-	return SMP_CACHE_BYTES < 32 ? 32 : SMP_CACHE_BYTES;
-}
+static u8 rng_buffer[SMP_CACHE_BYTES < 32 ? 32 : SMP_CACHE_BYTES]
+	__cacheline_aligned;
 
 static inline int hwrng_init(struct hwrng *rng)
 {
@@ -75,7 +70,7 @@ static inline void hwrng_cleanup(struct hwrng *rng)
 
 static int rng_dev_open(struct inode *inode, struct file *filp)
 {
-	/* enforce read-only access to this chrdev */
+	
 	if ((filp->f_mode & FMODE_READ) == 0)
 		return -EINVAL;
 	if (filp->f_mode & FMODE_WRITE)
@@ -121,7 +116,7 @@ static ssize_t rng_dev_read(struct file *filp, char __user *buf,
 
 		if (!data_avail) {
 			bytes_read = rng_get_data(current_rng, rng_buffer,
-				rng_buffer_size(),
+				sizeof(rng_buffer),
 				!(filp->f_flags & O_NONBLOCK));
 			if (bytes_read < 0) {
 				err = bytes_read;
@@ -312,15 +307,7 @@ int hwrng_register(struct hwrng *rng)
 
 	mutex_lock(&rng_mutex);
 
-	/* kmalloc makes this safe for virt_to_page() in virtio_rng.c */
-	err = -ENOMEM;
-	if (!rng_buffer) {
-		rng_buffer = kmalloc(rng_buffer_size(), GFP_KERNEL);
-		if (!rng_buffer)
-			goto out_unlock;
-	}
-
-	/* Must not register two RNGs with the same name. */
+	
 	err = -EEXIST;
 	list_for_each_entry(tmp, &rng_list, list) {
 		if (strcmp(tmp->name, rng->name) == 0)

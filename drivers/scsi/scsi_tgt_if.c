@@ -22,6 +22,7 @@
 #include <linux/miscdevice.h>
 #include <linux/gfp.h>
 #include <linux/file.h>
+#include <linux/export.h>
 #include <net/tcp.h>
 #include <scsi/scsi.h>
 #include <scsi/scsi_cmnd.h>
@@ -48,7 +49,6 @@ struct tgt_ring {
 	spinlock_t tr_lock;
 };
 
-/* tx_ring : kernel->user, rx_ring : user->kernel */
 static struct tgt_ring tx_ring, rx_ring;
 static DECLARE_WAIT_QUEUE_HEAD(tgt_poll_wait);
 
@@ -243,7 +243,7 @@ static ssize_t tgt_write(struct file *file, const char __user * buffer,
 
 	while (1) {
 		ev = tgt_head_event(ring, ring->tr_idx);
-		/* do we need this? */
+		
 		flush_dcache_page(virt_to_page(ev));
 
 		if (!ev->hdr.status)

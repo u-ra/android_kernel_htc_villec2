@@ -20,21 +20,12 @@
 #include <asm/thread_info.h>
 #include <asm/memory.h>
 #include <asm/procinfo.h>
+#include <asm/hardware/cache-l2x0.h>
 #include <linux/kbuild.h>
 
-/*
- * Make sure that the compiler and target are compatible.
- */
 #if defined(__APCS_26__)
 #error Sorry, your compiler targets APCS-26 but this kernel requires APCS-32
 #endif
-/*
- * GCC 3.0, 3.1: general bad code generation.
- * GCC 3.2.0: incorrect function argument offset calculation.
- * GCC 3.2.x: miscompiles NEW_AUX_ENT in fs/binfmt_elf.c
- *            (http://gcc.gnu.org/PR8896) and incorrect structure
- *	      initialisation in fs/jffs2/erase.c
- */
 #if (__GNUC__ == 3 && __GNUC_MINOR__ < 3)
 #error Your compiler is too buggy; it is known to miscompile kernels.
 #error    Known good compilers: 3.3
@@ -59,6 +50,9 @@ int main(void)
   DEFINE(TI_TP_VALUE,		offsetof(struct thread_info, tp_value));
   DEFINE(TI_FPSTATE,		offsetof(struct thread_info, fpstate));
   DEFINE(TI_VFPSTATE,		offsetof(struct thread_info, vfpstate));
+#ifdef CONFIG_SMP
+  DEFINE(VFP_CPU,		offsetof(union vfp_state, hard.cpu));
+#endif
 #ifdef CONFIG_ARM_THUMBEE
   DEFINE(TI_THUMBEE_STATE,	offsetof(struct thread_info, thumbee_state));
 #endif
@@ -89,6 +83,17 @@ int main(void)
   DEFINE(S_OLD_R0,		offsetof(struct pt_regs, ARM_ORIG_r0));
   DEFINE(S_FRAME_SIZE,		sizeof(struct pt_regs));
   BLANK();
+#ifdef CONFIG_CACHE_L2X0
+  DEFINE(L2X0_R_PHY_BASE,	offsetof(struct l2x0_regs, phy_base));
+  DEFINE(L2X0_R_AUX_CTRL,	offsetof(struct l2x0_regs, aux_ctrl));
+  DEFINE(L2X0_R_TAG_LATENCY,	offsetof(struct l2x0_regs, tag_latency));
+  DEFINE(L2X0_R_DATA_LATENCY,	offsetof(struct l2x0_regs, data_latency));
+  DEFINE(L2X0_R_FILTER_START,	offsetof(struct l2x0_regs, filter_start));
+  DEFINE(L2X0_R_FILTER_END,	offsetof(struct l2x0_regs, filter_end));
+  DEFINE(L2X0_R_PREFETCH_CTRL,	offsetof(struct l2x0_regs, prefetch_ctrl));
+  DEFINE(L2X0_R_PWR_CTRL,	offsetof(struct l2x0_regs, pwr_ctrl));
+  BLANK();
+#endif
 #ifdef CONFIG_CPU_HAS_ASID
   DEFINE(MM_CONTEXT_ID,		offsetof(struct mm_struct, context.id));
   BLANK();

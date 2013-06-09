@@ -1,9 +1,6 @@
 #ifndef __NET_ACT_API_H
 #define __NET_ACT_API_H
 
-/*
- * Public police action API for classifiers/qdiscs
- */
 
 #include <net/sch_generic.h>
 #include <net/pkt_sched.h>
@@ -72,8 +69,8 @@ struct tcf_act_hdr {
 
 struct tc_action {
 	void			*priv;
-	struct tc_action_ops	*ops;
-	__u32			type; /* for backward compat(TCA_OLD_COMPAT) */
+	const struct tc_action_ops	*ops;
+	__u32			type; 
 	__u32			order;
 	struct tc_action	*next;
 };
@@ -83,10 +80,10 @@ struct tc_action_ops {
 	struct tc_action_ops *next;
 	struct tcf_hashinfo *hinfo;
 	char    kind[IFNAMSIZ];
-	__u32   type; /* TBD to match kind */
-	__u32 	capab;  /* capabilities includes 4 bit version */
+	__u32   type; 
+	__u32 	capab;  
 	struct module		*owner;
-	int     (*act)(struct sk_buff *, struct tc_action *, struct tcf_result *);
+	int     (*act)(struct sk_buff *, const struct tc_action *, struct tcf_result *);
 	int     (*get_stats)(struct sk_buff *, struct tc_action *);
 	int     (*dump)(struct sk_buff *, struct tc_action *, int, int);
 	int     (*cleanup)(struct tc_action *, int bind);
@@ -115,12 +112,12 @@ extern void tcf_hash_insert(struct tcf_common *p, struct tcf_hashinfo *hinfo);
 extern int tcf_register_action(struct tc_action_ops *a);
 extern int tcf_unregister_action(struct tc_action_ops *a);
 extern void tcf_action_destroy(struct tc_action *a, int bind);
-extern int tcf_action_exec(struct sk_buff *skb, struct tc_action *a, struct tcf_result *res);
+extern int tcf_action_exec(struct sk_buff *skb, const struct tc_action *a, struct tcf_result *res);
 extern struct tc_action *tcf_action_init(struct nlattr *nla, struct nlattr *est, char *n, int ovr, int bind);
 extern struct tc_action *tcf_action_init_1(struct nlattr *nla, struct nlattr *est, char *n, int ovr, int bind);
 extern int tcf_action_dump(struct sk_buff *skb, struct tc_action *a, int, int);
 extern int tcf_action_dump_old(struct sk_buff *skb, struct tc_action *a, int, int);
 extern int tcf_action_dump_1(struct sk_buff *skb, struct tc_action *a, int, int);
 extern int tcf_action_copy_stats (struct sk_buff *,struct tc_action *, int);
-#endif /* CONFIG_NET_CLS_ACT */
+#endif 
 #endif

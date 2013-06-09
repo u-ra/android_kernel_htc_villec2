@@ -1,6 +1,3 @@
-/*
- *
- */
 #ifndef __LOG_MESSAGE_H__
 #define __LOG_MESSAGE_H__
 
@@ -15,4 +12,6 @@
 #define PR_DISP_CONT(fmt, args...) 		printk(KERN_CONT "[DISP] "fmt, ##args);
 #define PR_DISP_DEBUG(fmt, args...) 		printk(KERN_DEBUG "[DISP] "fmt, ##args);
 
-#endif /* __LOG_MESSAGE_H__ */
+#endif 
+
+

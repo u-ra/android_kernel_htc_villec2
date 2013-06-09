@@ -7,7 +7,6 @@
 #include <stdlib.h>
 #include <string.h>
 
-#define LKC_DIRECT_LINK
 #include "lkc.h"
 
 static char *escape(const char* text, char *bf, int len)
@@ -219,7 +218,7 @@ static void menu__xgettext(void)
 	struct message *m = message__list;
 
 	while (m != NULL) {
-		/* skip empty lines ("") */
+		
 		if (strlen(m->msg) > sizeof("\"\""))
 			message__print_gettext_msgid_msgstr(m);
 		m = m->next;

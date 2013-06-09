@@ -22,9 +22,10 @@
 #include <linux/gfp.h>
 #include <linux/uaccess.h>
 #include <linux/slab.h>
-#include <mach/qdsp6v2_1x/snddev_icodec.h>
-#include <mach/qdsp6v2_1x/snddev_ecodec.h>
-#include <mach/qdsp6v2_1x/audio_dev_ctl.h>
+#include <linux/switch.h>
+#include "qdsp6v2/snddev_icodec.h"
+#include "qdsp6v2/snddev_ecodec.h"
+#include <mach/qdsp6v2/audio_dev_ctl.h>
 #include <mach/htc_acoustic_8x60.h>
 #if defined(CONFIG_HTC_HEADSET_MGR)
 #include <mach/htc_headset_mgr.h>
@@ -33,7 +34,7 @@
 #include <mach/msm_smd.h>
 #include <mach/msm_rpcrouter.h>
 #include "smd_private.h"
-#include <mach/qdsp6v2_1x/q6afe.h>
+#include <sound/q6afe.h>
 
 #define ACOUSTIC_IOCTL_MAGIC 'p'
 #define ACOUSTIC_ADIE_SIZE	_IOW(ACOUSTIC_IOCTL_MAGIC, 15, size_t)
@@ -60,6 +61,7 @@
 #define ACOUSTIC_GET_BEATS_STATE	_IOW(ACOUSTIC_IOCTL_MAGIC, 41, unsigned)
 #define ACOUSTIC_ENABLE_BEATS		_IOW(ACOUSTIC_IOCTL_MAGIC, 42, unsigned)
 #define ACOUSTIC_SET_Q6_EFFECT		_IOW(ACOUSTIC_IOCTL_MAGIC, 43, unsigned)
+#define ACOUSTIC_UPDATE_BEATS_STATUS	_IOW(ACOUSTIC_IOCTL_MAGIC, 47, unsigned)
 
 #define D(fmt, args...) printk(KERN_INFO "[AUD] htc-acoustic: "fmt, ##args)
 #define E(fmt, args...) printk(KERN_ERR "[AUD] htc-acoustic: "fmt, ##args)
@@ -78,6 +80,7 @@ static struct mutex api_lock;
 static struct mutex rpc_connect_lock;
 static struct acoustic_ops default_acoustic_ops;
 static struct acoustic_ops *the_ops = &default_acoustic_ops;
+static struct switch_dev sdev_beats;
 
 struct acdb_id {
 	u32 tx_dev_id;
@@ -175,7 +178,7 @@ acoustic_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 		htc_adie_table = NULL;
 
 		if (!htc_adie_table) {
-			/* allocate 4 pages for adie table*/
+			
 			htc_adie_table = kzalloc(16384, GFP_KERNEL);
 			if (!htc_adie_table) {
 				E("cannot allocate enough memory.\n");
@@ -188,7 +191,7 @@ acoustic_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 		break;
 	case ACOUSTIC_UPDATE_ADIE: {
 		int support_adie = 0;
-		int i, j, setting_sz;
+		u32 i, j, setting_sz;
 		int reg_dev = 0;
 		struct profile_action_info act_info;
 		struct snddev_icodec_state *icodec;
@@ -217,12 +220,10 @@ acoustic_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 			break;
 		}
 
-		/* set un-initialized frequency to default 8K */
+		
 		if (act_info.freq == 0)
 			act_info.freq = 8000;
 
-		/* got registry devices through msm_snddev_* API
-		 * which defined in "audio_dev_ctl.h" */
 		reg_dev = msm_snddev_devcount();
 		for (i = 0; i < reg_dev; i++) {
 			dev_info = audio_dev_ctrl_find_dev(i);
@@ -250,8 +251,6 @@ acoustic_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 						D("Update adie (media) of %s\n", dev_info->name);
 						entry[j].midi_action = htc_adie_ptr;
 						entry[j].midi_action_sz = act_info.act_sz;
-						/* assign new setting pass from user space
-						 * default adie setting is for midi */
 						entry[j].actions = htc_adie_ptr;
 						entry[j].action_sz = act_info.act_sz;
 						}
@@ -269,7 +268,7 @@ acoustic_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 			rc = -EFAULT;
 		}
 
-		/* calculate next address of action presentation */
+		
 		action_offset +=
 			act_info.act_sz * sizeof(struct adie_codec_action_unit);
 		break;
@@ -529,6 +528,24 @@ acoustic_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 			the_ops->set_q6_effect(mode);
 		break;
 	}
+	case ACOUSTIC_UPDATE_BEATS_STATUS: {
+		int new_state = -1;
+
+		if (copy_from_user(&new_state, (void *)arg, sizeof(new_state))) {
+			rc = -EFAULT;
+			break;
+		}
+		D("Update Beats Status : %d\n", new_state);
+		if (new_state < -1 || new_state > 1) {
+			E("Invalid Beats status update");
+			rc = -EINVAL;
+			break;
+		}
+
+		sdev_beats.state = -1;
+		switch_set_state(&sdev_beats, new_state);
+		break;
+	}
 	default:
 		rc = -EINVAL;
 	}
@@ -561,6 +578,10 @@ done:
 	return rc;
 }
 
+static ssize_t beats_print_name(struct switch_dev *sdev, char *buf)
+{
+	return sprintf(buf, "Beats\n");
+}
 
 static struct file_operations acoustic_fops = {
 	.owner = THIS_MODULE,
@@ -648,6 +669,15 @@ static int __init acoustic_init(void)
 	if (ret < 0)
 		goto err_create_class_device;
 
+	sdev_beats.name = "Beats";
+	sdev_beats.print_name = beats_print_name;
+
+	ret = switch_dev_register(&sdev_beats);
+	if (ret < 0) {
+		pr_err("failed to register beats switch device!\n");
+		goto err_create_switch_device;
+	}
+
 #if defined(CONFIG_HTC_HEADSET_MGR)
 	{
 		struct headset_notifier notifier;
@@ -658,7 +688,8 @@ static int __init acoustic_init(void)
 #endif
 
 	return 0;
-
+err_create_switch_device:
+	device_remove_file(acoustic_misc.this_device, &dev_attr_sysattr);
 err_create_class_device:
 	device_destroy(htc_class, 0);
 err_create_class:

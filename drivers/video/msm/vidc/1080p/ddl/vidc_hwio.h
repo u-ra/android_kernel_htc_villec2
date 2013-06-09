@@ -16,18 +16,17 @@
 
 #include "vidc_hwio_reg.h"
 
-/*HTC_START*/
 extern u32 vidc_msg_register;
-#define VIDC_REG_OUT(x...)			\
-	if (vidc_msg_register) {		\
-		printk(KERN_DEBUG x);		\
-	}
+#define VIDC_REG_OUT(x...)          \
+    if (vidc_msg_register) {        \
+        printk(KERN_DEBUG x);       \
+    }
 
-#define VIDC_REG_IN(x...)			\
-	if (vidc_msg_register) {		\
-		printk(KERN_DEBUG x);		\
-	}
-/*HTC_END*/
+#define VIDC_REG_IN(x...)           \
+    if (vidc_msg_register) {        \
+        printk(KERN_DEBUG x);       \
+    }
+
 #define __inpdw(port) __raw_readl(port)
 #define __outpdw(port, val) __raw_writel(val, port)
 

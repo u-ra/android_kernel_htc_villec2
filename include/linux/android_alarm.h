@@ -20,7 +20,7 @@
 #include <linux/time.h>
 
 enum android_alarm_type {
-	/* return code bit numbers or set alarm arg */
+	
 	ANDROID_ALARM_RTC_WAKEUP,
 	ANDROID_ALARM_RTC,
 	ANDROID_ALARM_ELAPSED_REALTIME_WAKEUP,
@@ -29,8 +29,8 @@ enum android_alarm_type {
 
 	ANDROID_ALARM_TYPE_COUNT,
 
-	/* return code bit numbers */
-	/* ANDROID_ALARM_TIME_CHANGE = 16 */
+	
+	
 };
 
 #ifdef __KERNEL__
@@ -38,24 +38,7 @@ enum android_alarm_type {
 #include <linux/ktime.h>
 #include <linux/rbtree.h>
 
-/*
- * The alarm interface is similar to the hrtimer interface but adds support
- * for wakeup from suspend. It also adds an elapsed realtime clock that can
- * be used for periodic timers that need to keep runing while the system is
- * suspended and not be disrupted when the wall time is set.
- */
 
-/**
- * struct alarm - the basic alarm structure
- * @node:	red black tree node for time ordered insertion
- * @type:	alarm type. rtc/elapsed-realtime/systemtime, wakeup/non-wakeup.
- * @softexpires: the absolute earliest expiry time of the alarm.
- * @expires:	the absolute expiry time.
- * @function:	alarm expiry callback function
- *
- * The alarm structure must be initialized by alarm_init()
- *
- */
 
 struct alarm {
 	struct rb_node 		node;
@@ -72,7 +55,6 @@ int alarm_try_to_cancel(struct alarm *alarm);
 int alarm_cancel(struct alarm *alarm);
 ktime_t alarm_get_elapsed_realtime(void);
 
-/* set rtc while preserving elapsed realtime */
 int alarm_set_rtc(const struct timespec ts);
 void alarm_update_timedelta(struct timespec tv, struct timespec ts);
 
@@ -89,18 +71,11 @@ enum android_alarm_return_flags {
 	ANDROID_ALARM_TIME_CHANGE_MASK = 1U << 16
 };
 
-/* Disable alarm */
 #define ANDROID_ALARM_CLEAR(type)           _IO('a', 0 | ((type) << 4))
 
-/* Ack last alarm and wait for next */
 #define ANDROID_ALARM_WAIT                  _IO('a', 1)
 
-#ifdef CONFIG_ANDROID_RTC_CHANGE_WAIT
-#define ANDROID_RTC_CHANGE_WAIT             _IO('a', 2)
-#endif
-
 #define ALARM_IOW(c, type, size)            _IOW('a', (c) | ((type) << 4), size)
-/* Set alarm */
 #define ANDROID_ALARM_SET(type)             ALARM_IOW(2, type, struct timespec)
 #define ANDROID_ALARM_SET_AND_WAIT(type)    ALARM_IOW(3, type, struct timespec)
 #define ANDROID_ALARM_GET_TIME(type)        ALARM_IOW(4, type, struct timespec)

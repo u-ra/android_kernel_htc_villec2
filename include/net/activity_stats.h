@@ -22,4 +22,4 @@ void activity_stats_update(void);
 #define activity_stats_update(void) {}
 #endif
 
-#endif /* _NET_ACTIVITY_STATS_H */
+#endif 

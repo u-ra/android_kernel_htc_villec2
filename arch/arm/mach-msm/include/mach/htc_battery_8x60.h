@@ -16,7 +16,6 @@
 
 #define ADC_REPLY_ARRAY_SIZE		5
 
-/* ioctl define */
 #define HTC_BATT_IOCTL_MAGIC		0xba
 
 #define DEBUG_LOG_LENGTH		1024
@@ -72,7 +71,6 @@ struct battery_vol_alarm {
 	int enable;
 };
 
-/* information about the system we're running on */
 extern unsigned int system_rev;
 
 enum {

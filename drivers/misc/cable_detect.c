@@ -39,7 +39,7 @@
 #endif
 
 #ifdef CONFIG_FB_MSM_HDMI_MHL_SII9234
-#include "../video/msm_8x60/sii9234/TPI.h"
+#include "../video/msm/sii9234/TPI.h"
 #endif
 
 #ifdef CONFIG_INTERNAL_CHARGING_SUPPORT
@@ -58,7 +58,7 @@ struct cable_detect_info {
 	int vbus_mpp_gpio;
 	int vbus_mpp_irq;
 	enum usb_connect_type connect_type;
-	/*for accessory*/
+	
 	int usb_id_pin_gpio;
 	__u8 detect_type;
 	__u8 accessory_type;
@@ -96,9 +96,6 @@ struct cable_detect_info {
 } the_cable_info;
 
 
-/* ---------------------------------------------------------------------------
-			Routine prototype
------------------------------------------------------------------------------*/
 static irqreturn_t vbus_irq_handler(int irq, void *dev_id);
 #ifdef CONFIG_CABLE_DETECT_ACCESSORY
 static int cable_detect_get_adc(void);
@@ -148,8 +145,8 @@ static void send_cable_connect_notify(int cable_type)
 			if (notifier->func != NULL) {
 				CABLE_INFO("Send to: %s, type %d\n",
 						notifier->name, cable_type);
-				/* Notify other drivers about connect type. */
-				/* use slow charging for unknown type*/
+				
+				
 				notifier->func(cable_type);
 			}
 		}
@@ -182,8 +179,8 @@ static void send_usb_host_connect_notify(int cable_in)
 		if (notifier->func != NULL) {
 			CABLE_INFO("[HostNotify] Send to: %s: %d\n",
 					notifier->name, cable_in);
-			/* Notify other drivers about connect type. */
-			/* use slow charging for unknown type*/
+			
+			
 			notifier->func(cable_in);
 		}
 	}
@@ -207,6 +204,7 @@ static void check_vbus_in(struct work_struct *w)
 {
 	int vbus_in;
 	int level;
+	static int isInitial = 1; 
 	struct cable_detect_info *pInfo = container_of(
 			w, struct cable_detect_info, vbus_detect_work.work);
 
@@ -226,10 +224,9 @@ static void check_vbus_in(struct work_struct *w)
 			&pInfo->cable_detect_work, ADC_DELAY);
 	}
 #endif
-
-	if (vbus != vbus_in) {
+	if (vbus != vbus_in || isInitial) {
 		vbus = vbus_in;
-
+		isInitial = 0;
 		if (pInfo->usb_uart_switch)
 			pInfo->usb_uart_switch(!vbus);
 		msm_otg_set_vbus_state(vbus_in);
@@ -246,7 +243,7 @@ static void check_vbus_in(struct work_struct *w)
 
 				if (cancel_delayed_work_sync(&pInfo->dock_work)) {
 					if (pInfo->dock_pin_state == 0)
-						set_irq_type(pInfo->dockpin_irq,
+						irq_set_irq_type(pInfo->dockpin_irq,
 							IRQF_TRIGGER_LOW);
 				}
 				if (pInfo->accessory_type == DOCK_STATE_DESK) {
@@ -323,7 +320,7 @@ static void cable_detect_handler(struct work_struct *w)
 		return;
 #ifdef CONFIG_FB_MSM_HDMI_MHL_SII9234
 	if (pInfo->mhl_reset_gpio != 0)
-		gpio_set_value(pInfo->mhl_reset_gpio, 0); /* Reset Low */
+		gpio_set_value(pInfo->mhl_reset_gpio, 0); 
 #endif
 	if (pInfo->detect_type == CABLE_TYPE_PMIC_ADC) {
 		accessory_type = cable_detect_get_type(pInfo);
@@ -337,7 +334,7 @@ static void cable_detect_handler(struct work_struct *w)
 
 #ifdef CONFIG_FB_MSM_HDMI_MHL_SII9234
 	if (pInfo->mhl_reset_gpio != 0)
-		gpio_set_value(pInfo->mhl_reset_gpio, 1); /* Reset High */
+		gpio_set_value(pInfo->mhl_reset_gpio, 1); 
 
 	if (accessory_type != DOCK_STATE_MHL)
 		D2ToD3();
@@ -444,10 +441,10 @@ static void cable_detect_handler(struct work_struct *w)
 		return;
 #endif
 	if (pInfo->accessory_type == DOCK_STATE_UNDOCKED)
-		set_irq_type(pInfo->idpin_irq,
+		irq_set_irq_type(pInfo->idpin_irq,
 			value ? IRQF_TRIGGER_LOW : IRQF_TRIGGER_HIGH);
 	else
-		set_irq_type(pInfo->idpin_irq, IRQF_TRIGGER_HIGH);
+		irq_set_irq_type(pInfo->idpin_irq, IRQF_TRIGGER_HIGH);
 
 	enable_irq(pInfo->idpin_irq);
 #if 0
@@ -471,11 +468,10 @@ static int cable_detect_get_adc(void)
 	int mean_adc;
 	int adc[5];
 	int i, ret = 0;
-	int result; /*adc = 1250 * mean_adc / mean_vref*/
+	int result; 
 
 	result = 0;
 	mean_adc = 0;
-
 	ret = pm8058_htc_config_mpp_and_adc_read(
 				adc, 5,
 				CHANNEL_ADC_BATT_THERM,
@@ -564,7 +560,7 @@ static ssize_t dock_status_show(struct device *dev,
 
 	if (pInfo->accessory_type == 1)
 		return sprintf(buf, "online\n");
-	else if (pInfo->accessory_type == 3) /*desk dock*/
+	else if (pInfo->accessory_type == 3) 
 		return sprintf(buf, "online\n");
 	else
 		return sprintf(buf, "offline\n");
@@ -657,7 +653,7 @@ static void mhl_status_notifier_func(bool isMHL, int charging_type)
 #ifdef MHL_REDETECT
 		if (mhl_connected == 0) {
 			CABLE_INFO("MHL re-detect\n");
-			set_irq_type(pInfo->idpin_irq,
+			irq_set_irq_type(pInfo->idpin_irq,
 				id_pin ? IRQF_TRIGGER_LOW : IRQF_TRIGGER_HIGH);
 			pInfo->cable_redetect = 1;
 		}
@@ -670,7 +666,7 @@ static void mhl_status_notifier_func(bool isMHL, int charging_type)
 		return;
 	} else {
 		mhl_connected = 1;
-		set_irq_type(pInfo->idpin_irq,
+		irq_set_irq_type(pInfo->idpin_irq,
 			id_pin ? IRQF_TRIGGER_LOW : IRQF_TRIGGER_HIGH);
 
 		send_cable_connect_notify(charging_type);
@@ -688,8 +684,8 @@ static struct t_mhl_status_notifier mhl_status_notifier = {
 	.name = "mhl_detect",
 	.func = mhl_status_notifier_func,
 };
-#endif /*CONFIG_FB_MSM_HDMI_MHL_SII9234*/
-#endif /*CONFIG_CABLE_DETECT_ACCESSORY*/
+#endif 
+#endif 
 
 #ifdef CONFIG_CABLE_DETECT_GPIO_DOCK
 static irqreturn_t dock_interrupt(int irq, void *data)
@@ -708,9 +704,9 @@ static void dock_isr_work(struct work_struct *w)
 	pInfo->dock_pin_state = gpio_get_value(pInfo->dock_pin_gpio);
 
 	if (pInfo->dock_pin_state == 1)
-		set_irq_type(pInfo->dockpin_irq, IRQF_TRIGGER_LOW);
+		irq_set_irq_type(pInfo->dockpin_irq, IRQF_TRIGGER_LOW);
 	else
-		set_irq_type(pInfo->dockpin_irq, IRQF_TRIGGER_HIGH);
+		irq_set_irq_type(pInfo->dockpin_irq, IRQF_TRIGGER_HIGH);
 	queue_delayed_work(pInfo->cable_detect_wq,
 			&pInfo->dock_work, DOCK_DET_DELAY);
 	enable_irq(pInfo->dockpin_irq);
@@ -731,14 +727,14 @@ static void dock_detect_work(struct work_struct *w)
 	if (value == 0 && vbus) {
 		if (pInfo->accessory_type == DOCK_STATE_DESK)
 			return;
-		set_irq_type(pInfo->dockpin_irq, IRQF_TRIGGER_HIGH);
+		irq_set_irq_type(pInfo->dockpin_irq, IRQF_TRIGGER_HIGH);
 		switch_set_state(&dock_switch, DOCK_STATE_DESK);
 		pInfo->accessory_type = DOCK_STATE_DESK;
 		CABLE_INFO("dock: set state %d\n", DOCK_STATE_DESK);
 	} else {
 		if (pInfo->accessory_type == DOCK_STATE_UNDOCKED)
 			return;
-		set_irq_type(pInfo->dockpin_irq, IRQF_TRIGGER_LOW);
+		irq_set_irq_type(pInfo->dockpin_irq, IRQF_TRIGGER_LOW);
 		switch_set_state(&dock_switch, DOCK_STATE_UNDOCKED);
 		pInfo->accessory_type = DOCK_STATE_UNDOCKED;
 		CABLE_INFO("dock: set state %d\n", DOCK_STATE_UNDOCKED);
@@ -886,7 +882,6 @@ static int cable_detect_probe(struct platform_device *pdev)
 			CABLE_ERR("usb: fail to create workqueue\n");
 			return -ENOMEM;
 		}
-
 		pdata->vbus_mpp_config();
 #if 0
 		wake_lock_init(&pInfo->vbus_wlock,
@@ -971,7 +966,7 @@ static irqreturn_t vbus_irq_handler(int irq, void *dev_id)
 
 struct platform_driver cable_detect_driver = {
 	.probe = cable_detect_probe,
-	/*.remove = __devexit_p(vbus_cable_detect_remove),*/
+	
 	.driver = {
 		.name	= "cable_detect",
 		.owner = THIS_MODULE,
@@ -990,11 +985,11 @@ static void usb_status_notifier_func(int cable_type)
 	} else if (pInfo->accessory_adc > 0 && pInfo->accessory_adc < 150) {
 		pInfo->connect_type = cable_type;
 		send_cable_connect_notify(cable_type);
-		/*enable MHL*/
+		
 		gpio_set_value(pInfo->mhl_usb_sel_gpio, 1);
 		gpio_set_value(pInfo->mhl_reset_gpio, 1);
 	} else if (cable_type == CONNECT_TYPE_NONE) {
-		/*disable MHL*/
+		
 		gpio_set_value(pInfo->mhl_usb_sel_gpio, 0);
 		gpio_set_value(pInfo->mhl_reset_gpio, 0);
 		pInfo->connect_type = cable_type;
@@ -1033,7 +1028,7 @@ static int __init cable_detect_init(void)
 {
 	vbus = 0;
 	the_cable_info.connect_type = CONNECT_TYPE_NONE;
-	usb_register_notifier(&usb_status_notifier);
+	htc_usb_register_notifier(&usb_status_notifier);
 
 #if (defined(CONFIG_CABLE_DETECT_ACCESSORY) && defined(CONFIG_FB_MSM_HDMI_MHL_SII9234))
 		mhl_detect_register_notifier(&mhl_status_notifier);

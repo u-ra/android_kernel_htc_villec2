@@ -1,4 +1,4 @@
-/* Copyright (c) 2010-2011, Code Aurora Forum. All rights reserved.
+/* Copyright (c) 2010-2012, Code Aurora Forum. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -201,6 +201,7 @@ static u32 ddl_set_dec_property(struct ddl_client_context *ddl,
 			decoder->dynamic_prop_change |=
 				DDL_DEC_REQ_OUTPUT_FLUSH;
 			decoder->dpb_mask.client_mask = 0;
+			decoder->field_needed_for_prev_ip = 0;
 			vcd_status = VCD_S_SUCCESS;
 		}
 	break;
@@ -292,6 +293,11 @@ static u32 ddl_set_dec_property(struct ddl_client_context *ddl,
 				frame_size->width, frame_size->height);
 			vcd_status = VCD_S_SUCCESS;
 		}
+	}
+	break;
+	case VCD_I_SET_TURBO_CLK:
+	{
+		vcd_status = VCD_S_SUCCESS;
 	}
 	break;
 	case VCD_I_BUFFER_FORMAT:
@@ -433,6 +439,9 @@ static u32 ddl_set_dec_property(struct ddl_client_context *ddl,
 		}
 	}
 	break;
+	case VCD_REQ_PERF_LEVEL:
+		vcd_status = VCD_S_SUCCESS;
+		break;
 	default:
 		vcd_status = VCD_ERR_ILLEGAL_OP;
 		break;
@@ -932,11 +941,7 @@ static u32 ddl_set_enc_property(struct ddl_client_context *ddl,
 	}
 	case VCD_I_METADATA_ENABLE:
 	case VCD_I_METADATA_HEADER:
-        DDL_MSG_ERROR("Meta Data Interface is Requested");
-        vcd_status = ddl_set_metadata_params(ddl, property_hdr,
-            property_value);
-        vcd_status = VCD_S_SUCCESS;
-/*		DDL_MSG_LOW("Meta Data Interface is Requested");
+		DDL_MSG_LOW("Meta Data Interface is Requested");
 		if (!res_trk_check_for_sec_session()) {
 			if (!encoder->slice_delivery_info.enable) {
 				vcd_status = ddl_set_metadata_params(ddl,
@@ -950,11 +955,26 @@ static u32 ddl_set_enc_property(struct ddl_client_context *ddl,
 			DDL_MSG_ERROR("Meta Data Interface is not "
 				"supported in secure session");
 			vcd_status = VCD_ERR_ILLEGAL_OP;
-		}*/
+		}
 	break;
 	case VCD_I_META_BUFFER_MODE:
 		vcd_status = VCD_S_SUCCESS;
 		break;
+	case VCD_I_ENABLE_SPS_PPS_FOR_IDR:
+	{
+		struct vcd_property_sps_pps_for_idr_enable *sps_pps =
+		(struct vcd_property_sps_pps_for_idr_enable *) property_value;
+
+		if ((sizeof(struct vcd_property_sps_pps_for_idr_enable)) ==
+		property_hdr->sz) {
+			DDL_MSG_LOW("SPS PPS generation for IDR Encode "
+				"is Requested");
+			encoder->sps_pps.sps_pps_for_idr_enable_flag =
+			sps_pps->sps_pps_for_idr_enable_flag;
+			vcd_status = VCD_S_SUCCESS;
+		}
+		break;
+	}
 	case VCD_I_SLICE_DELIVERY_MODE:
 	{
 		size_t output_buf_size;
@@ -969,8 +989,7 @@ static u32 ddl_set_enc_property(struct ddl_client_context *ddl,
 			DDLCLIENT_STATE_IS(ddl, DDL_CLIENT_OPEN)) {
 			encoder->slice_delivery_info.enable
 				= *(u32 *)property_value;
-			DDL_MSG_HIGH("set encoder->slice_delivery_mode"
-				"  = %u\n",
+			DDL_MSG_HIGH("set encoder->slice_delivery_mode = %u\n",
 				encoder->slice_delivery_info.enable);
 			output_buf_size =
 				encoder->client_output_buf_req.sz;
@@ -984,8 +1003,26 @@ static u32 ddl_set_enc_property(struct ddl_client_context *ddl,
 			encoder->slice_delivery_info.num_slices =
 				num_slices;
 			if (num_slices <= DDL_MAX_NUM_BFRS_FOR_SLICE_BATCH) {
-				encoder->client_output_buf_req.min_count
-				= ((DDL_ENC_SLICE_BATCH_FACTOR * num_slices + 2)
+				DDL_MSG_HIGH("%s: currently slice info "
+					"metadata is not supported when slice "
+					"delivery mode is enabled. hence "
+					"disabling slice info metadata.\n",
+					__func__);
+				slice_property_hdr.prop_id =
+					VCD_I_METADATA_ENABLE;
+				slice_property_hdr.sz =
+					sizeof(struct \
+					vcd_property_meta_data_enable);
+				ddl_get_metadata_params(ddl,
+						&slice_property_hdr,
+						&slice_meta_data);
+				slice_meta_data.meta_data_enable_flag
+					&= ~VCD_METADATA_ENC_SLICE;
+				ddl_set_metadata_params(ddl,
+						&slice_property_hdr,
+						&slice_meta_data);
+				encoder->client_output_buf_req.min_count =
+				((DDL_ENC_SLICE_BATCH_FACTOR * num_slices + 2)
 				> DDL_MAX_BUFFER_COUNT)
 				? DDL_MAX_BUFFER_COUNT :
 				(DDL_ENC_SLICE_BATCH_FACTOR * num_slices + 2);
@@ -1002,23 +1039,19 @@ static u32 ddl_set_enc_property(struct ddl_client_context *ddl,
 				encoder->client_output_buf_req.min_count,
 				output_buf_size,
 				encoder->client_output_buf_req.sz);
-				slice_property_hdr.prop_id =
-					VCD_I_METADATA_ENABLE;
-				slice_property_hdr.sz =
-				sizeof(struct vcd_property_meta_data_enable);
-				ddl_get_metadata_params(ddl,
-						&slice_property_hdr,
-						&slice_meta_data);
-				slice_meta_data.meta_data_enable_flag
-					&= ~VCD_METADATA_ENC_SLICE;
-				ddl_set_metadata_params(ddl,
-						&slice_property_hdr,
-						&slice_meta_data);
 				vcd_status = VCD_S_SUCCESS;
 			}
 		}
 		break;
 	}
+	case VCD_REQ_PERF_LEVEL:
+		vcd_status = VCD_S_SUCCESS;
+		break;
+    case VCD_I_SET_TURBO_CLK:
+    {
+        vcd_status = VCD_S_SUCCESS;
+        break;
+    }
 	default:
 		DDL_MSG_ERROR("INVALID ID %d\n", (int)property_hdr->prop_id);
 		vcd_status = VCD_ERR_ILLEGAL_OP;
@@ -1486,6 +1519,14 @@ static u32 ddl_get_enc_property(struct ddl_client_context *ddl,
 			property_value);
 		vcd_status = VCD_S_SUCCESS;
 	break;
+	case VCD_I_ENABLE_SPS_PPS_FOR_IDR:
+		if (sizeof(struct vcd_property_sps_pps_for_idr_enable) ==
+			property_hdr->sz) {
+			*(struct vcd_property_sps_pps_for_idr_enable *)
+				property_value = encoder->sps_pps;
+			vcd_status = VCD_S_SUCCESS;
+		}
+	break;
 	case VCD_I_SLICE_DELIVERY_MODE:
 		if (sizeof(struct vcd_property_slice_delivery_info) ==
 			property_hdr->sz) {
@@ -1564,6 +1605,7 @@ static u32 ddl_set_enc_dynamic_property(struct ddl_client_context *ddl,
 			vcd_status = VCD_S_SUCCESS;
 		}
 	}
+	break;
 	case VCD_I_INTRA_REFRESH:
 	{
 		struct vcd_property_intra_refresh_mb_number
@@ -1721,9 +1763,7 @@ static void ddl_set_default_enc_rc_params(
 	encoder->rc_level.frame_level_rc = true;
 	encoder->qp_range.min_qp = 0x1;
 	if (codec == VCD_CODEC_H264) {
-/*HTC_START*/
-		encoder->qp_range.min_qp = 0x5;
-/*HTC_END*/
+		encoder->qp_range.min_qp = 0x4;
 		encoder->qp_range.max_qp = 0x33;
 		encoder->session_qp.i_frame_qp = 0x14;
 		encoder->session_qp.p_frame_qp = 0x14;
@@ -1831,7 +1871,7 @@ u32 ddl_set_default_decoder_buffer_req(struct ddl_decoder_data *decoder,
 		if (!decoder->cont_mode)
 			min_dpb = ddl_decoder_min_num_dpb(decoder);
 		else
-			min_dpb = 5;
+			min_dpb = res_trk_get_min_dpb_count();
 		frame_size = &decoder->client_frame_size;
 		output_buf_req = &decoder->client_output_buf_req;
 		input_buf_req = &decoder->client_input_buf_req;
@@ -1844,11 +1884,24 @@ u32 ddl_set_default_decoder_buffer_req(struct ddl_decoder_data *decoder,
 		output_buf_req = &decoder->actual_output_buf_req;
 		input_buf_req = &decoder->actual_input_buf_req;
 		min_dpb = decoder->min_dpb_num;
-		y_cb_cr_size = decoder->y_cb_cr_size;
+		if ((decoder->buf_format.buffer_format ==
+			VCD_BUFFER_FORMAT_TILE_4x2) &&
+			(frame_size->height < MDP_MIN_TILE_HEIGHT)) {
+			frame_size->height = MDP_MIN_TILE_HEIGHT;
+			ddl_calculate_stride(frame_size,
+				!decoder->progressive_only);
+			y_cb_cr_size = ddl_get_yuv_buffer_size(
+				frame_size,
+				&decoder->buf_format,
+				(!decoder->progressive_only),
+				decoder->hdr.decoding, NULL);
+			decoder->y_cb_cr_size = y_cb_cr_size;
+		} else
+			y_cb_cr_size = decoder->y_cb_cr_size;
 	}
 	memset(output_buf_req, 0,
 		sizeof(struct vcd_buffer_requirement));
-	if (!estimate && !decoder->idr_only_decoding && !decoder->cont_mode)
+	if (!decoder->idr_only_decoding && !decoder->cont_mode)
 		output_buf_req->actual_count = min_dpb + 4;
 	else
 		output_buf_req->actual_count = min_dpb;
@@ -1945,7 +1998,7 @@ static u32 ddl_valid_buffer_requirement(struct vcd_buffer_requirement
 		req_buf_req->actual_count &&
 		!((original_buf_req->align - (u32)0x1) &
 		req_buf_req->align) &&
-		/*original_buf_req->align <= req_buf_req->align,*/
+		
 		original_buf_req->sz <= req_buf_req->sz)
 		status = true;
 	else {
@@ -2066,5 +2119,6 @@ void ddl_set_initial_default_values(struct ddl_client_context *ddl)
 		encoder->frame_rate.fps_numerator = DDL_INITIAL_FRAME_RATE;
 		encoder->frame_rate.fps_denominator = 1;
 		ddl_set_default_enc_property(ddl);
+		encoder->sps_pps.sps_pps_for_idr_enable_flag = false;
 	}
 }

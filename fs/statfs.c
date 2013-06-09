@@ -1,5 +1,5 @@
 #include <linux/syscalls.h>
-#include <linux/module.h>
+#include <linux/export.h>
 #include <linux/fs.h>
 #include <linux/file.h>
 #include <linux/mount.h>
@@ -7,6 +7,7 @@
 #include <linux/statfs.h>
 #include <linux/security.h>
 #include <linux/uaccess.h>
+#include "internal.h"
 
 static int flags_by_mnt(int mnt_flags)
 {
@@ -45,7 +46,7 @@ static int calculate_f_flags(struct vfsmount *mnt)
 		flags_by_sb(mnt->mnt_sb->s_flags);
 }
 
-int statfs_by_dentry(struct dentry *dentry, struct kstatfs *buf)
+static int statfs_by_dentry(struct dentry *dentry, struct kstatfs *buf)
 {
 	int retval;
 
@@ -66,9 +67,22 @@ int vfs_statfs(struct path *path, struct kstatfs *buf)
 {
 	int error;
 
+	ktime_t statfs_t, statfs_diff;
+	char pathname[256], *statfs_path;
+	if (path) {
+		statfs_path = d_path(path, pathname, sizeof(pathname));
+		if (IS_ERR(statfs_path))
+			statfs_path = "(unknown)";
+	} else
+		statfs_path = "(unknown)";
+
+	statfs_t = ktime_get();
 	error = statfs_by_dentry(path->dentry, buf);
 	if (!error)
 		buf->f_flags = calculate_f_flags(path->mnt);
+	statfs_diff = ktime_sub(ktime_get(), statfs_t);
+	if (ktime_to_ns(statfs_diff) >= 5000000000LL)
+		pr_info("VFS: %s pid:%d(%s)(parent:%d/%s) takes %lld nsec to statfs %s.\n", __func__, current->pid, current->comm, current->parent->pid, current->parent->comm, ktime_to_ns(statfs_diff), statfs_path);
 	return error;
 }
 EXPORT_SYMBOL(vfs_statfs);
@@ -107,10 +121,6 @@ static int do_statfs_native(struct kstatfs *st, struct statfs __user *p)
 			     st->f_bsize | st->f_frsize) &
 			    0xffffffff00000000ULL)
 				return -EOVERFLOW;
-			/*
-			 * f_files and f_ffree may be -1; it's okay to stuff
-			 * that into 32 bits
-			 */
 			if (st->f_files != -1 &&
 			    (st->f_files & 0xffffffff00000000ULL))
 				return -EOVERFLOW;
@@ -205,19 +215,23 @@ SYSCALL_DEFINE3(fstatfs64, unsigned int, fd, size_t, sz, struct statfs64 __user 
 	return error;
 }
 
-SYSCALL_DEFINE2(ustat, unsigned, dev, struct ustat __user *, ubuf)
+int vfs_ustat(dev_t dev, struct kstatfs *sbuf)
 {
-	struct super_block *s;
-	struct ustat tmp;
-	struct kstatfs sbuf;
+	struct super_block *s = user_get_super(dev);
 	int err;
-
-	s = user_get_super(new_decode_dev(dev));
 	if (!s)
 		return -EINVAL;
 
-	err = statfs_by_dentry(s->s_root, &sbuf);
+	err = statfs_by_dentry(s->s_root, sbuf);
 	drop_super(s);
+	return err;
+}
+
+SYSCALL_DEFINE2(ustat, unsigned, dev, struct ustat __user *, ubuf)
+{
+	struct ustat tmp;
+	struct kstatfs sbuf;
+	int err = vfs_ustat(new_decode_dev(dev), &sbuf);
 	if (err)
 		return err;
 

@@ -9,6 +9,7 @@
  *
  */
 
+#include <linux/module.h>
 #include <linux/kernel.h>
 #include <linux/init.h>
 #include <linux/platform_device.h>
@@ -17,7 +18,6 @@
 
 #define ATAG_BT_DEBUG
 
-/* configuration tags specific to Bluetooth*/
 #define ATAG_BLUETOOTH 0x43294329
 #define MAX_BT_SIZE 0x8U
 
@@ -61,7 +61,7 @@ void bt_export_bd_address(void)
 			cTemp[0], cTemp[1], cTemp[2],
 			cTemp[3], cTemp[4], cTemp[5]);
 
-	printk(KERN_INFO "BD_ADDRESS=%s\n", bdaddress);
+	printk(KERN_INFO "YoYo--BD_ADDRESS=%s\n", bdaddress);
 }
 module_param_string(bdaddress, bdaddress, sizeof(bdaddress), S_IWUSR | S_IRUGO);
 MODULE_PARM_DESC(bdaddress, "BT MAC ADDRESS");

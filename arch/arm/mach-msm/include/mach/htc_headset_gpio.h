@@ -21,6 +21,7 @@
 #define HTC_HEADSET_GPIO_H
 
 struct htc_headset_gpio_platform_data {
+	unsigned int uart_gpio;
 	unsigned int hpin_gpio;
 	unsigned int key_gpio;
 	unsigned int key_enable_gpio;

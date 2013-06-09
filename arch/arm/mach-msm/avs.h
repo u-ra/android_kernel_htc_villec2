@@ -14,7 +14,7 @@
 #ifndef AVS_H
 #define AVS_H
 
-#define VOLTAGE_MIN  1000 /* mV */
+#define VOLTAGE_MIN  1000 
 #define VOLTAGE_MAX  1250
 #define VOLTAGE_STEP 25
 
@@ -23,7 +23,6 @@ void __exit avs_exit(void);
 
 int avs_adjust_freq(u32 freq_index, int begin);
 
-/* Routines exported from avs_hw.S */
 #ifdef CONFIG_MSM_CPU_AVS
 u32 avs_test_delays(void);
 #else
@@ -51,7 +50,6 @@ static inline void avs_set_tscsr(u32 to_tscsr) {}
 static inline void avs_disable(void) {}
 #endif
 
-/*#define AVSDEBUG(x...) pr_info("AVS: " x);*/
 #define AVSDEBUG(...)
 
 #define AVS_DISABLE(cpu) do {			\
@@ -66,4 +64,4 @@ static inline void avs_disable(void) {}
 		put_cpu();			\
 	} while (0);
 
-#endif /* AVS_H */
+#endif 

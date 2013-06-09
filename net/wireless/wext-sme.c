@@ -5,10 +5,12 @@
  * Copyright (C) 2009   Intel Corporation. All rights reserved.
  */
 
+#include <linux/export.h>
 #include <linux/etherdevice.h>
 #include <linux/if_arp.h>
 #include <linux/slab.h>
 #include <net/cfg80211.h>
+#include <net/cfg80211-wext.h>
 #include "wext-compat.h"
 #include "nl80211.h"
 
@@ -27,6 +29,9 @@ int cfg80211_mgd_wext_connect(struct cfg80211_registered_device *rdev,
 
 	wdev->wext.connect.ie = wdev->wext.ie;
 	wdev->wext.connect.ie_len = wdev->wext.ie_len;
+
+	
+	wdev->wext.connect.bg_scan_period = -1;
 
 	if (wdev->wext.keys) {
 		wdev->wext.keys->def = wdev->wext.default_key;
@@ -66,7 +71,7 @@ int cfg80211_mgd_wext_siwfreq(struct net_device *dev,
 	struct ieee80211_channel *chan = NULL;
 	int err, freq;
 
-	/* call only for station! */
+	
 	if (WARN_ON(wdev->iftype != NL80211_IFTYPE_STATION))
 		return -EINVAL;
 
@@ -94,7 +99,7 @@ int cfg80211_mgd_wext_siwfreq(struct net_device *dev,
 			goto out;
 		}
 
-		/* if SSID set, we'll try right again, avoid event */
+		
 		if (wdev->wext.connect.ssid_len)
 			event = false;
 		err = __cfg80211_disconnect(rdev, dev,
@@ -106,7 +111,7 @@ int cfg80211_mgd_wext_siwfreq(struct net_device *dev,
 
 	wdev->wext.connect.channel = chan;
 
-	/* SSID is not set, we just want to switch channel */
+	
 	if (chan && !wdev->wext.connect.ssid_len) {
 		err = cfg80211_set_freq(rdev, wdev, freq, NL80211_CHAN_NO_HT);
 		goto out;
@@ -127,7 +132,7 @@ int cfg80211_mgd_wext_giwfreq(struct net_device *dev,
 	struct wireless_dev *wdev = dev->ieee80211_ptr;
 	struct ieee80211_channel *chan = NULL;
 
-	/* call only for station! */
+	
 	if (WARN_ON(wdev->iftype != NL80211_IFTYPE_STATION))
 		return -EINVAL;
 
@@ -144,7 +149,7 @@ int cfg80211_mgd_wext_giwfreq(struct net_device *dev,
 		return 0;
 	}
 
-	/* no channel if not joining */
+	
 	return -EINVAL;
 }
 
@@ -157,14 +162,14 @@ int cfg80211_mgd_wext_siwessid(struct net_device *dev,
 	size_t len = data->length;
 	int err;
 
-	/* call only for station! */
+	
 	if (WARN_ON(wdev->iftype != NL80211_IFTYPE_STATION))
 		return -EINVAL;
 
 	if (!data->flags)
 		len = 0;
 
-	/* iwconfig uses nul termination in SSID.. */
+	
 	if (len > 0 && ssid[len - 1] == '\0')
 		len--;
 
@@ -182,7 +187,7 @@ int cfg80211_mgd_wext_siwessid(struct net_device *dev,
 		    memcmp(wdev->wext.connect.ssid, ssid, len) == 0)
 			goto out;
 
-		/* if SSID set now, we'll try to connect, avoid event */
+		
 		if (len)
 			event = false;
 		err = __cfg80211_disconnect(rdev, dev,
@@ -214,7 +219,7 @@ int cfg80211_mgd_wext_giwessid(struct net_device *dev,
 {
 	struct wireless_dev *wdev = dev->ieee80211_ptr;
 
-	/* call only for station! */
+	
 	if (WARN_ON(wdev->iftype != NL80211_IFTYPE_STATION))
 		return -EINVAL;
 
@@ -248,14 +253,14 @@ int cfg80211_mgd_wext_siwap(struct net_device *dev,
 	u8 *bssid = ap_addr->sa_data;
 	int err;
 
-	/* call only for station! */
+	
 	if (WARN_ON(wdev->iftype != NL80211_IFTYPE_STATION))
 		return -EINVAL;
 
 	if (ap_addr->sa_family != ARPHRD_ETHER)
 		return -EINVAL;
 
-	/* automatic mode */
+	
 	if (is_zero_ether_addr(bssid) || is_broadcast_ether_addr(bssid))
 		bssid = NULL;
 
@@ -265,11 +270,11 @@ int cfg80211_mgd_wext_siwap(struct net_device *dev,
 
 	if (wdev->sme_state != CFG80211_SME_IDLE) {
 		err = 0;
-		/* both automatic */
+		
 		if (!bssid && !wdev->wext.connect.bssid)
 			goto out;
 
-		/* fixed already - and no change */
+		
 		if (wdev->wext.connect.bssid && bssid &&
 		    compare_ether_addr(bssid, wdev->wext.connect.bssid) == 0)
 			goto out;
@@ -300,7 +305,7 @@ int cfg80211_mgd_wext_giwap(struct net_device *dev,
 {
 	struct wireless_dev *wdev = dev->ieee80211_ptr;
 
-	/* call only for station! */
+	
 	if (WARN_ON(wdev->iftype != NL80211_IFTYPE_STATION))
 		return -EINVAL;
 
@@ -333,7 +338,7 @@ int cfg80211_wext_siwgenie(struct net_device *dev,
 
 	wdev_lock(wdev);
 
-	/* no change */
+	
 	err = 0;
 	if (wdev->wext.ie_len == ie_len &&
 	    memcmp(wdev->wext.ie, ie, ie_len) == 0)
@@ -359,13 +364,12 @@ int cfg80211_wext_siwgenie(struct net_device *dev,
 			goto out;
 	}
 
-	/* userspace better not think we'll reconnect */
+	
 	err = 0;
  out:
 	wdev_unlock(wdev);
 	return err;
 }
-EXPORT_SYMBOL_GPL(cfg80211_wext_siwgenie);
 
 int cfg80211_wext_siwmlme(struct net_device *dev,
 			  struct iw_request_info *info,
@@ -402,4 +406,3 @@ int cfg80211_wext_siwmlme(struct net_device *dev,
 
 	return err;
 }
-EXPORT_SYMBOL_GPL(cfg80211_wext_siwmlme);

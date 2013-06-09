@@ -17,7 +17,6 @@
 
 #include <linux/kernel.h>
 #include <linux/list.h>
-#include <linux/mutex.h>
 #include <linux/workqueue.h>
 
 struct xoadc_conv_state {
@@ -66,18 +65,22 @@ struct xoadc_platform_data {
 	u32 xoadc_wakeup;
 };
 
-int32_t pm8058_xoadc_read_adc_code(uint32_t , int32_t *data);
+#ifdef CONFIG_PMIC8058_XOADC
+int32_t pm8058_xoadc_read_adc_code(uint32_t adc_instance, int32_t *data);
 
-int32_t pm8058_xoadc_select_chan_and_start_conv(uint32_t,
-						struct adc_conv_slot *);
+int32_t pm8058_xoadc_select_chan_and_start_conv(uint32_t adc_instance,
+						struct adc_conv_slot *slot);
 
-void pm8058_xoadc_slot_request(uint32_t, struct adc_conv_slot **slot);
+void pm8058_xoadc_slot_request(uint32_t adc_instance,
+		struct adc_conv_slot **slot);
 
-void pm8058_xoadc_restore_slot(uint32_t, struct adc_conv_slot *slot);
+void pm8058_xoadc_restore_slot(uint32_t adc_instance,
+		struct adc_conv_slot *slot);
 
-struct adc_properties *pm8058_xoadc_get_properties(uint32_t);
+struct adc_properties *pm8058_xoadc_get_properties(uint32_t dev_instance);
 
-int32_t pm8058_xoadc_calibrate(uint32_t, struct adc_conv_slot *, int *);
+int32_t pm8058_xoadc_calibrate(uint32_t dev_instance,
+		struct adc_conv_slot *slot, int * calib_status);
 
 int32_t pm8058_xoadc_registered(void);
 
@@ -86,4 +89,37 @@ int32_t pm8058_xoadc_calib_device(uint32_t adc_instance);
 int32_t pm8058_htc_config_mpp_and_adc_read(int32_t *result,
 						int32_t size, int32_t channels,
 						uint32_t mpp, uint32_t amux);
+
+#else
+
+static inline int32_t pm8058_xoadc_read_adc_code(uint32_t adc_instance,
+		int32_t *data)
+{ return -ENXIO; }
+
+static inline int32_t pm8058_xoadc_select_chan_and_start_conv(
+		uint32_t adc_instance, struct adc_conv_slot *slot)
+{ return -ENXIO; }
+
+static inline void pm8058_xoadc_slot_request(uint32_t adc_instance,
+		struct adc_conv_slot **slot)
+{ return; }
+
+static inline void pm8058_xoadc_restore_slot(uint32_t adc_instance,
+		struct adc_conv_slot *slot)
+{ return; }
+
+static inline struct adc_properties *pm8058_xoadc_get_properties(
+		uint32_t dev_instance)
+{ return NULL; }
+
+static inline int32_t pm8058_xoadc_calibrate(uint32_t dev_instance,
+		struct adc_conv_slot *slot, int *calib_status)
+{ return -ENXIO; }
+
+static inline int32_t pm8058_xoadc_registered(void)
+{ return -ENXIO; }
+
+static inline int32_t pm8058_xoadc_calib_device(uint32_t adc_instance)
+{ return -ENXIO; }
+#endif
 #endif

@@ -11,14 +11,11 @@
 #include <linux/notifier.h>
 #endif
 
-/* Bit 0 => Sensor Pad 1, ..., Bit 3 => Sendor Pad 4*/
 #define CS_STATUS		(uint8_t) 0x00
 
-/* F/W Reversion */
 #define CS_FW_VERSION		(uint8_t) 0x01
-#define CS_FW_CONFIG		(uint8_t) 0xAA		/*Smart Sense Supported*/
+#define CS_FW_CONFIG		(uint8_t) 0xAA		
 
-/* 8: high sensitivity, 255: low sensitivity */
 #define CS_IDAC_BTN_BASE	(uint8_t) 0x02
 #define CS_IDAC_BTN_PAD1	(uint8_t) 0x02
 #define CS_IDAC_BTN_PAD2        (uint8_t) 0x03
@@ -28,8 +25,8 @@
 #define CS_MODE			(uint8_t) 0x06
 #define CS_DTIME		(uint8_t) 0x07
 #define CS_SLEEPTIME		(uint8_t) 0x08
-#define CS_FW_CHIPID		(uint8_t) 0x0A		/*Smart Sense Supported*/
-#define CS_FW_KEYCFG		(uint8_t) 0x0B		/*Smart Sense Supported*/
+#define CS_FW_CHIPID		(uint8_t) 0x0A		
+#define CS_FW_KEYCFG		(uint8_t) 0x0B		
 
 #define CS_SELECT		(uint8_t) 0x0C
 #define CS_BL_HB		(uint8_t) 0x0D
@@ -52,10 +49,9 @@
 #define CS_KEY_4		(0x04)
 #define CS_KEY_3		(0x03)
 
-/*Func support*/
 #define CS_FUNC_PRINTRAW	(0x01)
 
-#define ENABLE_CAP_ONLY_3KEY   1        /* 1:Enable 0:Disable. Let cap only support 3Key.*/
+#define ENABLE_CAP_ONLY_3KEY   1        
 
 struct infor {
 	uint8_t  config;
@@ -77,7 +73,6 @@ struct cy8c_i2c_cs_platform_data {
 
 
 #if defined(CONFIG_TOUCH_KEY_FILTER)
-/*For touchkey call back*/
 extern struct blocking_notifier_head touchkey_notifier_list;
 
 extern int register_notifier_by_touchkey(struct notifier_block *nb);

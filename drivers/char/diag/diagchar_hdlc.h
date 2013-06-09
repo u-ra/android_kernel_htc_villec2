@@ -1,4 +1,4 @@
-/* Copyright (c) 2008-2009, Code Aurora Forum. All rights reserved.
+/* Copyright (c) 2008-2009, 2012, Code Aurora Forum. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -24,16 +24,15 @@ enum diag_send_state_enum_type {
 
 struct diag_send_desc_type {
 	const void *pkt;
-	const void *last;	/* Address of last byte to send. */
+	const void *last;	
 	enum diag_send_state_enum_type state;
-	unsigned char terminate;	/* True if this fragment
-					   terminates the packet */
+	unsigned char terminate;	
 };
 
 struct diag_hdlc_dest_type {
 	void *dest;
 	void *dest_last;
-	/* Below: internal use only */
+	
 	uint16_t crc;
 };
 
@@ -54,7 +53,6 @@ void diag_hdlc_encode(struct diag_send_desc_type *src_desc,
 int diag_hdlc_decode(struct diag_hdlc_decode_type *hdlc);
 
 #define ESC_CHAR     0x7D
-#define CONTROL_CHAR 0x7E
 #define ESC_MASK     0x20
 
 #endif

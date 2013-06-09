@@ -1,4 +1,4 @@
-/* Copyright (c) 2010-2011, Code Aurora Forum. All rights reserved.
+/* Copyright (c) 2010-2012, Code Aurora Forum. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -13,14 +13,12 @@
 #ifndef __KGSL_PWRCTRL_H
 #define __KGSL_PWRCTRL_H
 
-/*****************************************************************************
-** power flags
-*****************************************************************************/
 #define KGSL_PWRFLAGS_ON   1
 #define KGSL_PWRFLAGS_OFF  0
 
 #define KGSL_PWRLEVEL_TURBO 0
 #define KGSL_PWRLEVEL_NOMINAL 1
+#define KGSL_PWRLEVEL_LAST_OFFSET 2
 
 #define KGSL_MAX_CLKS 5
 
@@ -38,21 +36,21 @@ struct kgsl_busy {
 
 struct kgsl_pwrctrl {
 	int interrupt_num;
-	int have_irq;
 	struct clk *ebi1_clk;
 	struct clk *grp_clks[KGSL_MAX_CLKS];
 	unsigned long power_flags;
 	struct kgsl_pwrlevel pwrlevels[KGSL_MAX_PWRLEVELS];
 	unsigned int active_pwrlevel;
 	int thermal_pwrlevel;
+	unsigned int default_pwrlevel;
 	unsigned int num_pwrlevels;
 	unsigned int interval_timeout;
 	bool strtstp_sleepwake;
 	struct regulator *gpu_reg;
+	struct regulator *gpu_dig;
 	uint32_t pcl;
 	unsigned int nap_allowed;
 	unsigned int idle_needed;
-	const char *regulator_name;
 	const char *irq_name;
 	s64 time;
 	struct kgsl_busy busy;
@@ -81,4 +79,4 @@ static inline unsigned long kgsl_get_clkrate(struct clk *clk)
 
 void kgsl_pwrctrl_set_state(struct kgsl_device *device, unsigned int state);
 void kgsl_pwrctrl_request_state(struct kgsl_device *device, unsigned int state);
-#endif /* __KGSL_PWRCTRL_H */
+#endif 

@@ -10,10 +10,9 @@
 #ifndef _LINUX_XATTR_H
 #define _LINUX_XATTR_H
 
-#define XATTR_CREATE	0x1	/* set value, fail if attr already exists */
-#define XATTR_REPLACE	0x2	/* set value, fail if attr does not exist */
+#define XATTR_CREATE	0x1	
+#define XATTR_REPLACE	0x2	
 
-/* Namespaces */
 #define XATTR_OS2_PREFIX "os2."
 #define XATTR_OS2_PREFIX_LEN (sizeof (XATTR_OS2_PREFIX) - 1)
 
@@ -29,7 +28,9 @@
 #define XATTR_USER_PREFIX "user."
 #define XATTR_USER_PREFIX_LEN (sizeof (XATTR_USER_PREFIX) - 1)
 
-/* Security namespace */
+#define XATTR_EVM_SUFFIX "evm"
+#define XATTR_NAME_EVM XATTR_SECURITY_PREFIX XATTR_EVM_SUFFIX
+
 #define XATTR_SELINUX_SUFFIX "selinux"
 #define XATTR_NAME_SELINUX XATTR_SECURITY_PREFIX XATTR_SELINUX_SUFFIX
 
@@ -49,6 +50,11 @@
 #define XATTR_CAPS_SUFFIX "capability"
 #define XATTR_NAME_CAPS XATTR_SECURITY_PREFIX XATTR_CAPS_SUFFIX
 
+#define XATTR_POSIX_ACL_ACCESS  "posix_acl_access"
+#define XATTR_NAME_POSIX_ACL_ACCESS XATTR_SYSTEM_PREFIX XATTR_POSIX_ACL_ACCESS
+#define XATTR_POSIX_ACL_DEFAULT  "posix_acl_default"
+#define XATTR_NAME_POSIX_ACL_DEFAULT XATTR_SYSTEM_PREFIX XATTR_POSIX_ACL_DEFAULT
+
 #ifdef  __KERNEL__
 
 #include <linux/types.h>
@@ -58,13 +64,19 @@ struct dentry;
 
 struct xattr_handler {
 	const char *prefix;
-	int flags;	/* fs private flags passed back to the handlers */
+	int flags;	
 	size_t (*list)(struct dentry *dentry, char *list, size_t list_size,
 		       const char *name, size_t name_len, int handler_flags);
 	int (*get)(struct dentry *dentry, const char *name, void *buffer,
 		   size_t size, int handler_flags);
 	int (*set)(struct dentry *dentry, const char *name, const void *buffer,
 		   size_t size, int flags, int handler_flags);
+};
+
+struct xattr {
+	char *name;
+	void *value;
+	size_t value_len;
 };
 
 ssize_t xattr_getsecurity(struct inode *, const char *, void *, size_t);
@@ -78,7 +90,10 @@ ssize_t generic_getxattr(struct dentry *dentry, const char *name, void *buffer, 
 ssize_t generic_listxattr(struct dentry *dentry, char *buffer, size_t buffer_size);
 int generic_setxattr(struct dentry *dentry, const char *name, const void *value, size_t size, int flags);
 int generic_removexattr(struct dentry *dentry, const char *name);
+ssize_t vfs_getxattr_alloc(struct dentry *dentry, const char *name,
+			   char **xattr_value, size_t size, gfp_t flags);
+int vfs_xattr_cmp(struct dentry *dentry, const char *xattr_name,
+		  const char *value, size_t size, gfp_t flags);
+#endif  
 
-#endif  /*  __KERNEL__  */
-
-#endif	/* _LINUX_XATTR_H */
+#endif	

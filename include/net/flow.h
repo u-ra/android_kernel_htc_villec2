@@ -1,15 +1,10 @@
-/*
- *
- *	Generic internet FLOW.
- *
- */
 
 #ifndef _NET_FLOW_H
 #define _NET_FLOW_H
 
 #include <linux/socket.h>
 #include <linux/in6.h>
-#include <asm/atomic.h>
+#include <linux/atomic.h>
 
 struct flowi_common {
 	int	flowic_oif;
@@ -59,8 +54,11 @@ struct flowi4 {
 #define flowi4_proto		__fl_common.flowic_proto
 #define flowi4_flags		__fl_common.flowic_flags
 #define flowi4_secid		__fl_common.flowic_secid
-	__be32			daddr;
+
+	
 	__be32			saddr;
+	__be32			daddr;
+
 	union flowi_uli		uli;
 #define fl4_sport		uli.ports.sport
 #define fl4_dport		uli.ports.dport
@@ -75,7 +73,7 @@ static inline void flowi4_init_output(struct flowi4 *fl4, int oif,
 				      __u32 mark, __u8 tos, __u8 scope,
 				      __u8 proto, __u8 flags,
 				      __be32 daddr, __be32 saddr,
-				      __be16 dport, __be32 sport)
+				      __be16 dport, __be16 sport)
 {
 	fl4->flowi4_oif = oif;
 	fl4->flowi4_iif = 0;
@@ -91,7 +89,6 @@ static inline void flowi4_init_output(struct flowi4 *fl4, int oif,
 	fl4->fl4_sport = sport;
 }
 
-/* Reset some input parameters after previous lookup */
 static inline void flowi4_update_output(struct flowi4 *fl4, int oif, __u8 tos,
 					__be32 daddr, __be32 saddr)
 {
@@ -217,6 +214,7 @@ extern struct flow_cache_object *flow_cache_lookup(
 		u8 dir, flow_resolve_t resolver, void *ctx);
 
 extern void flow_cache_flush(void);
+extern void flow_cache_flush_deferred(void);
 extern atomic_t flow_cache_genid;
 
 #endif

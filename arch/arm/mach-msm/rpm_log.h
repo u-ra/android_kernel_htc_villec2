@@ -31,4 +31,4 @@ struct msm_rpm_log_platform_data {
 	void __iomem *reg_base;
 };
 
-#endif /* __ARCH_ARM_MACH_MSM_RPM_LOG_H */
+#endif 

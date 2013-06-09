@@ -11,12 +11,17 @@
  */
 
 #include <linux/cpu.h>
+#include <linux/smp.h>
 #include "acpuclock.h"
 
 static struct acpuclk_data *acpuclk_data;
+int init_done = 0;
 
 unsigned long acpuclk_get_rate(int cpu)
 {
+	if (!init_done)
+		return 0;
+
 	if (!acpuclk_data->get_rate)
 		return 0;
 
@@ -52,24 +57,8 @@ unsigned long acpuclk_wait_for_irq(void)
 	return rate;
 }
 
-void __init acpuclk_register(struct acpuclk_data *data)
+void __devinit acpuclk_register(struct acpuclk_data *data)
 {
+	init_done = 1;
 	acpuclk_data = data;
-}
-
-int __init acpuclk_init(struct acpuclk_soc_data *soc_data)
-{
-	int rc;
-
-	if (!soc_data->init)
-		return -EINVAL;
-
-	rc = soc_data->init(soc_data);
-	if (rc)
-		return rc;
-
-	if (!acpuclk_data)
-		return -ENODEV;
-
-	return 0;
 }

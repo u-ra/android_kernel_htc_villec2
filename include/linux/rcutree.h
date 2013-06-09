@@ -35,11 +35,6 @@ extern void rcu_note_context_switch(int cpu);
 extern int rcu_needs_cpu(int cpu);
 extern void rcu_cpu_stall_reset(void);
 
-/*
- * Note a virtualization-based context switch.  This is simply a
- * wrapper around rcu_note_context_switch(), which allows TINY_RCU
- * to save a few bytes.
- */
 static inline void rcu_virt_note_context_switch(int cpu)
 {
 	rcu_note_context_switch(cpu);
@@ -49,17 +44,19 @@ static inline void rcu_virt_note_context_switch(int cpu)
 
 extern void exit_rcu(void);
 
-#else /* #ifdef CONFIG_TREE_PREEMPT_RCU */
+#else 
 
 static inline void exit_rcu(void)
 {
 }
 
-#endif /* #else #ifdef CONFIG_TREE_PREEMPT_RCU */
+#endif 
 
 extern void synchronize_rcu_bh(void);
 extern void synchronize_sched_expedited(void);
 extern void synchronize_rcu_expedited(void);
+
+void kfree_call_rcu(struct rcu_head *head, void (*func)(struct rcu_head *rcu));
 
 static inline void synchronize_rcu_bh_expedited(void)
 {
@@ -67,6 +64,8 @@ static inline void synchronize_rcu_bh_expedited(void)
 }
 
 extern void rcu_barrier(void);
+extern void rcu_barrier_bh(void);
+extern void rcu_barrier_sched(void);
 
 extern unsigned long rcutorture_testseq;
 extern unsigned long rcutorture_vernum;
@@ -78,13 +77,13 @@ extern void rcu_force_quiescent_state(void);
 extern void rcu_bh_force_quiescent_state(void);
 extern void rcu_sched_force_quiescent_state(void);
 
-/* A context switch is a grace period for RCU-sched and RCU-bh. */
 static inline int rcu_blocking_is_gp(void)
 {
+	might_sleep();  
 	return num_online_cpus() == 1;
 }
 
 extern void rcu_scheduler_starting(void);
 extern int rcu_scheduler_active __read_mostly;
 
-#endif /* __LINUX_RCUTREE_H */
+#endif 

@@ -26,8 +26,9 @@
 #include <linux/gpio.h>
 #include <linux/workqueue.h>
 
-#define CY8C_I2C_RETRY_TIMES (10)
-#define CY8C_KEYLOCKTIME    (1500)
+#define CY8C_I2C_RETRY_TIMES 	(10)
+#define CY8C_KEYLOCKTIME    	(1500)
+#define CY8C_KEYLOCKRESET	(6)
 
 struct cy8c_cs_data {
 	struct i2c_client *client;
@@ -54,6 +55,7 @@ static struct cy8c_cs_data *private_cs;
 
 static irqreturn_t cy8c_cs_irq_handler(int, void *);
 static int disable_key;
+static int reset_cnt; 
 
 extern int board_build_flag(void);
 #ifdef CONFIG_HAS_EARLYSUSPEND
@@ -408,9 +410,33 @@ static void cy8c_rawdata_print(struct work_struct *work)
 	pos = strlen(buf)+1;
 	pr_info("[cap]%s\n", buf);
 
-	if (cs->vk_id)
+	if (cs->vk_id) {
+		reset_cnt++;
+		if (reset_cnt % CY8C_KEYLOCKRESET == 0) {
+			switch (cs->vk_id) {
+				case 0x01:
+					input_report_key(cs->input_dev, cs->keycode[0], 0);
+					break;
+				case 0x02:
+					input_report_key(cs->input_dev, cs->keycode[1], 0);
+					break;
+				case 0x04:
+					input_report_key(cs->input_dev, cs->keycode[2], 0);
+					break;
+				case 0x08:
+					input_report_key(cs->input_dev, cs->keycode[3], 0);
+					break;
+			}
+			input_sync(cs->input_dev);
+
+			pr_info("[cap] keylock reset\n");
+			cs->reset();
+			reset_cnt = 0;
+			cs->vk_id = 0;
+		}
 		queue_delayed_work(cs->wq_raw, &cs->work_raw,
 				   msecs_to_jiffies(CY8C_KEYLOCKTIME-500));
+	}
 }
 
 static int cy8c_init_sensor(struct cy8c_cs_data *cs, struct cy8c_i2c_cs_platform_data *pdata)
@@ -597,7 +623,7 @@ static int cy8c_cs_probe(struct i2c_client *client,
 
 	if (cy8c_init_sensor(cs, pdata) < 0) {
 		pr_err("[cap_err] init failure, not probe up driver\n");
-		goto err_create_wq_failed;
+		goto err_init_sensor_failed;
 	}
 	if (pdata) {
 		if (pdata->id.config != cs->id.config) {
@@ -692,6 +718,7 @@ err_input_register_device_failed:
 
 err_input_dev_alloc_failed:
 	destroy_workqueue(cs->cy8c_wq);
+err_init_sensor_failed:
 err_create_wq_failed:
 	kfree(cs);
 

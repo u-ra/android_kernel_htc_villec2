@@ -19,20 +19,13 @@
 
 #include <linux/mfd/pm8xxx/core.h>
 #include <linux/mfd/pm8xxx/rtc.h>
-
-#include <mach/msm_rpcrouter.h>
-#include <asm/atomic.h>
-#include <linux/delay.h>
-#include <linux/kthread.h>
 #include <linux/sched.h>
 
-/* RTC Register offsets from RTC CTRL REG */
 #define PM8XXX_ALARM_CTRL_OFFSET 0x01
 #define PM8XXX_RTC_WRITE_OFFSET 0x02
 #define PM8XXX_RTC_READ_OFFSET 0x06
 #define PM8XXX_ALARM_RW_OFFSET 0x0A
 
-/* RTC_CTRL register bit fields */
 #define PM8xxx_RTC_ENABLE	BIT(7)
 #define PM8xxx_RTC_ALARM_ENABLE	BIT(1)
 #define PM8xxx_RTC_ABORT_ENABLE BIT(0)
@@ -41,15 +34,6 @@
 
 #define NUM_8_BIT_RTC_REGS	0x4
 
-#define APP_RTC_PROG			0x30000048
-#define APP_RTC_VER			0x00040000
-#define TIMEREMOTE_PROCEEDURE_SET_JULIAN	6
-
-/**
- * struct pm8xxx_rtc - rtc driver internal structure
- * @rtc: rtc device for this driver
- * @rtc_alarm_irq: rtc alarm irq number
- */
 struct pm8xxx_rtc {
 	struct rtc_device *rtc;
 	int rtc_alarm_irq;
@@ -61,28 +45,6 @@ struct pm8xxx_rtc {
 	struct device *rtc_dev;
 	spinlock_t ctrl_reg_lock;
 };
-
-struct rpc_time_julian {
-	uint32_t year;
-	uint32_t month;
-	uint32_t day;
-	uint32_t hour;
-	uint32_t minute;
-	uint32_t second;
-	uint32_t day_of_week;
-};
-
-/* VERDI_LTE not support 8k modem. Disable this */
-#ifndef CONFIG_MACH_VERDI_LTE
-struct pm8xxx_data {
-	struct rtc_time *rtc_t;
-	struct work_struct work;
-};
-static struct msm_rpc_endpoint *ep;
-static struct mutex rpc_setup_lock;
-static struct pm8xxx_data *rtc_connect;
-#endif
-
 
 /*
  * The RTC registers need to be read/written one byte at a time. This is a
@@ -123,94 +85,7 @@ static int pm8xxx_write_wrapper(struct pm8xxx_rtc *rtc_dd, u8 *rtc_val,
 	return 0;
 }
 
-/* VERDI_LTE not support 8k modem. Disable this */
-#ifndef CONFIG_MACH_VERDI_LTE
-static int
-pm8058_init_rpc(void)
-{
-	int rc = 0;
-	mutex_lock(&rpc_setup_lock);
-	if (!ep || (IS_ERR(ep))) {
-		ep = msm_rpc_connect_compatible(APP_RTC_PROG, APP_RTC_VER, 0);
-		if (IS_ERR(ep)) {
-			pr_err("%s: init rpc failed! rc = %ld\n", __func__, PTR_ERR(ep));
-			rc = -EIO;
-		}
-	}
-	mutex_unlock(&rpc_setup_lock);
-	return rc;
-}
 
-
-static int
-pm8058_rtc_connect_to_mdm(struct rtc_time *tm)
-{
-	int ret = 0;
-
-	struct timeremote_set_julian_req {
-		struct rpc_request_hdr hdr;
-		uint32_t opt_arg;
-
-		struct rpc_time_julian time;
-	} req;
-
-	struct timeremote_set_julian_rep {
-		struct rpc_reply_hdr hdr;
-	} rep;
-
-	ret = pm8058_init_rpc();
-	if (ret < 0)
-		return ret;
-
-	req.opt_arg = cpu_to_be32(1);
-	req.time.year = cpu_to_be32(tm->tm_year + 1900);
-	req.time.month = cpu_to_be32(tm->tm_mon + 1);
-	req.time.day = cpu_to_be32(tm->tm_mday);
-	req.time.hour = cpu_to_be32(tm->tm_hour);
-	req.time.minute = cpu_to_be32(tm->tm_min);
-	req.time.second = cpu_to_be32(tm->tm_sec);
-	req.time.day_of_week = cpu_to_be32(tm->tm_wday);
-
-	ret = msm_rpc_call_reply(ep, TIMEREMOTE_PROCEEDURE_SET_JULIAN,
-			&req, sizeof(req),
-			&rep, sizeof(rep),
-			5 * HZ);
-	if (ret < 0) {
-		pr_err("%s: set time fail, ret = %d\n", __func__, ret);
-		#if 0 /*disable debug panic*/
-		panic("RPC link fail, FAKE a kernel panic for ramdump!!\n"); /* HTC test */
-		#endif
-	}
-
-	return 0;
-}
-
-/*
- * In order to prevent blocking in RPC functions, do pm8058_rtc_connect_to_mdm() in another thread.
- */
-static int rtc_connect_to_mdm(struct rtc_time *tm)
-{
-	pm8058_rtc_connect_to_mdm(tm);
-	return 0;
-}
-
-static void update_rtc_to_8kmodem(struct work_struct *work)
-{
-	struct pm8xxx_data *rtc_connect;
-
-	rtc_connect = container_of(work, struct pm8xxx_data, work);
-	rtc_connect_to_mdm(rtc_connect->rtc_t);
-
-}
-#endif
-
-/*
- * Steps to write the RTC registers.
- * 1. Disable alarm if enabled.
- * 2. Write 0x00 to LSB.
- * 3. Write Byte[1], Byte[2], Byte[3] then Byte[0].
- * 4. Enable alarm if disabled in step 1.
- */
 static int
 pm8xxx_rtc_set_time(struct device *dev, struct rtc_time *tm)
 {
@@ -228,7 +103,9 @@ pm8xxx_rtc_set_time(struct device *dev, struct rtc_time *tm)
 
 	dev_dbg(dev, "Seconds value to be written to RTC = %lu\n", secs);
 	printk("[RTC_DEBUG] Seconds value to be written to RTC = %lu by pid[%d][%s]\n", secs, current->pid, current->comm);
+
 	dump_stack();
+
 	spin_lock_irqsave(&rtc_dd->ctrl_reg_lock, irq_flags);
 	ctrl_reg = rtc_dd->ctrl_reg;
 
@@ -244,8 +121,8 @@ pm8xxx_rtc_set_time(struct device *dev, struct rtc_time *tm)
 	} else
 		spin_unlock_irqrestore(&rtc_dd->ctrl_reg_lock, irq_flags);
 
-	/* Write Byte[1], Byte[2], Byte[3], Byte[0] */
-	/* Write 0 to Byte[0] */
+	
+	
 	reg = 0;
 	rc = pm8xxx_write_wrapper(rtc_dd, &reg, rtc_dd->rtc_write_base, 1);
 	if (rc < 0) {
@@ -253,7 +130,7 @@ pm8xxx_rtc_set_time(struct device *dev, struct rtc_time *tm)
 		goto rtc_rw_fail;
 	}
 
-	/* Write Byte[1], Byte[2], Byte[3] */
+	
 	rc = pm8xxx_write_wrapper(rtc_dd, value + 1,
 					rtc_dd->rtc_write_base + 1, 3);
 	if (rc < 0) {
@@ -261,18 +138,12 @@ pm8xxx_rtc_set_time(struct device *dev, struct rtc_time *tm)
 		goto rtc_rw_fail;
 	}
 
-	/* Write Byte[0] */
+	
 	rc = pm8xxx_write_wrapper(rtc_dd, value, rtc_dd->rtc_write_base, 1);
 	if (rc < 0) {
 		dev_err(dev, "Write to RTC register failed\n");
 		goto rtc_rw_fail;
 	}
-
-/* VERDI_LTE not support 8k modem. Disable this */
-#ifndef CONFIG_MACH_VERDI_LTE
-	memcpy(rtc_connect->rtc_t, tm, sizeof(struct rtc_time));
-	schedule_work(&rtc_connect->work);
-#endif
 
 	if (alarm_enabled) {
 		ctrl_reg |= PM8xxx_RTC_ALARM_ENABLE;
@@ -308,10 +179,6 @@ pm8xxx_rtc_read_time(struct device *dev, struct rtc_time *tm)
 		return rc;
 	}
 
-	/*
-	 * Read the LSB again and check if there has been a carry over.
-	 * If there is, redo the read operation.
-	 */
 	rc = pm8xxx_read_wrapper(rtc_dd, &reg, rtc_dd->rtc_read_base, 1);
 	if (rc < 0) {
 		dev_err(dev, "PM8xxx read failed\n");
@@ -356,10 +223,6 @@ pm8xxx_rtc_set_alarm(struct device *dev, struct rtc_wkalrm *alarm)
 
 	rtc_tm_to_time(&alarm->time, &secs);
 
-	/*
-	 * Read the current RTC time and verify if the alarm time is in the
-	 * past. If yes, return invalid.
-	 */
 	rc = pm8xxx_rtc_read_time(dev, &rtc_tm);
 	if (rc < 0) {
 		dev_err(dev, "Unamble to read RTC time\n");
@@ -486,7 +349,7 @@ static irqreturn_t pm8xxx_alarm_trigger(int irq, void *dev_id)
 
 	spin_lock_irqsave(&rtc_dd->ctrl_reg_lock, irq_flags);
 
-	/* Clear the alarm enable bit */
+	
 	ctrl_reg = rtc_dd->ctrl_reg;
 	ctrl_reg &= ~PM8xxx_RTC_ALARM_ENABLE;
 
@@ -500,7 +363,7 @@ static irqreturn_t pm8xxx_alarm_trigger(int irq, void *dev_id)
 	rtc_dd->ctrl_reg = ctrl_reg;
 	spin_unlock_irqrestore(&rtc_dd->ctrl_reg_lock, irq_flags);
 
-	/* Clear RTC alarm register */
+	
 	rc = pm8xxx_read_wrapper(rtc_dd, &ctrl_reg, rtc_dd->rtc_base +
 						PM8XXX_ALARM_CTRL_OFFSET, 1);
 	if (rc < 0) {
@@ -537,7 +400,7 @@ static int __devinit pm8xxx_rtc_probe(struct platform_device *pdev)
 		return -ENOMEM;
 	}
 
-	/* Initialise spinlock to protect RTC cntrol register */
+	
 	spin_lock_init(&rtc_dd->ctrl_reg_lock);
 
 	rtc_dd->rtc_alarm_irq = platform_get_irq(pdev, 0);
@@ -557,14 +420,14 @@ static int __devinit pm8xxx_rtc_probe(struct platform_device *pdev)
 
 	rtc_dd->rtc_base = rtc_resource->start;
 
-	/* Setup RTC register addresses */
+	
 	rtc_dd->rtc_write_base = rtc_dd->rtc_base + PM8XXX_RTC_WRITE_OFFSET;
 	rtc_dd->rtc_read_base = rtc_dd->rtc_base + PM8XXX_RTC_READ_OFFSET;
 	rtc_dd->alarm_rw_base = rtc_dd->rtc_base + PM8XXX_ALARM_RW_OFFSET;
 
 	rtc_dd->rtc_dev = &(pdev->dev);
 
-	/* Check if the RTC is on, else turn it on */
+	
 	rc = pm8xxx_read_wrapper(rtc_dd, &ctrl_reg, rtc_dd->rtc_base, 1);
 	if (rc < 0) {
 		dev_err(&pdev->dev, "PM8xxx read failed!\n");
@@ -581,7 +444,7 @@ static int __devinit pm8xxx_rtc_probe(struct platform_device *pdev)
 		}
 	}
 
-	/* Enable abort enable feature */
+	
 	ctrl_reg |= PM8xxx_RTC_ABORT_ENABLE;
 	rc = pm8xxx_write_wrapper(rtc_dd, &ctrl_reg, rtc_dd->rtc_base, 1);
 	if (rc < 0) {
@@ -595,7 +458,7 @@ static int __devinit pm8xxx_rtc_probe(struct platform_device *pdev)
 
 	platform_set_drvdata(pdev, rtc_dd);
 
-	/* Register the RTC device */
+	
 	rtc_dd->rtc = rtc_device_register("pm8xxx_rtc", &pdev->dev,
 				&pm8xxx_rtc_ops, THIS_MODULE);
 	if (IS_ERR(rtc_dd->rtc)) {
@@ -605,7 +468,7 @@ static int __devinit pm8xxx_rtc_probe(struct platform_device *pdev)
 		goto fail_rtc_enable;
 	}
 
-	/* Request the alarm IRQ */
+	
 	rc = request_any_context_irq(rtc_dd->rtc_alarm_irq,
 				 pm8xxx_alarm_trigger, IRQF_TRIGGER_RISING,
 				 "pm8xxx_rtc_alarm", rtc_dd);
@@ -618,27 +481,8 @@ static int __devinit pm8xxx_rtc_probe(struct platform_device *pdev)
 
 	dev_dbg(&pdev->dev, "Probe success !!\n");
 
-#ifndef CONFIG_MACH_VERDI_LTE
-	rtc_connect = kzalloc(sizeof(*rtc_connect), GFP_ATOMIC);
-	if (!rtc_connect) {
-		dev_err(&pdev->dev, "ENOMEM\n");
-		rc = -ENOMEM;
-		goto fail_req_irq;
-	}
-
-	rtc_connect->rtc_t = kzalloc(sizeof(struct rtc_time), GFP_ATOMIC);
-	if (!rtc_connect->rtc_t) {
-		dev_err(&pdev->dev, "ENOMEM\n");
-		rc = -ENOMEM;
-		goto err_rtc;
-	}
-	INIT_WORK(&rtc_connect->work, update_rtc_to_8kmodem);
-#endif
-
 	return 0;
 
-err_rtc:
-	kfree(rtc_connect);
 fail_req_irq:
 	rtc_device_unregister(rtc_dd->rtc);
 fail_rtc_enable:
@@ -677,10 +521,6 @@ static int __devexit pm8xxx_rtc_remove(struct platform_device *pdev)
 {
 	struct pm8xxx_rtc *rtc_dd = platform_get_drvdata(pdev);
 
-#ifndef CONFIG_MACH_VERDI_LTE
-	kfree(rtc_connect->rtc_t);
-	kfree(rtc_connect);
-#endif
 	device_init_wakeup(&pdev->dev, 0);
 	free_irq(rtc_dd->rtc_alarm_irq, rtc_dd);
 	rtc_device_unregister(rtc_dd->rtc);
@@ -708,7 +548,7 @@ static void pm8xxx_rtc_shutdown(struct platform_device *pdev)
 		spin_lock_irqsave(&rtc_dd->ctrl_reg_lock, irq_flags);
 		dev_dbg(&pdev->dev, "Disabling alarm interrupts\n");
 
-		/* Disable RTC alarms */
+		
 		reg = rtc_dd->ctrl_reg;
 		reg &= ~PM8xxx_RTC_ALARM_ENABLE;
 		rc = pm8xxx_write_wrapper(rtc_dd, &reg, rtc_dd->rtc_base, 1);
@@ -717,7 +557,7 @@ static void pm8xxx_rtc_shutdown(struct platform_device *pdev)
 			goto fail_alarm_disable;
 		}
 
-		/* Clear Alarm register */
+		
 		rc = pm8xxx_write_wrapper(rtc_dd, value,
 				rtc_dd->alarm_rw_base, NUM_8_BIT_RTC_REGS);
 		if (rc < 0)
@@ -743,11 +583,6 @@ static struct platform_driver pm8xxx_rtc_driver = {
 
 static int __init pm8xxx_rtc_init(void)
 {
-/* VERDI_LTE not support 8k modem. Disable this*/
-#ifndef CONFIG_MACH_VERDI_LTE
-	mutex_init(&rpc_setup_lock);
-#endif
-
 	return platform_driver_register(&pm8xxx_rtc_driver);
 }
 module_init(pm8xxx_rtc_init);

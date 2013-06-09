@@ -18,4 +18,4 @@ struct kgsl_device;
 
 int adreno_postmortem_dump(struct kgsl_device *device, int manual);
 
-#endif /* __ADRENO_POSTMORTEM_H */
+#endif 

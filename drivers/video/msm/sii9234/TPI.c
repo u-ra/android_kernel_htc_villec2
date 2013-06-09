@@ -25,33 +25,21 @@
 #include "inc/si_datatypes.h"
 #include <linux/jiffies.h>
 #include <mach/board.h>
-#ifdef CONFIG_FB_MSM_HDMI_MHL_SUPERDEMO
-#include <mach/mhl.h>
-#endif
 #include "sii_mhltx.h"
-
-#ifdef CONFIG_FB_MSM_HDMI_MHL_SUPERDEMO
-#define MHL_SII9234_SCRATCHPAD_REG_MAX 16
-static int g_sii9234_intr_writeburst_en = E_MHL_FALSE;
-static uint16_t g_sii9234_finger_num = MHL_SII9234_TOUCH_FINGER_NUM_MAX;
-static T_MHL_EVT_REMOTE_CNTL g_sii9234_remote_evt_type = E_MHL_EVT_UNKNOWN;
-static T_MHL_REMOTE_KEY_DATA g_sii9234_key_data;
-static T_MHL_REMOTE_FINGER_DATA g_sii9234_finger_data[MHL_SII9234_TOUCH_FINGER_NUM_MAX];
-#endif
 
 static unsigned long rsenCheckTimeout = 0;
 static unsigned long deglitchTimeout = 0;
 static int rsenCount = 0;
-static int WR_Dcap_Rdy_Int_Done = false;/* new in V100109 */
-static bool IsEstablished = false;/* new in V100109 */
+static int WR_Dcap_Rdy_Int_Done = false;
+static bool IsEstablished = false;
 extern bool g_bProbe;
-extern u8 dbg_drv_str_a3, dbg_drv_str_on;
+extern bool disable_interswitch;
+extern u8 dbg_drv_str_a3, dbg_drv_str_a6, dbg_drv_str_on;
 
 
 static	uint8_t	fwPowerState = POWER_STATE_FIRST_INIT;
 #ifdef CONFIG_INTERNAL_CHARGING_SUPPORT
 
-/* To remember current MHL connection status */
 enum usb_connect_type gStatusMHL = CONNECT_TYPE_UNKNOWN;
 static bool gConnectMHL = false;
 #endif
@@ -61,10 +49,9 @@ static	uint8_t	gotFifoUnderRunOverRun = 0;
 #endif
 static	bool	deglitchingRsenNow = false;
 
-uint8_t		mscCmdInProgress;	/* false when it is okay to send a new command */
+uint8_t		mscCmdInProgress;	
 static	uint8_t	dsHpdStatus = 0;
 static  uint8_t contentOn = 0;
-/* HTC board parameters */
 
 #define	I2C_READ_MODIFY_WRITE(saddr, offset, mask)	I2C_WriteByte(saddr, offset, I2C_ReadByte(saddr, offset) | (mask));
 
@@ -85,11 +72,11 @@ static  uint8_t contentOn = 0;
 #define	UNMASK_CBUS1_INTERRUPTS			I2C_WriteByte(CBUS_SLAVE_ADDR, 0x09, INTR_CBUS1_DESIRED_MASK)
 #define	MASK_CBUS1_INTERRUPTS			I2C_WriteByte(CBUS_SLAVE_ADDR, 0x09, 0x00)
 
-#define	INTR_CBUS2_DESIRED_MASK			(BIT_0 | BIT_2 | BIT_3)	/* mw20110922 enable write burst int */
+#define	INTR_CBUS2_DESIRED_MASK			(BIT_0 | BIT_2 | BIT_3)	
 #define	UNMASK_CBUS2_INTERRUPTS			I2C_WriteByte(CBUS_SLAVE_ADDR, 0x1F, INTR_CBUS2_DESIRED_MASK)
 #define	MASK_CBUS2_INTERRUPTS			I2C_WriteByte(CBUS_SLAVE_ADDR, 0x1F, 0x00)
-#define I2C_INACCESSIBLE -1		/* new in V100109 */
-#define I2C_ACCESSIBLE 1			/* new in v100109 */
+#define I2C_INACCESSIBLE -1		
+#define I2C_ACCESSIBLE 1			
 
 static	int	Int4Isr(void);
 static	void	Int1RsenIsr(void);
@@ -199,9 +186,9 @@ void	TPI_Poll(void)
 #ifdef	APPLY_PLL_RECOVERY
 		if ((I2C_ReadByte(TPI_SLAVE_ADDR, 0x09) & BIT_2)) {
 			TPI_DEBUG_PRINT(("PowerState=D0_MHL, chk TxDrvRecovery\n"));
-			/*if ((MHL_STATUS_PATH_ENABLED & linkMode) && (BIT_6 &dsHpdStatus) &&(contentOn))	{*/
+			
 				SiiMhlTxDrvRecovery();
-			/*}*/
+			
 		}
 
 #endif
@@ -212,8 +199,6 @@ void	TPI_Poll(void)
 
 void SiiMhlTxDrvReleaseUpstreamHPDControl(void)
 {
-	/* Un-force HPD (it was kept low, now propagate to source
-	   let HPD float by clearing reg_hpd_out_ovr_en */
 	CLR_BIT(TPI_SLAVE_ADDR, 0x79, 4);
 	TPI_DEBUG_PRINT(("Drv:%d Upstream HPD released.\n", (int)__LINE__));
 }
@@ -224,7 +209,7 @@ void	SiiMhlTxDrvTmdsControl(bool enable)
 	if (enable) {
 		SET_BIT(TPI_SLAVE_ADDR, 0x80, 4);
 		TPI_DEBUG_PRINT(("Drv: TMDS Output Enabled\n"));
-		SiiMhlTxDrvReleaseUpstreamHPDControl();  /* this triggers an EDID read */
+		SiiMhlTxDrvReleaseUpstreamHPDControl();  
 	} else {
 		CLR_BIT(TPI_SLAVE_ADDR, 0x80, 4);
 		TPI_DEBUG_PRINT(("Drv: TMDS Ouput Disabled\n"));
@@ -235,17 +220,15 @@ void	SiiMhlTxDrvNotifyEdidChange(void)
 {
 	TPI_DEBUG_PRINT(("Drv: SiiMhlTxDrvNotifyEdidChange\n"));
 
-	/*SET_BIT(TPI_SLAVE_ADDR, 0x79, 4);*/
+	
 	ReadModifyWriteTPI(0x79, BIT_5 | BIT_4, BIT_4);
 	TPI_DEBUG_PRINT(("Drv: Upstream HPD Acquired - driven low.\n"));
-	/*CLR_BIT(TPI_SLAVE_ADDR, 0x79, 5);*/
+	
 	SET_BIT(TPI_SLAVE_ADDR, 0x79, 5);
 
 
 	DelayMS(110);
 
-	/* release HPD back to high by reg_hpd_out_ovr_val = HIGH
-	SET_BIT(PAGE_0_0X72, 0x79, 5);*/
 	CLR_BIT(TPI_SLAVE_ADDR, 0x79, 4);
 	TPI_DEBUG_PRINT(("Drv: Upstream HPD released.\n"));
 
@@ -280,7 +263,7 @@ bool SiiMhlTxDrvSendCbusCommand(cbus_req_t *pReq)
 		break;
 
 	case MHL_WRITE_STAT:
-		//WriteByteCBUS((0x13 & 0xFF), pReq->offsetData + 0x30);
+		
 		startbit = (0x01 << 3);
 		break;
 
@@ -344,11 +327,11 @@ void	Int1RsenIsr(void)
 	uint8_t		reg71 = I2C_ReadByte(TPI_SLAVE_ADDR, 0x71);
 	uint8_t		rsen  = I2C_ReadByte(TPI_SLAVE_ADDR, 0x09) & BIT_2;
 
-	if ((reg71 & BIT_5)/* ||
-		((false == deglitchingRsenNow) && (rsen == 0x00))*/) {
+	if ((reg71 & BIT_5)
+) {
 		TPI_DEBUG_PRINT(("Drv: Got INTR_1: reg71 = %02X, rsen = %02X\n", (int) reg71, (int) rsen));
 		Int1ProcessRsen(rsen);
-		/* Clear MDI_RSEN interrupt */
+		
 		I2C_WriteByte(TPI_SLAVE_ADDR, 0x71, BIT_5);
 		UNMASK_INTR_1_INTERRUPTS;
 	}
@@ -381,7 +364,7 @@ static void DeglitchRsenLow(void)
 			DISABLE_DISCOVERY;
 			ENABLE_DISCOVERY;
 
-			dsHpdStatus &= ~BIT_6;  /* cable disconnect implies downstream HPD low */
+			dsHpdStatus &= ~BIT_6;  
 
 			WriteByteCBUS(0x0D, dsHpdStatus);
 			SiiMhlTxNotifyDsHpdChange(0);
@@ -403,7 +386,7 @@ static void WriteInitialRegisterValues(void)
 	I2C_WriteByte(HDMI_SLAVE_ADDR, 0x11, 0x01);
 	I2C_WriteByte(HDMI_SLAVE_ADDR, 0x12, 0x15);
 	I2C_WriteByte(TPI_SLAVE_ADDR, 0x08, 0x35);
-	CbusReset();								/* mw20110922 match v100108 ; to pass CTS 3.3.5.3 & 3.3.7.1 */
+	CbusReset();								
 
 	I2C_WriteByte(HDMI_SLAVE_ADDR, 0x10, 0xC1);
 	I2C_WriteByte(HDMI_SLAVE_ADDR, 0x17, 0x03);
@@ -416,32 +399,35 @@ static void WriteInitialRegisterValues(void)
 	I2C_WriteByte(HDMI_SLAVE_ADDR, 0x4C, 0xA0);
 	I2C_WriteByte(HDMI_SLAVE_ADDR, 0x4D, 0x00);
 
-	I2C_WriteByte(HDMI_SLAVE_ADDR, 0x50, 0x11);	/* mw20110925 match w/ v100109 */
-	I2C_WriteByte(HDMI_SLAVE_ADDR, 0x51, 0x09);	/* mw20110925 match w/ v100109 */
-	I2C_WriteByte(HDMI_SLAVE_ADDR, 0x52, 0x11);	/* mw20110925 match w/ v100109 */
+	I2C_WriteByte(HDMI_SLAVE_ADDR, 0x50, 0x11);	
+	I2C_WriteByte(HDMI_SLAVE_ADDR, 0x51, 0x09);	
+	I2C_WriteByte(HDMI_SLAVE_ADDR, 0x52, 0x11);	
 
-	/* I2C_WriteByte(TPI_SLAVE_ADDR, 0x80, 0x34);	mw20110925 match w/ v100109 */
+	
 	I2C_WriteByte(TPI_SLAVE_ADDR, 0x80, 0x24);
 	I2C_WriteByte(HDMI_SLAVE_ADDR, 0x45, 0x44);
 	I2C_WriteByte(HDMI_SLAVE_ADDR, 0x31, 0x0A);
 	I2C_WriteByte(TPI_SLAVE_ADDR, 0xA0, 0xD0);
 	I2C_WriteByte(TPI_SLAVE_ADDR, 0xA1, 0xFC);
 
-	if(board_build_flag() != SHIP_BUILD && dbg_drv_str_on)
+	
+	if(dbg_drv_str_on){
 		I2C_WriteByte(TPI_SLAVE_ADDR, 0xA3, dbg_drv_str_a3);
-	else
+		I2C_WriteByte(TPI_SLAVE_ADDR, 0xA6, dbg_drv_str_a6);
+	}else{
 		I2C_WriteByte(TPI_SLAVE_ADDR, 0xA3, 0xEB);
-	I2C_WriteByte(TPI_SLAVE_ADDR, 0xA6, 0x0C);
+		I2C_WriteByte(TPI_SLAVE_ADDR, 0xA6, 0x0C);
+	}
 
 	I2C_WriteByte(TPI_SLAVE_ADDR, 0x2B, 0x01);
 
 
-	ReadModifyWriteTPI(0x90, BIT_3 | BIT_2, BIT_2);/* mw20110925 match w/ v100109 */
+	ReadModifyWriteTPI(0x90, BIT_3 | BIT_2, BIT_2);
 	I2C_WriteByte(TPI_SLAVE_ADDR, 0x91, 0xA5);
 
 
 
-	I2C_WriteByte(TPI_SLAVE_ADDR, 0x94, 0x77); /* mw20110925 if same as v100108 0x77, then MHL won't established */
+	I2C_WriteByte(TPI_SLAVE_ADDR, 0x94, 0x77); 
 
 
 	I2C_WriteByte(CBUS_SLAVE_ADDR, 0x31, I2C_ReadByte(CBUS_SLAVE_ADDR, 0x31) | 0x0c);
@@ -449,47 +435,41 @@ static void WriteInitialRegisterValues(void)
 	I2C_WriteByte(TPI_SLAVE_ADDR, 0xA5, 0xA0);
 	TPI_DEBUG_PRINT(("Drv: MHL 1.0 Compliant Clock\n"));
 
-	/*  mw20110925 match w/ v100109
-	if (sii9234_get_ci2ca())
-		I2C_WriteByte(TPI_SLAVE_ADDR, 0x95, 0x35);
-	else
-		I2C_WriteByte(TPI_SLAVE_ADDR, 0x95, 0x31); */
-
-	I2C_WriteByte(TPI_SLAVE_ADDR, 0x95, 0x71); /*  mw20110925 match w/ v100109 */
+	if(!disable_interswitch)
+		I2C_WriteByte(TPI_SLAVE_ADDR, 0x95, 0x71); 
 
 	I2C_WriteByte(TPI_SLAVE_ADDR, 0x97, 0x00);
 
-	/* ReadModifyWriteTPI(0x95, BIT_6, BIT_6);  mw20110922 match w v100108 ; Force USB ID switch to open */
+	
 
-	WriteByteTPI(0x92, 0x86);
-	WriteByteTPI(0x93, 0x8C);
+	if(!disable_interswitch) {
+		WriteByteTPI(0x92, 0x86);
+		WriteByteTPI(0x93, 0x8C);
+	}
 
 
 	ReadModifyWriteTPI(0x79, BIT_5 | BIT_4, BIT_4);
 
 	DelayMS(25);
-	ReadModifyWriteTPI(0x95, BIT_6, 0x00);
-
-	I2C_WriteByte(TPI_SLAVE_ADDR, 0x90, 0x27);
-
-	/*  mw20110925 match w/ v100109
-		mw20110922 match v100108 to pass CTS 3.3.5.3 & 3.3.7.1
-	CbusReset();*/
+	if(!disable_interswitch) {
+		ReadModifyWriteTPI(0x95, BIT_6, 0x00);
+		I2C_WriteByte(TPI_SLAVE_ADDR, 0x90, 0x27);
+	}
 
 	InitCBusRegs();
 
 
 
-	I2C_WriteByte(CBUS_SLAVE_ADDR, 0x3C, 0xB4) ; 	/* mw20110921 add to match w v100108 */
-	I2C_WriteByte(CBUS_SLAVE_ADDR, 0x2E, 0x15) ; 	/* mw20110921 add to match w v100108 handle CEC abort items */
+	I2C_WriteByte(CBUS_SLAVE_ADDR, 0x3C, 0xB4) ; 	
+	I2C_WriteByte(CBUS_SLAVE_ADDR, 0x2E, 0x15) ; 	
 
-	/* Enable Auto soft reset on SCDT = 0 */
+	
 	I2C_WriteByte(TPI_SLAVE_ADDR, 0x05, 0x04);
-	/* HDMI Transcode mode enable */
+	
 	I2C_WriteByte(TPI_SLAVE_ADDR, 0x0D, 0x1C);
-	I2C_WriteByte(TPI_SLAVE_ADDR, 0x75, 0x60);	/* mw20110921 match w/ v100108 to pass CTS xxxxx [6]=enable Rsen change int */
-	I2C_WriteByte(TPI_SLAVE_ADDR, 0x76, 0x02);	/* enable Tclk stable  change int mw20110921 match w/ v100108 to pass CTS xxxxx */
-	I2C_WriteByte(TPI_SLAVE_ADDR, 0x3C, 0x02);	/* mw20110616 enable TPI Rsen int */
+	I2C_WriteByte(TPI_SLAVE_ADDR, 0x75, 0x60);	
+	I2C_WriteByte(TPI_SLAVE_ADDR, 0x76, 0x02);	
+	I2C_WriteByte(TPI_SLAVE_ADDR, 0x3C, 0x02);	
 }
 
 static void InitCBusRegs(void)
@@ -497,7 +477,7 @@ static void InitCBusRegs(void)
 	uint8_t		regval;
 
 	TPI_DEBUG_PRINT(("Drv: InitCBusRegs\n"));
-	/* I2C_WriteByte(CBUS_SLAVE_ADDR, 0x07, 0x36);  new default is for MHL mode ; mw20110921 match v100108 DDC transition max value */
+	
 	I2C_WriteByte(CBUS_SLAVE_ADDR, 0x07, 0xF2);
 
 	I2C_WriteByte(CBUS_SLAVE_ADDR, 0x40, 0x03);
@@ -533,7 +513,7 @@ static void InitCBusRegs(void)
 	I2C_WriteByte(CBUS_SLAVE_ADDR, 0x31, regval);
 
 	regval = I2C_ReadByte(CBUS_SLAVE_ADDR, 0x22);
-	I2C_WriteByte(CBUS_SLAVE_ADDR, 0x22, (regval&0xF0)|0x0D);/* mw20110921 match v100108 */
+	I2C_WriteByte(CBUS_SLAVE_ADDR, 0x22, (regval&0xF0)|0x0D);
 
 	I2C_WriteByte(CBUS_SLAVE_ADDR, 0x30, 0x01);
 
@@ -568,22 +548,21 @@ void SetHDCPStatus(bool Status)
 
 static void ForceUsbIdSwitchOpen(void)
 {
-	I2C_WriteByte(TPI_SLAVE_ADDR, 0x90, 0x26);
-	ReadModifyWriteTPI(0x95, BIT_6, BIT_6);
-
-	WriteByteTPI(0x92, 0x86);
-
-	ReadModifyWriteTPI(0x79, BIT_5 | BIT_4, BIT_4);
-
+	if(!disable_interswitch) {
+		I2C_WriteByte(TPI_SLAVE_ADDR, 0x90, 0x26);
+		ReadModifyWriteTPI(0x95, BIT_6, BIT_6);
+		WriteByteTPI(0x92, 0x86);
+		ReadModifyWriteTPI(0x79, BIT_5 | BIT_4, BIT_4);
+	}
 }
 
 static void ReleaseUsbIdSwitchOpen(void)
 {
-	DelayMS(50);
-
-	ReadModifyWriteTPI(0x95, BIT_6, 0x00);
-
-	ENABLE_DISCOVERY;
+	if(!disable_interswitch) {
+		DelayMS(50);
+		ReadModifyWriteTPI(0x95, BIT_6, 0x00);
+		ENABLE_DISCOVERY;
+	}
 }
 
 void CbusWakeUpPulseGenerator(void)
@@ -593,42 +572,42 @@ void CbusWakeUpPulseGenerator(void)
 	TPI_DEBUG_PRINT(("Drv: CbusWakeUpPulseGenerator\n"));
 
 	regval = I2C_ReadByte(TPI_SLAVE_ADDR, 0x96);
-	/* I2C_WriteByte(TPI_SLAVE_ADDR, 0x96, (I2C_ReadByte(TPI_SLAVE_ADDR, 0x96) | 0xC0));*/
+	
 	regval |= 0xC0;
 	I2C_WriteByte(TPI_SLAVE_ADDR, 0x96, regval);
 	DelayMS(T_SRC_WAKE_PULSE_WIDTH_1 - 1);
 
-	/* I2C_WriteByte(TPI_SLAVE_ADDR, 0x96, (I2C_ReadByte(TPI_SLAVE_ADDR, 0x96) & 0x3F));*/
+	
 	regval &= 0x3F;
 	I2C_WriteByte(TPI_SLAVE_ADDR, 0x96, regval);
 	DelayMS(T_SRC_WAKE_PULSE_WIDTH_1 - 2);
 
-	/* I2C_WriteByte(TPI_SLAVE_ADDR, 0x96, (I2C_ReadByte(TPI_SLAVE_ADDR, 0x96) | 0xC0));*/
+	
 	regval |= 0xC0;
 	I2C_WriteByte(TPI_SLAVE_ADDR, 0x96, regval);
 	DelayMS(T_SRC_WAKE_PULSE_WIDTH_1 - 2);
 
-	/* I2C_WriteByte(TPI_SLAVE_ADDR, 0x96, (I2C_ReadByte(TPI_SLAVE_ADDR, 0x96) & 0x3F));*/
+	
 	regval &= 0x3F;
 	I2C_WriteByte(TPI_SLAVE_ADDR, 0x96, regval);
 	DelayMS(T_SRC_WAKE_PULSE_WIDTH_2 - 2);
 
-	/* I2C_WriteByte(TPI_SLAVE_ADDR, 0x96, (I2C_ReadByte(TPI_SLAVE_ADDR, 0x96) | 0xC0));*/
+	
 	regval |= 0xC0;
 	I2C_WriteByte(TPI_SLAVE_ADDR, 0x96, regval);
 	DelayMS(T_SRC_WAKE_PULSE_WIDTH_1 - 2);
 
-	/* I2C_WriteByte(TPI_SLAVE_ADDR, 0x96, (I2C_ReadByte(TPI_SLAVE_ADDR, 0x96) & 0x3F));*/
+	
 	regval &= 0x3F;
 	I2C_WriteByte(TPI_SLAVE_ADDR, 0x96, regval);
 	DelayMS(T_SRC_WAKE_PULSE_WIDTH_1 - 2);
 
-	/* I2C_WriteByte(TPI_SLAVE_ADDR, 0x96, (I2C_ReadByte(TPI_SLAVE_ADDR, 0x96) | 0xC0));*/
+	
 	regval |= 0xC0;
 	I2C_WriteByte(TPI_SLAVE_ADDR, 0x96, regval);
 	DelayMS(T_SRC_WAKE_PULSE_WIDTH_1 - 2);
 
-	/* I2C_WriteByte(TPI_SLAVE_ADDR, 0x96, (I2C_ReadByte(TPI_SLAVE_ADDR, 0x96) & 0x3F));*/
+	
 	regval &= 0x3F;
 	I2C_WriteByte(TPI_SLAVE_ADDR, 0x96, regval);
 
@@ -669,7 +648,7 @@ void	ProcessRgnd(void)
 	TPI_DEBUG_PRINT(("Drv: RGND Reg 99 = %02X : ", (int)reg99RGNDRange));
 
 
-	if (0x02 == reg99RGNDRange /*|| (0x01 == reg99RGNDRange)*/) {
+	if (0x02 == reg99RGNDRange ) {
 			SET_BIT(TPI_SLAVE_ADDR, 0x95, 5);
 
 			TPI_DEBUG_PRINT(("Drv: Waiting T_SRC_VBUS_CBUS_TO_STABLE (%d ms)\n", (int)T_SRC_VBUS_CBUS_TO_STABLE));
@@ -683,8 +662,10 @@ void	ProcessRgnd(void)
 }
 void change_driving_strength(byte reg_a3, byte reg_a6)
 {
-	if(board_build_flag() != SHIP_BUILD && dbg_drv_str_on) {
+	
+	if( dbg_drv_str_on) {
 		TPI_DEBUG_PRINT(("Drv: %s debuging driving str 0xA3 = %x\n", __func__, dbg_drv_str_a3));
+		TPI_DEBUG_PRINT(("Drv: %s debuging driving str 0xA6 = %x\n", __func__, dbg_drv_str_a6));
 		return;
 	}
 	TPI_DEBUG_PRINT(("Drv: %s 0xA3 = %x 0xA6 = %x\n",
@@ -749,14 +730,14 @@ void ProcessMhlStatus(bool connect, bool force)
 
 		gConnectMHL = connect;
 
-		/* if connected, let DetectCharger to report the status */
+		
 		if (connect)
 			return;
 		else
 			gStatusMHL = CONNECT_TYPE_UNKNOWN;
 
 	} else {
-		/* the connection has been closed, no need to report the charger status */
+		
 		if (!gConnectMHL && gStatusMHL) {
 			TPI_DEBUG_PRINT(("DetectCharger: no need to report the charger status?\n"));
 			return;
@@ -778,31 +759,31 @@ static	int	Int4Isr(void)
 	uint8_t		reg74, reg72;
 
 	reg74 = I2C_ReadByte(TPI_SLAVE_ADDR, (0x74));
-	reg72 = I2C_ReadByte(TPI_SLAVE_ADDR, (0x72)); /* mw20110729 for debug when has SCDT,PSTABLE change int only */
+	reg72 = I2C_ReadByte(TPI_SLAVE_ADDR, (0x72)); 
 	if (0xFF == reg74)
 		return I2C_INACCESSIBLE;
 
 	if (reg74 & BIT_2) {
-		/* WR_Dcap_Rdy_Int_Done = false; */
+		
 		MhlTxDrvProcessConnection();
-		/*UNMASK_INTR_2_INTERRUPTS; */
-		/*UNMASK_INTR_4_INTERRUPTS; */
+		
+		
 #ifdef CONFIG_CABLE_DETECT_ACCESSORY
-		/* ProcessMhlStatus(true, true); */
+		
 #endif
 	} else if (reg74 & BIT_3) {
 		I2C_WriteByte(TPI_SLAVE_ADDR, (0x74), reg74);
 		MhlTxDrvProcessDisconnection();
 #ifdef CONFIG_CABLE_DETECT_ACCESSORY
-		/* ProcessMhlStatus(false, true); */
+		
 #endif
-		return I2C_INACCESSIBLE; /* mw20110925 may related to MHL_Est 5K pull up failure issue */
+		return I2C_INACCESSIBLE; 
 	}
 
 	if ((POWER_STATE_D3 == fwPowerState) && (reg74 & BIT_6)) {
 		SwitchToD0();
 		ProcessRgnd();
-		/* UNMASK_INTR_1_INTERRUPTS;*/
+		
 	}
 
 	if (reg74 & BIT_4) {
@@ -821,8 +802,6 @@ static	int	Int4Isr(void)
 #ifdef	APPLY_PLL_RECOVERY
 static void ApplyPllRecovery(void)
 {
-	if (!HDCPSuccess) //8x60 needs to keep it, or it will flash
-		return;
 
 	CLR_BIT(TPI_SLAVE_ADDR, 0x80, 4);
 
@@ -872,13 +851,13 @@ static void MhlTxDrvProcessConnection(void)
 
 	fwPowerState = POWER_STATE_D0_MHL;
 
-	WriteByteCBUS(0x07, 0xF2); /* mw20110922 match w/ V100108 */
+	WriteByteCBUS(0x07, 0xF2); 
 
 	SET_BIT(CBUS_SLAVE_ADDR, 0x44, 1);
 
-	/* CLR_BIT(TPI_SLAVE_ADDR, 0x79, 4);*/
+	
 
-	/* SiiMhlTxDrvTmdsControl( true ); mw20110922 , v100108 doesn't enable TMDS here ; Page0Reg0x80[4]=1 enable TMDS Tx */
+	
 
 	SET_BIT(TPI_SLAVE_ADDR, 0x90, 0);
 	ENABLE_DISCOVERY;
@@ -894,8 +873,8 @@ static void MhlTxDrvProcessConnection(void)
 	DelayMS(T_SRC_RXSENSE_CHK-100);
 	contentOn = 1;
 	SiiMhlTxNotifyConnection(mhlConnected = true);
-	//SiiMhlTxDrvTmdsControl(true);
-#if 1
+	
+
 	if (!(I2C_ReadByte(TPI_SLAVE_ADDR, 0x09) & BIT_2)) {
 		TPI_DEBUG_PRINT(("400ms exp, Rsen=0,discnct\n"));
 		DISABLE_DISCOVERY;
@@ -904,7 +883,7 @@ static void MhlTxDrvProcessConnection(void)
 		DelayMS(100);
 		return ;
 	}
-#endif
+
 #ifdef CONFIG_CABLE_DETECT_ACCESSORY
 	ProcessMhlStatus(true, true);
 #endif
@@ -917,8 +896,14 @@ static void MhlTxDrvProcessDisconnection(void)
 
 	TPI_DEBUG_PRINT(("Drv: MhlTxDrvProcessDisconnection\n"));
 
-        if(fwPowerState == POWER_STATE_D0_NO_MHL)
-               fwPowerState = POWER_STATE_D0_MHL;
+#ifdef CONFIG_CABLE_DETECT_ACCESSORY
+#ifdef CONFIG_INTERNAL_CHARGING_SUPPORT
+	
+	if(fwPowerState == POWER_STATE_D0_NO_MHL && (gConnectMHL == false))
+		fwPowerState = POWER_STATE_D0_MHL;
+#endif
+#endif
+
 
 	I2C_WriteByte(TPI_SLAVE_ADDR, 0xA0, 0xD0);
 
@@ -954,7 +939,7 @@ void	CbusReset()
 
 	UNMASK_CBUS1_INTERRUPTS;
 	UNMASK_CBUS2_INTERRUPTS;
-	/* mw20110922 , delete to match w v100108 ; DDC translation time out=3; Cbus burst length=128 bytes, enable Cbus DDC burst mode */
+	
 	for (idx = 0; idx < 4; idx++) {
 		WriteByteCBUS(0xE0 + idx, 0xFF);
 		WriteByteCBUS(0xF0 + idx, 0xFF);
@@ -1010,86 +995,12 @@ static uint8_t CBusProcessErrors(uint8_t intStatus)
 	return(result);
 }
 
-#ifdef CONFIG_FB_MSM_HDMI_MHL_SUPERDEMO
-void Tpi_query_remote_keyInfo(T_MHL_REMOTE_KEY_DATA *data)
-{
-	memcpy(data, &g_sii9234_key_data, sizeof(T_MHL_REMOTE_KEY_DATA));
-}
-
-void Tpi_query_remote_touchInfo(uint16_t *finger_num, T_MHL_REMOTE_FINGER_DATA *data)
-{
-	uint16_t fingers = g_sii9234_finger_num;
-
-	if (fingers > MHL_SII9234_TOUCH_FINGER_NUM_MAX) {
-		TPI_DEBUG_PRINT(("[Err]: invaild fingers = %d\n", fingers));
-		return;
-	}
-	*finger_num = fingers;
-	memcpy(data, g_sii9234_finger_data, sizeof(T_MHL_REMOTE_FINGER_DATA)*fingers);
-#if 0
-	TPI_DEBUG_PRINT(("[SWA]: x = %d, y = %d, z = %d\n",
-		g_sii9234_finger_data[0].x, g_sii9234_finger_data[0].y, g_sii9234_finger_data[0].z));
-	TPI_DEBUG_PRINT(("[SWA]: x1 = %d, y1 = %d, z1 = %d\n",
-		g_sii9234_finger_data[1].x, g_sii9234_finger_data[1].y, g_sii9234_finger_data[1].z));
-#endif
-}
-
-void Tpi_reset_remote_intr(void)
-{
-	g_sii9234_intr_writeburst_en = E_MHL_FALSE;
-}
-
-int Tpi_query_remote_type(uint16_t *evt_type)
-{
-	*evt_type = E_MHL_EVT_UNKNOWN;
-	if (g_sii9234_intr_writeburst_en)
-		*evt_type = g_sii9234_remote_evt_type;
-	return g_sii9234_intr_writeburst_en;
-}
-
-void Tpi_parse_scratchpad_data(uint8_t *Data)
-{
-	memset(g_sii9234_finger_data, 0, sizeof(T_MHL_REMOTE_FINGER_DATA)*MHL_SII9234_TOUCH_FINGER_NUM_MAX);
-	memset(&g_sii9234_key_data, 0, sizeof(T_MHL_REMOTE_KEY_DATA));
-	g_sii9234_finger_num = Data[11];
-	g_sii9234_remote_evt_type = Data[13];
-	switch (g_sii9234_remote_evt_type) {
-	case E_MHL_EVT_REMOTE_KEY:
-	case E_MHL_EVT_REMOTE_KEY_RELEASE:
-		g_sii9234_key_data.keyIn = E_MHL_TRUE;
-		g_sii9234_key_data.keyCode = Data[14];
-		break;
-	case E_MHL_EVT_REMOTE_TOUCH:
-		/* finger 1 press */
-		if ((Data[1] == E_MHL_EVT_REMOTE_TOUCH_PRESS || Data[1] == E_MHL_EVT_REMOTE_TOUCH_RELEASE)) {
-			g_sii9234_finger_data[0].x = Data[2] | (Data[3] << 8);
-			g_sii9234_finger_data[0].y = Data[4] | (Data[5] << 8);
-			g_sii9234_finger_data[0].z = Data[1];
-		}
-		/* finger 2 press */
-		if ((Data[6] == E_MHL_EVT_REMOTE_TOUCH_PRESS || Data[6] == E_MHL_EVT_REMOTE_TOUCH_RELEASE)) {
-			g_sii9234_finger_data[1].x = Data[7] | (Data[8] << 8);
-			g_sii9234_finger_data[1].y = Data[9] | (Data[10] << 8);
-			g_sii9234_finger_data[1].z = Data[6];
-		}
-		break;
-	default:
-		TPI_DEBUG_PRINT(("Err: invaild remote event = %d\n", g_sii9234_remote_evt_type));
-		break;
-	}
-}
-#endif
-
 static void MhlCbusIsr(void)
 {
 	uint8_t		cbusInt;
 	uint8_t     gotData[4];
 	uint8_t		i;
 	uint8_t		reg71 = I2C_ReadByte(TPI_SLAVE_ADDR, 0x71);
-#ifdef CONFIG_FB_MSM_HDMI_MHL_SUPERDEMO
-	uint8_t		Data[MHL_SII9234_SCRATCHPAD_REG_MAX] = {0};
-#endif
-
 
 	cbusInt = ReadByteCBUS(0x08);
 
@@ -1097,7 +1008,7 @@ static void MhlCbusIsr(void)
 		return;
 
 	if (cbusInt) {
-		/* Clear all interrupts that were raised even if we did not process */
+		
 		WriteByteCBUS(0x08, cbusInt);
 		TPI_DEBUG_PRINT(("Drv: CBUS INTR_1: %02X\n", (int) cbusInt));
 	}
@@ -1112,7 +1023,7 @@ static void MhlCbusIsr(void)
 
 	if ((cbusInt & BIT_5) || (cbusInt & BIT_6)) {
 		if (!WR_Dcap_Rdy_Int_Done && (cbusInt&BIT_5))
-			return; /* don't clear pending int, until 400ms sw delay expired */
+			return; 
 		gotData[0] = CBusProcessErrors(cbusInt);
 	}
 
@@ -1131,22 +1042,6 @@ static void MhlCbusIsr(void)
 	cbusInt = ReadByteCBUS(0x1E);
 	if (cbusInt)
 		TPI_DEBUG_PRINT(("Drv: CBUS INTR_2: %d\n", (int) cbusInt));
-
-#ifdef CONFIG_FB_MSM_HDMI_MHL_SUPERDEMO
-	if (cbusInt & BIT_0) {
-		g_sii9234_intr_writeburst_en = E_MHL_TRUE;
-		for (i = 0; i < MHL_SII9234_SCRATCHPAD_REG_MAX; i++) {
-			Data[i] = ReadByteCBUS(0xc0+i);
-#if 0
-			if (i == 13)
-				TPI_DEBUG_PRINT(("Addr 0x%x = 0%x\n", 0xc0+i, Data[i]));
-			if (i == 14)
-				TPI_DEBUG_PRINT(("Addr 0x%x = 0%x\n", 0xc0+i, Data[i]));
-#endif
-		}
-		Tpi_parse_scratchpad_data(Data);
-	}
-#endif
 
 	if (cbusInt & BIT_2) {
 		TPI_DEBUG_PRINT(("Drv: MHL INTR Received\n"));
@@ -1175,7 +1070,7 @@ static void MhlCbusIsr(void)
 
 	if (BIT_6 & (dsHpdStatus ^ cbusInt)) {
 		uint8_t status = cbusInt & BIT_6;
-		/* SiiMhlTxNotifyDsHpdChange( cbusInt ); */
+		
 		TPI_DEBUG_PRINT(("Drv: Downstream HPD changed to: %02X\n", (int) cbusInt));
 		SiiMhlTxNotifyDsHpdChange(status);
 		if (status)

@@ -16,11 +16,6 @@
  * along with this program; if not, write to the Free Software
  * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  */
-/*
- * Authors:
- *	Noriaki TAKAMIYA @USAGI
- *	Masahide NAKAMURA @USAGI
- */
 
 #include <linux/module.h>
 #include <linux/skbuff.h>
@@ -84,30 +79,28 @@ static int mip6_mh_len(int type)
 
 static int mip6_mh_filter(struct sock *sk, struct sk_buff *skb)
 {
-	struct ip6_mh _hdr;
-	const struct ip6_mh *mh;
+	struct ip6_mh *mh;
 
-	mh = skb_header_pointer(skb, skb_transport_offset(skb),
-				sizeof(_hdr), &_hdr);
-	if (!mh)
+	if (!pskb_may_pull(skb, (skb_transport_offset(skb)) + 8) ||
+	    !pskb_may_pull(skb, (skb_transport_offset(skb) +
+				 ((skb_transport_header(skb)[1] + 1) << 3))))
 		return -1;
 
-	if (((mh->ip6mh_hdrlen + 1) << 3) > skb->len)
-		return -1;
+	mh = (struct ip6_mh *)skb_transport_header(skb);
 
 	if (mh->ip6mh_hdrlen < mip6_mh_len(mh->ip6mh_type)) {
 		LIMIT_NETDEBUG(KERN_DEBUG "mip6: MH message too short: %d vs >=%d\n",
 			       mh->ip6mh_hdrlen, mip6_mh_len(mh->ip6mh_type));
-		mip6_param_prob(skb, 0, offsetof(struct ip6_mh, ip6mh_hdrlen) +
-				skb_network_header_len(skb));
+		mip6_param_prob(skb, 0, ((&mh->ip6mh_hdrlen) -
+					 skb_network_header(skb)));
 		return -1;
 	}
 
 	if (mh->ip6mh_proto != IPPROTO_NONE) {
 		LIMIT_NETDEBUG(KERN_DEBUG "mip6: MH invalid payload proto = %d\n",
 			       mh->ip6mh_proto);
-		mip6_param_prob(skb, 0, offsetof(struct ip6_mh, ip6mh_proto) +
-				skb_network_header_len(skb));
+		mip6_param_prob(skb, 0, ((&mh->ip6mh_proto) -
+					 skb_network_header(skb)));
 		return -1;
 	}
 
@@ -141,10 +134,6 @@ static int mip6_destopt_input(struct xfrm_state *x, struct sk_buff *skb)
 	return err;
 }
 
-/* Destination Option Header is inserted.
- * IP Header's src address is replaced with Home Address Option in
- * Destination Option Header.
- */
 static int mip6_destopt_output(struct xfrm_state *x, struct sk_buff *skb)
 {
 	struct ipv6hdr *iph;
@@ -164,11 +153,6 @@ static int mip6_destopt_output(struct xfrm_state *x, struct sk_buff *skb)
 
 	hao = mip6_padn((char *)(dstopt + 1),
 			calc_padlen(sizeof(*dstopt), 6));
-
-#ifdef CONFIG_HTC_NETWORK_MODIFY
-	if (IS_ERR(hao) || (!hao))
-		printk(KERN_ERR "[NET] hao is NULL in %s!\n", __func__);
-#endif
 
 	hao->type = IPV6_TLV_HAO;
 	BUILD_BUG_ON(sizeof(*hao) != 18);
@@ -202,8 +186,8 @@ static inline int mip6_report_rl_allow(struct timeval *stamp,
 		mip6_report_rl.stamp.tv_sec = stamp->tv_sec;
 		mip6_report_rl.stamp.tv_usec = stamp->tv_usec;
 		mip6_report_rl.iif = iif;
-		ipv6_addr_copy(&mip6_report_rl.src, src);
-		ipv6_addr_copy(&mip6_report_rl.dst, dst);
+		mip6_report_rl.src = *src;
+		mip6_report_rl.dst = *dst;
 		allow = 1;
 	}
 	spin_unlock_bh(&mip6_report_rl.lock);
@@ -285,11 +269,6 @@ static int mip6_destopt_offset(struct xfrm_state *x, struct sk_buff *skb,
 			found_rhdr = 1;
 			break;
 		case NEXTHDR_DEST:
-			/*
-			 * HAO MUST NOT appear more than once.
-			 * XXX: It is better to try to find by the end of
-			 * XXX: packet if HAO exists.
-			 */
 			if (ipv6_find_tlv(skb, offset, IPV6_TLV_HAO) >= 0) {
 				LIMIT_NETDEBUG(KERN_WARNING "mip6: hao exists already, override\n");
 				return offset;
@@ -332,10 +311,6 @@ static int mip6_destopt_init_state(struct xfrm_state *x)
 	return 0;
 }
 
-/*
- * Do nothing about destroying since it has no specific operation for
- * destination options header unlike IPsec protocols.
- */
 static void mip6_destopt_destroy(struct xfrm_state *x)
 {
 }
@@ -369,9 +344,6 @@ static int mip6_rthdr_input(struct xfrm_state *x, struct sk_buff *skb)
 	return err;
 }
 
-/* Routing Header type 2 is inserted.
- * IP Header's dst address is replaced with Routing Header's Home Address.
- */
 static int mip6_rthdr_output(struct xfrm_state *x, struct sk_buff *skb)
 {
 	struct ipv6hdr *iph;
@@ -465,10 +437,6 @@ static int mip6_rthdr_init_state(struct xfrm_state *x)
 	return 0;
 }
 
-/*
- * Do nothing about destroying since it has no specific operation for routing
- * header type 2 unlike IPsec protocols.
- */
 static void mip6_rthdr_destroy(struct xfrm_state *x)
 {
 }

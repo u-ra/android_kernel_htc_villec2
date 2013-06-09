@@ -1,4 +1,4 @@
-/* Copyright (c) 2010-2011, Code Aurora Forum. All rights reserved.
+/* Copyright (c) 2010-2012, Code Aurora Forum. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -9,6 +9,9 @@
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  * GNU General Public License for more details.
  */
+
+#define pr_fmt(fmt) "AXI: %s(): " fmt, __func__
+
 #include <linux/kernel.h>
 #include <linux/init.h>
 #include <linux/module.h>
@@ -43,12 +46,6 @@ struct bus_type msm_bus_type = {
 };
 EXPORT_SYMBOL(msm_bus_type);
 
-/**
- * msm_bus_get_fabric_device() - This function is used to search for
- * the fabric device on the bus
- * @fabid: Fabric id
- * Function returns: Pointer to the fabric device
- */
 struct msm_bus_fabric_device *msm_bus_get_fabric_device(int fabid)
 {
 	struct device *dev;
@@ -59,10 +56,6 @@ struct msm_bus_fabric_device *msm_bus_get_fabric_device(int fabid)
 	return fabric;
 }
 
-/**
- * msm_bus_fabric_device_register() - Registers a fabric on msm bus
- * @fabdev: Fabric device to be registered
- */
 int msm_bus_fabric_device_register(struct msm_bus_fabric_device *fabdev)
 {
 	int ret = 0;
@@ -83,10 +76,6 @@ err:
 	return ret;
 }
 
-/**
- * msm_bus_fabric_device_unregister() - Unregisters the fabric
- * devices from the msm bus
- */
 void msm_bus_fabric_device_unregister(struct msm_bus_fabric_device *fabdev)
 {
 	device_unregister(&fabdev->dev);

@@ -7,6 +7,7 @@
 #include <linux/time.h>
 #include <linux/proc_fs.h>
 #include <linux/kernel.h>
+#include <linux/pid_namespace.h>
 #include <linux/mm.h>
 #include <linux/string.h>
 #include <linux/stat.h>
@@ -17,9 +18,10 @@
 #include <linux/init.h>
 #include <linux/module.h>
 #include <linux/sysctl.h>
+#include <linux/seq_file.h>
 #include <linux/slab.h>
+#include <linux/mount.h>
 
-#include <asm/system.h>
 #include <asm/uaccess.h>
 
 #include "internal.h"
@@ -33,10 +35,10 @@ static void proc_evict_inode(struct inode *inode)
 	truncate_inode_pages(&inode->i_data, 0);
 	end_writeback(inode);
 
-	/* Stop tracking associated processes */
+	
 	put_pid(PROC_I(inode)->pid);
 
-	/* Let go of any associated proc directory entry */
+	
 	de = PROC_I(inode)->pde;
 	if (de)
 		pde_put(de);
@@ -45,7 +47,7 @@ static void proc_evict_inode(struct inode *inode)
 		rcu_assign_pointer(PROC_I(inode)->sysctl, NULL);
 		sysctl_head_put(head);
 	}
-	/* Release any associated namespace */
+	
 	ns_ops = PROC_I(inode)->ns_ops;
 	if (ns_ops && ns_ops->put)
 		ns_ops->put(PROC_I(inode)->ns);
@@ -77,7 +79,6 @@ static struct inode *proc_alloc_inode(struct super_block *sb)
 static void proc_i_callback(struct rcu_head *head)
 {
 	struct inode *inode = container_of(head, struct inode, i_rcu);
-	INIT_LIST_HEAD(&inode->i_dentry);
 	kmem_cache_free(proc_inode_cachep, PROC_I(inode));
 }
 
@@ -102,12 +103,27 @@ void __init proc_init_inodecache(void)
 					     init_once);
 }
 
+static int proc_show_options(struct seq_file *seq, struct dentry *root)
+{
+	struct super_block *sb = root->d_sb;
+	struct pid_namespace *pid = sb->s_fs_info;
+
+	if (pid->pid_gid)
+		seq_printf(seq, ",gid=%lu", (unsigned long)pid->pid_gid);
+	if (pid->hide_pid != 0)
+		seq_printf(seq, ",hidepid=%u", pid->hide_pid);
+
+	return 0;
+}
+
 static const struct super_operations proc_sops = {
 	.alloc_inode	= proc_alloc_inode,
 	.destroy_inode	= proc_destroy_inode,
 	.drop_inode	= generic_delete_inode,
 	.evict_inode	= proc_evict_inode,
 	.statfs		= simple_statfs,
+	.remount_fs	= proc_remount,
+	.show_options	= proc_show_options,
 };
 
 static void __pde_users_dec(struct proc_dir_entry *pde)
@@ -131,23 +147,11 @@ static loff_t proc_reg_llseek(struct file *file, loff_t offset, int whence)
 	loff_t (*llseek)(struct file *, loff_t, int);
 
 	spin_lock(&pde->pde_unload_lock);
-	/*
-	 * remove_proc_entry() is going to delete PDE (as part of module
-	 * cleanup sequence). No new callers into module allowed.
-	 */
 	if (!pde->proc_fops) {
 		spin_unlock(&pde->pde_unload_lock);
 		return rv;
 	}
-	/*
-	 * Bump refcount so that remove_proc_entry will wail for ->llseek to
-	 * complete.
-	 */
 	pde->pde_users++;
-	/*
-	 * Save function pointer under lock, to protect against ->proc_fops
-	 * NULL'ifying right after ->pde_unload_lock is dropped.
-	 */
 	llseek = pde->proc_fops->llseek;
 	spin_unlock(&pde->pde_unload_lock);
 
@@ -301,16 +305,6 @@ static int proc_reg_open(struct inode *inode, struct file *file)
 	int (*release)(struct inode *, struct file *);
 	struct pde_opener *pdeo;
 
-	/*
-	 * What for, you ask? Well, we can have open, rmmod, remove_proc_entry
-	 * sequence. ->release won't be called because ->proc_fops will be
-	 * cleared. Depending on complexity of ->release, consequences vary.
-	 *
-	 * We can't wait for mercy when close will be done for real, it's
-	 * deadlockable: rmmod foo </proc/foo . So, we're going to do ->release
-	 * by hand in remove_proc_entry(). For this, save opener's credentials
-	 * for later.
-	 */
 	pdeo = kmalloc(sizeof(struct pde_opener), GFP_KERNEL);
 	if (!pdeo)
 		return -ENOMEM;
@@ -319,7 +313,7 @@ static int proc_reg_open(struct inode *inode, struct file *file)
 	if (!pde->proc_fops) {
 		spin_unlock(&pde->pde_unload_lock);
 		kfree(pdeo);
-		return -EINVAL;
+		return -ENOENT;
 	}
 	pde->pde_users++;
 	open = pde->proc_fops->open;
@@ -331,10 +325,10 @@ static int proc_reg_open(struct inode *inode, struct file *file)
 
 	spin_lock(&pde->pde_unload_lock);
 	if (rv == 0 && release) {
-		/* To know what to release. */
+		
 		pdeo->inode = inode;
 		pdeo->file = file;
-		/* Strictly for "too late" ->release in proc_reg_release(). */
+		
 		pdeo->release = release;
 		list_add(&pdeo->lh, &pde->pde_openers);
 	} else
@@ -366,14 +360,6 @@ static int proc_reg_release(struct inode *inode, struct file *file)
 	spin_lock(&pde->pde_unload_lock);
 	pdeo = find_pde_opener(pde, inode, file);
 	if (!pde->proc_fops) {
-		/*
-		 * Can't simply exit, __fput() will think that everything is OK,
-		 * and move on to freeing struct file. remove_proc_entry() will
-		 * find slacker in opener's list and will try to do non-trivial
-		 * things with struct file. Therefore, remove opener from list.
-		 *
-		 * But if opener is removed from list, who will ->release it?
-		 */
 		if (pdeo) {
 			list_del(&pdeo->lh);
 			spin_unlock(&pde->pde_unload_lock);
@@ -445,7 +431,7 @@ struct inode *proc_get_inode(struct super_block *sb, struct proc_dir_entry *de)
 		if (de->size)
 			inode->i_size = de->size;
 		if (de->nlink)
-			inode->i_nlink = de->nlink;
+			set_nlink(inode, de->nlink);
 		if (de->proc_iops)
 			inode->i_op = de->proc_iops;
 		if (de->proc_fops) {
@@ -469,8 +455,6 @@ struct inode *proc_get_inode(struct super_block *sb, struct proc_dir_entry *de)
 
 int proc_fill_super(struct super_block *s)
 {
-	struct inode * root_inode;
-
 	s->s_flags |= MS_NODIRATIME | MS_NOSUID | MS_NOEXEC;
 	s->s_blocksize = 1024;
 	s->s_blocksize_bits = 10;
@@ -479,19 +463,11 @@ int proc_fill_super(struct super_block *s)
 	s->s_time_gran = 1;
 	
 	pde_get(&proc_root);
-	root_inode = proc_get_inode(s, &proc_root);
-	if (!root_inode)
-		goto out_no_root;
-	root_inode->i_uid = 0;
-	root_inode->i_gid = 0;
-	s->s_root = d_alloc_root(root_inode);
-	if (!s->s_root)
-		goto out_no_root;
-	return 0;
+	s->s_root = d_make_root(proc_get_inode(s, &proc_root));
+	if (s->s_root)
+		return 0;
 
-out_no_root:
 	printk("proc_read_super: get root inode failed\n");
-	iput(root_inode);
 	pde_put(&proc_root);
 	return -ENOMEM;
 }

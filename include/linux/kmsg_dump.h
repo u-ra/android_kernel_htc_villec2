@@ -16,23 +16,14 @@
 #include <linux/list.h>
 
 enum kmsg_dump_reason {
-	KMSG_DUMP_OOPS,
 	KMSG_DUMP_PANIC,
-	KMSG_DUMP_KEXEC,
+	KMSG_DUMP_OOPS,
+	KMSG_DUMP_EMERG,
 	KMSG_DUMP_RESTART,
 	KMSG_DUMP_HALT,
 	KMSG_DUMP_POWEROFF,
-	KMSG_DUMP_EMERG,
 };
 
-/**
- * struct kmsg_dumper - kernel crash message dumper structure
- * @dump:	The callback which gets called on crashes. The buffer is passed
- * 		as two sections, where s1 (length l1) contains the older
- * 		messages and s2 (length l2) contains the newer.
- * @list:	Entry in the dumper list (private)
- * @registered:	Flag that specifies if this is already registered
- */
 struct kmsg_dumper {
 	void (*dump)(struct kmsg_dumper *dumper, enum kmsg_dump_reason reason,
 			const char *s1, unsigned long l1,
@@ -63,4 +54,4 @@ static inline int kmsg_dump_unregister(struct kmsg_dumper *dumper)
 }
 #endif
 
-#endif /* _LINUX_KMSG_DUMP_H */
+#endif 

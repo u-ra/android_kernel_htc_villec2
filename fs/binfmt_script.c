@@ -22,13 +22,11 @@ static int load_script(struct linux_binprm *bprm,struct pt_regs *regs)
 	char interp[BINPRM_BUF_SIZE];
 	int retval;
 
-	if ((bprm->buf[0] != '#') || (bprm->buf[1] != '!'))
+	if ((bprm->buf[0] != '#') || (bprm->buf[1] != '!') ||
+	    (bprm->recursion_depth > BINPRM_MAX_RECURSION))
 		return -ENOEXEC;
-	/*
-	 * This section does the #! interpretation.
-	 * Sorta complicated, but hopefully it will work.  -TYT
-	 */
 
+	bprm->recursion_depth++;
 	allow_write_access(bprm->file);
 	fput(bprm->file);
 	bprm->file = NULL;
@@ -46,26 +44,16 @@ static int load_script(struct linux_binprm *bprm,struct pt_regs *regs)
 	}
 	for (cp = bprm->buf+2; (*cp == ' ') || (*cp == '\t'); cp++);
 	if (*cp == '\0') 
-		return -ENOEXEC; /* No interpreter name found */
+		return -ENOEXEC; 
 	i_name = cp;
 	i_arg = NULL;
 	for ( ; *cp && (*cp != ' ') && (*cp != '\t'); cp++)
-		/* nothing */ ;
+		 ;
 	while ((*cp == ' ') || (*cp == '\t'))
 		*cp++ = '\0';
 	if (*cp)
 		i_arg = cp;
 	strcpy (interp, i_name);
-	/*
-	 * OK, we've parsed out the interpreter name and
-	 * (optional) argument.
-	 * Splice in (1) the interpreter's name for argv[0]
-	 *           (2) (optional) argument to interpreter
-	 *           (3) filename of shell script (replace argv[0])
-	 *
-	 * This is done in reverse order, because of how the
-	 * user environment and arguments are stored.
-	 */
 	retval = remove_arg_zero(bprm);
 	if (retval)
 		return retval;
@@ -80,13 +68,8 @@ static int load_script(struct linux_binprm *bprm,struct pt_regs *regs)
 	retval = copy_strings_kernel(1, &i_name, bprm);
 	if (retval) return retval; 
 	bprm->argc++;
-	retval = bprm_change_interp(interp, bprm);
-	if (retval < 0)
-		return retval;
+	bprm->interp = interp;
 
-	/*
-	 * OK, now restart the process with the interpreter's dentry.
-	 */
 	file = open_exec(interp);
 	if (IS_ERR(file))
 		return PTR_ERR(file);
@@ -105,7 +88,8 @@ static struct linux_binfmt script_format = {
 
 static int __init init_script_binfmt(void)
 {
-	return register_binfmt(&script_format);
+	register_binfmt(&script_format);
+	return 0;
 }
 
 static void __exit exit_script_binfmt(void)

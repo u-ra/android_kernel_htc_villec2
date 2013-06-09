@@ -20,6 +20,7 @@
 #include <linux/kernel.h>
 #include <linux/init.h>
 #include <linux/platform_device.h>
+#include <linux/module.h>
 
 #include <asm/mach/flash.h>
 #include <asm/io.h>
@@ -33,13 +34,14 @@
 
 #include <mach/board.h>
 
+#ifdef CONFIG_MMC_MUST_PREVENT_WP_VIOLATION
+#include <linux/mmc/card.h>
+#endif	
 
-/* configuration tags specific to msm */
 
-#define ATAG_MSM_PARTITION 0x4d534D70 /* MSMp */
+#define ATAG_MSM_PARTITION 0x4d534D70 
 
-struct msm_ptbl_entry
-{
+struct msm_ptbl_entry {
 	char name[16];
 	__u32 offset;
 	__u32 size;
@@ -50,8 +52,6 @@ struct msm_ptbl_entry
 
 static struct mtd_partition msm_nand_partitions[MSM_MAX_PARTITIONS];
 static char msm_nand_names[MSM_MAX_PARTITIONS * 16];
-
-extern struct flash_platform_data msm_nand_data;
 
 int emmc_partition_read_proc(char *page, char **start, off_t off,
 			   int count, int *eof, void *data)
@@ -72,7 +72,6 @@ int emmc_partition_read_proc(char *page, char **start, off_t off,
 	return p - page;
 }
 
-#ifdef CONFIG_MACH_VILLEC2
 int get_partition_num_by_name(char *name)
 {
 	struct mtd_partition *ptn = msm_nand_partitions;
@@ -85,7 +84,6 @@ int get_partition_num_by_name(char *name)
 	return -1;
 }
 EXPORT_SYMBOL(get_partition_num_by_name);
-#endif
 
 static int __init parse_tag_msm_partition(const struct tag *tag)
 {
@@ -112,6 +110,11 @@ static int __init parse_tag_msm_partition(const struct tag *tag)
 		ptn->offset = entry->offset;
 		ptn->size = entry->size;
 
+#ifdef CONFIG_MMC_MUST_PREVENT_WP_VIOLATION
+		if (!strncmp(ptn->name, "system", 6))
+			mmc_blk_set_wp_prevention_partno((int) ptn->offset);
+#endif	
+
 		name += 16;
 		entry++;
 		ptn++;
@@ -123,7 +126,7 @@ static int __init parse_tag_msm_partition(const struct tag *tag)
 		uint64_t kpanic_off = 0;
 
 		if (count == MSM_MAX_PARTITIONS) {
-			printk(KERN_ERR "[K] Cannot create virtual 'kpanic' partition\n");
+			printk(KERN_ERR "Cannot create virtual 'kpanic' partition\n");
 			goto out;
 		}
 
@@ -136,23 +139,23 @@ static int __init parse_tag_msm_partition(const struct tag *tag)
 			}
 		}
 		if (i == count) {
-			printk(KERN_ERR "[K] Partition %s not found\n",
+			printk(KERN_ERR "Partition %s not found\n",
 			       CONFIG_VIRTUAL_KPANIC_SRC);
 			goto out;
 		}
 
 		ptn = &msm_nand_partitions[count];
-		ptn->name ="kpanic";
+		ptn->name = "kpanic";
 		ptn->offset = kpanic_off;
 		ptn->size = CONFIG_VIRTUAL_KPANIC_PSIZE;
 
-		printk(KERN_INFO "[K] Virtual mtd partition '%s' created @%llx (%llu)\n",
+		printk(KERN_INFO "Virtual mtd partition '%s' created @%llx (%llu)\n",
 		       ptn->name, ptn->offset, ptn->size);
 
 		count++;
 	}
 out:
-#endif /* CONFIG_VIRTUAL_KPANIC_SRC */
+#endif 
 	msm_nand_data.nr_parts = count;
 	msm_nand_data.parts = msm_nand_partitions;
 

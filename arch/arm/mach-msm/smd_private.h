@@ -1,7 +1,7 @@
 /* arch/arm/mach-msm/smd_private.h
  *
  * Copyright (C) 2007 Google, Inc.
- * Copyright (c) 2007-2011, Code Aurora Forum. All rights reserved.
+ * Copyright (c) 2007-2012, Code Aurora Forum. All rights reserved.
  *
  * This software is licensed under the terms of the GNU General Public
  * License version 2, as published by the Free Software Foundation, and
@@ -19,6 +19,7 @@
 #include <linux/types.h>
 #include <linux/spinlock.h>
 #include <mach/msm_smsm.h>
+#include <mach/msm_smd.h>
 
 #define PC_APPS  0
 #define PC_MODEM 1
@@ -43,8 +44,9 @@ struct smem_heap_entry {
 	unsigned allocated;
 	unsigned offset;
 	unsigned size;
-	unsigned reserved;
+	unsigned reserved; 
 };
+#define BASE_ADDR_MASK 0xfffffffc
 
 struct smem_proc_comm {
 	unsigned command;
@@ -77,10 +79,6 @@ struct smsm_interrupt_info {
   uint32_t aArm_wakeup_reason;
 };
 #elif !defined(CONFIG_MSM_SMD)
-void *smem_alloc(unsigned id, unsigned size)
-{
-	return NULL;
-}
 #else
 #error No SMD Package Specified; aborting
 #endif
@@ -103,12 +101,6 @@ void *smem_alloc(unsigned id, unsigned size)
 #define SMD_CHANNELS             64
 #define SMD_HEADER_SIZE          20
 
-/* 'type' field of smd_alloc_elm structure
- * has the following breakup
- * bits 0-7   -> channel type
- * bits 8-11  -> xfer type
- * bits 12-31 -> reserved
- */
 struct smd_alloc_elm {
 	char name[20];
 	uint32_t cid;
@@ -133,24 +125,68 @@ struct smd_half_channel {
 	unsigned head;
 };
 
+struct smd_half_channel_word_access {
+	unsigned state;
+	unsigned fDSR;
+	unsigned fCTS;
+	unsigned fCD;
+	unsigned fRI;
+	unsigned fHEAD;
+	unsigned fTAIL;
+	unsigned fSTATE;
+	unsigned fBLOCKREADINTR;
+	unsigned tail;
+	unsigned head;
+};
+
+struct smd_half_channel_access {
+	void (*set_state)(volatile void *half_channel, unsigned data);
+	unsigned (*get_state)(volatile void *half_channel);
+	void (*set_fDSR)(volatile void *half_channel, unsigned char data);
+	unsigned (*get_fDSR)(volatile void *half_channel);
+	void (*set_fCTS)(volatile void *half_channel, unsigned char data);
+	unsigned (*get_fCTS)(volatile void *half_channel);
+	void (*set_fCD)(volatile void *half_channel, unsigned char data);
+	unsigned (*get_fCD)(volatile void *half_channel);
+	void (*set_fRI)(volatile void *half_channel, unsigned char data);
+	unsigned (*get_fRI)(volatile void *half_channel);
+	void (*set_fHEAD)(volatile void *half_channel, unsigned char data);
+	unsigned (*get_fHEAD)(volatile void *half_channel);
+	void (*set_fTAIL)(volatile void *half_channel, unsigned char data);
+	unsigned (*get_fTAIL)(volatile void *half_channel);
+	void (*set_fSTATE)(volatile void *half_channel, unsigned char data);
+	unsigned (*get_fSTATE)(volatile void *half_channel);
+	void (*set_fBLOCKREADINTR)(volatile void *half_channel,
+					unsigned char data);
+	unsigned (*get_fBLOCKREADINTR)(volatile void *half_channel);
+	void (*set_tail)(volatile void *half_channel, unsigned data);
+	unsigned (*get_tail)(volatile void *half_channel);
+	void (*set_head)(volatile void *half_channel, unsigned data);
+	unsigned (*get_head)(volatile void *half_channel);
+};
+
+int is_word_access_ch(unsigned ch_type);
+
+struct smd_half_channel_access *get_half_ch_funcs(unsigned ch_type);
+
 struct smem_ram_ptn {
 	char name[16];
 	unsigned start;
 	unsigned size;
 
-	/* RAM Partition attribute: READ_ONLY, READWRITE etc.  */
+	
 	unsigned attr;
 
-	/* RAM Partition category: EBI0, EBI1, IRAM, IMEM */
+	
 	unsigned category;
 
-	/* RAM Partition domain: APPS, MODEM, APPS & MODEM (SHARED) etc. */
+	
 	unsigned domain;
 
-	/* RAM Partition type: system, bootloader, appsboot, apps etc. */
+	
 	unsigned type;
 
-	/* reserved for future expansion without changing version number */
+	
 	unsigned reserved2, reserved3, reserved4, reserved5;
 } __attribute__ ((__packed__));
 
@@ -166,7 +202,6 @@ struct smem_ram_ptable {
 	unsigned buf;
 } __attribute__ ((__packed__));
 
-/* SMEM RAM Partition */
 enum {
 	DEFAULT_ATTRB = ~0x0,
 	READ_ONLY = 0x0,
@@ -196,16 +231,29 @@ enum {
 };
 
 enum {
-	SYS_MEMORY = 1,        /* system memory*/
-	BOOT_REGION_MEMORY1,   /* boot loader memory 1*/
-	BOOT_REGION_MEMORY2,   /* boot loader memory 2,reserved*/
-	APPSBL_MEMORY,         /* apps boot loader memory*/
-	APPS_MEMORY,           /* apps  usage memory*/
+	SYS_MEMORY = 1,        
+	BOOT_REGION_MEMORY1,   
+	BOOT_REGION_MEMORY2,   
+	APPSBL_MEMORY,         
+	APPS_MEMORY,           
 };
 
 extern spinlock_t smem_lock;
 
 
-int smd_diag(void);
+void smd_diag(void);
+int smd_diag_ssr(char *reset_reason);
+int smd_smsm_erase_efs(void);
+
+struct interrupt_stat {
+	uint32_t smd_in_count;
+	uint32_t smd_out_hardcode_count;
+	uint32_t smd_out_config_count;
+
+	uint32_t smsm_in_count;
+	uint32_t smsm_out_hardcode_count;
+	uint32_t smsm_out_config_count;
+};
+extern struct interrupt_stat interrupt_stats[NUM_SMD_SUBSYSTEMS];
 
 #endif

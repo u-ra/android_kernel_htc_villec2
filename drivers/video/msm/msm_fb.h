@@ -23,7 +23,6 @@
 #include "linux/proc_fs.h"
 
 #include <mach/hardware.h>
-#include <mach/msm_subsystem_map.h>
 #include <linux/io.h>
 #include <mach/board.h>
 
@@ -38,7 +37,6 @@
 #include <linux/fb.h>
 #include <linux/list.h>
 #include <linux/types.h>
-#include <linux/ion.h>
 
 #include <linux/msm_mdp.h>
 #ifdef CONFIG_HAS_EARLYSUSPEND
@@ -62,6 +60,7 @@ struct msmfb_writeback_data_list {
 	struct list_head registered_entry;
 	struct list_head active_entry;
 	void *addr;
+	struct ion_handle *ihdl;
 	struct file *pmem_file;
 	struct msmfb_data buf_info;
 	struct msmfb_img img;
@@ -77,6 +76,7 @@ struct msm_fb_data_type {
 
 	panel_id_type panel;
 	struct msm_panel_info panel_info;
+	int init_mipi_lcd;
 
 	DISP_TARGET dest;
 	struct fb_info *fbi;
@@ -98,7 +98,7 @@ struct msm_fb_data_type {
 	boolean pan_waiting;
 	struct completion pan_comp;
 
-	/* vsync */
+	
 	boolean use_mdp_vsync;
 	__u32 vsync_gpio;
 	__u32 total_lcd_lines;
@@ -133,8 +133,9 @@ struct msm_fb_data_type {
 	int (*lut_update) (struct fb_info *info,
 			      struct fb_cmap *cmap);
 	int (*do_histogram) (struct fb_info *info,
-			      struct mdp_histogram *hist);
-	int (*get_gamma_curvy) (struct msm_panel_info pinfo, struct gamma_curvy *gc);
+			      struct mdp_histogram_data *hist);
+	int (*start_histogram) (struct mdp_histogram_start_req *req);
+	int (*stop_histogram) (struct fb_info *info, uint32_t block);
 	void *cursor_buf;
 	void *cursor_buf_phys;
 
@@ -149,10 +150,12 @@ struct msm_fb_data_type {
 	__u32 var_xres;
 	__u32 var_yres;
 	__u32 var_pixclock;
-#if 1 /* HTC_CSP_START */
+#if 1 
 	uint32_t width;
 	uint32_t height;
-#endif /* HTC_CSP_END */
+	int perfhint;
+#endif 
+	__u32 var_frame_rate;
 
 #ifdef MSM_FB_ENABLE_DBGFS
 	struct dentry *sub_dir;
@@ -160,7 +163,7 @@ struct msm_fb_data_type {
 
 #ifdef CONFIG_HAS_EARLYSUSPEND
 	struct early_suspend early_suspend;
-#ifdef CONFIG_HAS_EARLYSUSPEND
+#ifdef CONFIG_HTC_ONMODE_CHARGING
 	struct early_suspend onchg_suspend;
 #endif
 #ifdef CONFIG_FB_MSM_MDDI
@@ -182,24 +185,16 @@ struct msm_fb_data_type {
 	struct list_head writeback_register_queue;
 	wait_queue_head_t wait_q;
 	struct ion_client *iclient;
-	struct msm_mapped_buffer *map_buffer;
+	unsigned long display_iova;
+	unsigned long rotator_iova;
 	struct mdp_buf_type *ov0_wb_buf;
 	struct mdp_buf_type *ov1_wb_buf;
 	u32 ov_start;
 	u32 mem_hid;
 	u32 mdp_rev;
-	u32 use_ov0_blt, ov0_blt_state;
 	u32 writeback_state;
-#if defined CONFIG_FB_MSM_SELF_REFRESH
-	struct workqueue_struct *self_refresh_wq;
-	struct work_struct self_refresh_work;
-	struct timer_list self_refresh_timer;
-#endif
-#ifdef CONFIG_FB_MSM_CABC
-	struct workqueue_struct *cabc_wq;
-	struct work_struct cabc_work;
-	struct timer_list cabc_update_timer;
-#endif
+	bool writeback_active_cnt;
+	int cont_splash_done;
 };
 
 struct dentry *msm_fb_get_debugfs_root(void);
@@ -218,27 +213,27 @@ int msm_fb_writeback_dequeue_buffer(struct fb_info *info,
 int msm_fb_writeback_stop(struct fb_info *info);
 int msm_fb_writeback_terminate(struct fb_info *info);
 int msm_fb_detect_client(const char *name);
-void msm_fb_display_on(struct msm_fb_data_type *mfd);
-#define DEFAULT_BRIGHTNESS 83
+int calc_fb_offset(struct msm_fb_data_type *mfd, struct fb_info *fbi, int bpp);
+void mdp_color_enhancement(const struct mdp_reg *reg_seq, int size);
 
 #ifdef CONFIG_FB_BACKLIGHT
 void msm_fb_config_backlight(struct msm_fb_data_type *mfd);
 #endif
 
-#if (defined(CONFIG_USB_FUNCTION_PROJECTOR) || defined(CONFIG_USB_ANDROID_PROJECTOR))
-/* For USB Projector to quick access the frame buffer info */
-struct msm_fb_info {
-    unsigned char *fb_addr;
-    int msmfb_area;
-    int xres;
-    int yres;
-};
-
-extern int msmfb_get_var(struct msm_fb_info *tmp);
-extern int msmfb_get_fb_area(void);
-#endif
-
 void fill_black_screen(void);
 void unfill_black_screen(void);
+int msm_fb_check_frame_rate(struct msm_fb_data_type *mfd,
+				struct fb_info *info);
 
-#endif /* MSM_FB_H */
+#ifdef CONFIG_FB_MSM_LOGO
+#define INIT_IMAGE_FILE "/initlogo.rle"
+int load_565rle_image(char *filename, bool bf_supported);
+#endif
+enum {
+	MSM_FB_PERFORMANCE_NONE,
+	MSM_FB_PERFORMANCE_NORMAL,
+	MSM_FB_PERFORMANCE_MORE,
+};
+
+#define DEFAULT_BRIGHTNESS 143
+#endif 

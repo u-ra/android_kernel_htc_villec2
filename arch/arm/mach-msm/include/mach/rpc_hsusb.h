@@ -1,6 +1,6 @@
 /* linux/include/mach/rpc_hsusb.h
  *
- * Copyright (c) 2008-2010, Code Aurora Forum. All rights reserved.
+ * Copyright (c) 2008-2010, 2012 Code Aurora Forum. All rights reserved.
  *
  * All source code in this file is licensed under the following license except
  * where indicated.
@@ -23,7 +23,11 @@
 
 #include <mach/msm_rpcrouter.h>
 #include <mach/msm_otg.h>
+#ifdef CONFIG_USB_MSM_OTG_72K
 #include <mach/msm_hsusb.h>
+#else
+#include <linux/usb/msm_hsusb.h>
+#endif
 
 #if defined(CONFIG_MSM_ONCRPCROUTER) && !defined(CONFIG_ARCH_MSM8X60)
 int msm_hsusb_rpc_connect(void);
@@ -42,9 +46,7 @@ int msm_chg_usb_i_is_not_available(void);
 int msm_chg_usb_charger_disconnected(void);
 int msm_chg_rpc_close(void);
 
-int hsusb_rpc_connect(int connect);
-
-#ifdef CONFIG_USB_GADGET_MSM_72K
+#ifdef CONFIG_USB_MSM_72K
 int hsusb_chg_init(int connect);
 void hsusb_chg_vbus_draw(unsigned mA);
 void hsusb_chg_connected(enum chg_type chgtype);
@@ -61,7 +63,6 @@ int msm_fsusb_remote_dev_disconnected(void);
 int msm_fsusb_set_remote_wakeup(void);
 void msm_fsusb_rpc_deinit(void);
 
-/* wrapper to send pid and serial# info to bootloader */
 int usb_diag_update_pid_and_serial_num(uint32_t pid, const char *snum);
 #else
 static inline int msm_hsusb_rpc_connect(void) { return 0; }
@@ -80,7 +81,7 @@ static inline int msm_chg_usb_i_is_not_available(void) { return 0; }
 static inline int msm_chg_usb_charger_disconnected(void) { return 0; }
 static inline int msm_chg_rpc_close(void) { return 0; }
 
-#ifdef CONFIG_USB_GADGET_MSM_72K
+#ifdef CONFIG_USB_MSM_72K
 static inline int hsusb_chg_init(int connect) { return 0; }
 static inline void hsusb_chg_vbus_draw(unsigned mA) { }
 static inline void hsusb_chg_connected(enum chg_type chgtype) { }

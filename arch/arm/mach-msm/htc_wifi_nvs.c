@@ -20,12 +20,13 @@
 #include <linux/kernel.h>
 #include <linux/init.h>
 #include <linux/platform_device.h>
+#include <linux/string.h>
+#include <linux/export.h>
 #include <linux/proc_fs.h>
 
 #include <asm/setup.h>
 
-/* configuration tags specific to msm */
-#define ATAG_MSM_WIFI	0x57494649 /* MSM WiFi */
+#define ATAG_MSM_WIFI	0x57494649 
 
 #define NVS_MAX_SIZE	0x800U
 #define NVS_LEN_OFFSET	0x0C
@@ -37,20 +38,20 @@ static struct proc_dir_entry *wifi_data;
 
 unsigned char *get_wifi_nvs_ram( void )
 {
-	return wifi_nvs_ram;
+	return( wifi_nvs_ram );
 }
 EXPORT_SYMBOL(get_wifi_nvs_ram);
 
-unsigned char *wlan_random_mac(unsigned char *set_mac_addr)
+unsigned char* wlan_random_mac(unsigned char *set_mac_addr)
 {
-    static unsigned char mac_addr[6] = {0, 0, 0, 0, 0, 0};
-    if (set_mac_addr != NULL) {
-	mac_addr[0] = set_mac_addr[0];
-	mac_addr[1] = set_mac_addr[1];
-	mac_addr[2] = set_mac_addr[2];
-	mac_addr[3] = set_mac_addr[3];
-	mac_addr[4] = set_mac_addr[4];
-	mac_addr[5] = set_mac_addr[5];
+    static unsigned char mac_addr[6]={0,0,0,0,0,0};
+    if(set_mac_addr != NULL){
+        mac_addr[0]=set_mac_addr[0];
+        mac_addr[1]=set_mac_addr[1];
+        mac_addr[2]=set_mac_addr[2];
+        mac_addr[3]=set_mac_addr[3];
+        mac_addr[4]=set_mac_addr[4];
+        mac_addr[5]=set_mac_addr[5];
     }
     return mac_addr;
 }
@@ -67,8 +68,9 @@ static int __init parse_tag_msm_wifi(const struct tag *tag)
 	size = min((tag->hdr.size - 2) * sizeof(__u32), NVS_MAX_SIZE);
 #ifdef ATAG_MSM_WIFI_DEBUG
 	printk("WiFi Data size = %d , 0x%x\n", tag->hdr.size, tag->hdr.tag);
-	for (i = 0; i < size ; i++)
+	for(i=0;( i < size );i++) {
 		printk("%02x ", *dptr++);
+	}
 #endif	
 	memcpy(wifi_nvs_ram, dptr, size);
 	return 0;
@@ -76,13 +78,13 @@ static int __init parse_tag_msm_wifi(const struct tag *tag)
 
 __tagtable(ATAG_MSM_WIFI, parse_tag_msm_wifi);
 
-static unsigned wifi_get_nvs_size(void)
+static unsigned wifi_get_nvs_size( void )
 {
 	unsigned char *ptr;
 	unsigned len;
 
 	ptr = get_wifi_nvs_ram();
-	/* Size in format LE assumed */
+	
 	memcpy(&len, ptr + NVS_LEN_OFFSET, sizeof(len));
 	len = min(len, (NVS_MAX_SIZE - NVS_DATA_OFFSET));
 	return len;
@@ -125,6 +127,7 @@ static int __init wifi_nvs_init(void)
 		wifi_calibration->read_proc = wifi_calibration_read_proc;
 		wifi_calibration->write_proc = NULL;
 	}
+
 	wifi_data = create_proc_entry("wifi_data", 0444, NULL);
 	if (wifi_data != NULL) {
 		wifi_data->size = NVS_DATA_OFFSET;

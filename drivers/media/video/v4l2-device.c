@@ -18,6 +18,7 @@
     Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  */
 
+#include <linux/module.h>
 #include <linux/types.h>
 #include <linux/ioctl.h>
 #include <linux/i2c.h>
@@ -40,12 +41,12 @@ int v4l2_device_register(struct device *dev, struct v4l2_device *v4l2_dev)
 	kref_init(&v4l2_dev->ref);
 	v4l2_dev->dev = dev;
 	if (dev == NULL) {
-		/* If dev == NULL, then name must be filled in by the caller */
+		
 		WARN_ON(!v4l2_dev->name[0]);
 		return 0;
 	}
 
-	/* Set name to driver name + device name if it is empty. */
+	
 	if (!v4l2_dev->name[0])
 		snprintf(v4l2_dev->name, sizeof(v4l2_dev->name), "%s %s",
 			dev->driver->name, dev_name(dev));
@@ -105,17 +106,13 @@ void v4l2_device_unregister(struct v4l2_device *v4l2_dev)
 		return;
 	v4l2_device_disconnect(v4l2_dev);
 
-	/* Unregister subdevs */
+	
 	list_for_each_entry_safe(sd, next, &v4l2_dev->subdevs, list) {
 		v4l2_device_unregister_subdev(sd);
 #if defined(CONFIG_I2C) || (defined(CONFIG_I2C_MODULE) && defined(MODULE))
 		if (sd->flags & V4L2_SUBDEV_FL_IS_I2C) {
 			struct i2c_client *client = v4l2_get_subdevdata(sd);
 
-			/* We need to unregister the i2c client explicitly.
-			   We cannot rely on i2c_del_adapter to always
-			   unregister clients for us, since if the i2c bus
-			   is a platform bus, then it is never deleted. */
 			if (client)
 				i2c_unregister_device(client);
 			continue;
@@ -142,11 +139,11 @@ int v4l2_device_register_subdev(struct v4l2_device *v4l2_dev,
 #endif
 	int err;
 
-	/* Check for valid input */
+	
 	if (v4l2_dev == NULL || sd == NULL || !sd->name[0])
 		return -EINVAL;
 
-	/* Warn if we apparently re-register a subdev */
+	
 	WARN_ON(sd->v4l2_dev != NULL);
 
 	if (!try_module_get(sd->owner))
@@ -161,7 +158,7 @@ int v4l2_device_register_subdev(struct v4l2_device *v4l2_dev,
 		}
 	}
 
-	/* This just returns 0 if either of the two args is NULL */
+	
 	err = v4l2_ctrl_add_handler(v4l2_dev->ctrl_handler, sd->ctrl_handler);
 	if (err) {
 		if (sd->internal_ops && sd->internal_ops->unregistered)
@@ -171,7 +168,7 @@ int v4l2_device_register_subdev(struct v4l2_device *v4l2_dev,
 	}
 
 #if defined(CONFIG_MEDIA_CONTROLLER)
-	/* Register the entity. */
+	
 	if (v4l2_dev->mdev) {
 		err = media_device_register_entity(v4l2_dev->mdev, entity);
 		if (err < 0) {
@@ -183,6 +180,10 @@ int v4l2_device_register_subdev(struct v4l2_device *v4l2_dev,
 	}
 #endif
 
+#if defined(CONFIG_MACH_DUMMY)
+	if (v4l2_dev->subdevs.prev == NULL)
+		return -EINVAL;
+#endif
 	spin_lock(&v4l2_dev->lock);
 	list_add_tail(&sd->list, &v4l2_dev->subdevs);
 	spin_unlock(&v4l2_dev->lock);
@@ -197,9 +198,6 @@ int v4l2_device_register_subdev_nodes(struct v4l2_device *v4l2_dev)
 	struct v4l2_subdev *sd;
 	int err;
 
-	/* Register a device node for every subdev marked with the
-	 * V4L2_SUBDEV_FL_HAS_DEVNODE flag.
-	 */
 	list_for_each_entry(sd, &v4l2_dev->subdevs, list) {
 		if (!(sd->flags & V4L2_SUBDEV_FL_HAS_DEVNODE))
 			continue;
@@ -226,7 +224,7 @@ void v4l2_device_unregister_subdev(struct v4l2_subdev *sd)
 {
 	struct v4l2_device *v4l2_dev;
 
-	/* return if it isn't registered */
+	
 	if (sd == NULL || sd->v4l2_dev == NULL)
 		return;
 

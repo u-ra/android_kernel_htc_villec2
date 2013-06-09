@@ -56,7 +56,7 @@ static ssize_t show_ep_wMaxPacketSize(struct device *dev,
 {
 	struct ep_device *ep = to_ep_device(dev);
 	return sprintf(buf, "%04x\n",
-			le16_to_cpu(ep->desc->wMaxPacketSize) & 0x07ff);
+		        usb_endpoint_maxp(ep->desc) & 0x07ff);
 }
 static DEVICE_ATTR(wMaxPacketSize, S_IRUGO, show_ep_wMaxPacketSize, NULL);
 
@@ -97,7 +97,7 @@ static ssize_t show_ep_interval(struct device *dev,
 	switch (usb_endpoint_type(ep->desc)) {
 	case USB_ENDPOINT_XFER_CONTROL:
 		if (ep->udev->speed == USB_SPEED_HIGH)
-			/* uframes per NAK */
+			
 			interval = ep->desc->bInterval;
 		break;
 
@@ -107,7 +107,7 @@ static ssize_t show_ep_interval(struct device *dev,
 
 	case USB_ENDPOINT_XFER_BULK:
 		if (ep->udev->speed == USB_SPEED_HIGH && !in)
-			/* uframes per NAK */
+			
 			interval = ep->desc->bInterval;
 		break;
 

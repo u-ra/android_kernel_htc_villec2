@@ -24,10 +24,6 @@ enum msm_idle_stats_event {
 	MSM_IDLE_STATS_EVENT_TIMER_MIGRATED = 4,
 };
 
-/*
- * All time, timer, and time interval values are in units of
- * microseconds unless stated otherwise.
- */
 #define MSM_IDLE_STATS_NR_MAX_INTERVALS 100
 #define MSM_IDLE_STATS_MAX_TIMER 1000000
 
@@ -49,4 +45,4 @@ struct msm_idle_stats {
 #define MSM_IDLE_STATS_IOC_COLLECT  \
 		_IOWR(MSM_IDLE_STATS_IOC_MAGIC, 1, struct msm_idle_stats)
 
-#endif  /* __ARCH_ARM_MACH_MSM_IDLE_STATS_H */
+#endif  

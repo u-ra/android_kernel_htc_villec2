@@ -18,6 +18,7 @@
  *  Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
  */
 #include <linux/device.h>
+#include <linux/export.h>
 #include <linux/file.h>
 #include <linux/posix-clock.h>
 #include <linux/slab.h>
@@ -26,9 +27,6 @@
 
 static void delete_clock(struct kref *kref);
 
-/*
- * Returns NULL if the posix_clock instance attached to 'fp' is old and stale.
- */
 static struct posix_clock *get_posix_clock(struct file *fp)
 {
 	struct posix_clock *clk = fp->private_data;

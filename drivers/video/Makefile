@@ -13,7 +13,9 @@ fb-objs                           := $(fb-y)
 
 obj-$(CONFIG_VT)		  += console/
 obj-$(CONFIG_LOGO)		  += logo/
-obj-y				  += backlight/ display/
+obj-y				  += backlight/
+
+obj-$(CONFIG_EXYNOS_VIDEO)     += exynos/
 
 obj-$(CONFIG_FB_CFB_FILLRECT)  += cfbfillrect.o
 obj-$(CONFIG_FB_CFB_COPYAREA)  += cfbcopyarea.o
@@ -33,9 +35,11 @@ obj-$(CONFIG_FB_AMIGA)            += amifb.o c2p_planar.o
 obj-$(CONFIG_FB_ARC)              += arcfb.o
 obj-$(CONFIG_FB_CLPS711X)         += clps711xfb.o
 obj-$(CONFIG_FB_CYBER2000)        += cyber2000fb.o
+obj-$(CONFIG_FB_GRVGA)            += grvga.o
 obj-$(CONFIG_FB_PM2)              += pm2fb.o
 obj-$(CONFIG_FB_PM3)		  += pm3fb.o
 
+obj-$(CONFIG_FB_I740)		  += i740fb.o
 obj-$(CONFIG_FB_MATROX)		  += matrox/
 obj-$(CONFIG_FB_RIVA)		  += riva/
 obj-$(CONFIG_FB_NVIDIA)		  += nvidia/
@@ -127,6 +131,7 @@ obj-$(CONFIG_FB_IBM_GXT4500)	  += gxt4500.o
 obj-$(CONFIG_FB_PS3)		  += ps3fb.o
 obj-$(CONFIG_FB_SM501)            += sm501fb.o
 obj-$(CONFIG_FB_UDL)		  += udlfb.o
+obj-$(CONFIG_FB_SMSCUFX)	  += smscufx.o
 obj-$(CONFIG_FB_XILINX)           += xilinxfb.o
 obj-$(CONFIG_SH_MIPI_DSI)	  += sh_mipi_dsi.o
 obj-$(CONFIG_FB_SH_MOBILE_HDMI)	  += sh_mobile_hdmi.o
@@ -137,22 +142,7 @@ obj-y                             += omap2/
 obj-$(CONFIG_XEN_FBDEV_FRONTEND)  += xen-fbfront.o
 obj-$(CONFIG_FB_CARMINE)          += carminefb.o
 obj-$(CONFIG_FB_MB862XX)	  += mb862xx/
-
-ifeq ($(CONFIG_ARCH_MSM8960),y)
-  obj-$(CONFIG_FB_MSM)            += msm/
-else
-  ifeq ($(CONFIG_ARCH_MSM8X60),y)
-    ifeq ($(CONFIG_FB_MSM8960),y)
-	  obj-$(CONFIG_FB_MSM)          += msm/
-    else
-      obj-$(CONFIG_FB_MSM)          += msm_8x60/
-    endif
-  endif
-endif
-
-obj-$(CONFIG_MSM_VIDC_1080P) += msm/vidc/
-obj-$(CONFIG_MSM_VIDC_720P) += msm/vidc/
-
+obj-$(CONFIG_FB_MSM)              += msm/
 obj-$(CONFIG_FB_NUC900)           += nuc900fb.o
 obj-$(CONFIG_FB_JZ4740)		  += jz4740_fb.o
 obj-$(CONFIG_FB_PUV3_UNIGFX)      += fb-puv3.o

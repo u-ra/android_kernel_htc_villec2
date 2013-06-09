@@ -2,7 +2,7 @@
  *  linux/drivers/mmc/host/msmsdcc.h - QCT MSM7K SDC Controller
  *
  *  Copyright (C) 2008 Google, All Rights Reserved.
- *  Copyright (c) 2009-2011, Code Aurora Forum. All rights reserved.
+ *  Copyright (c) 2009-2012, Code Aurora Forum. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 as
@@ -26,7 +26,7 @@
 #include <linux/dma-mapping.h>
 #include <linux/wakelock.h>
 #include <linux/earlysuspend.h>
-#include <linux/pm_qos_params.h>
+#include <linux/pm_qos.h>
 #include <mach/sps.h>
 
 #include <asm/sizes.h>
@@ -38,6 +38,8 @@
 #define MCI_PWR_UP		0x02
 #define MCI_PWR_ON		0x03
 #define MCI_OD			(1 << 6)
+#define MCI_SW_RST		(1 << 7)
+#define MCI_SW_RST_CFG		(1 << 8)
 
 #define MMCICLOCK		0x004
 #define MCI_CLK_ENABLE		(1 << 8)
@@ -78,6 +80,7 @@
 #define MCI_DPSM_DIRECTION	(1 << 1)
 #define MCI_DPSM_MODE		(1 << 2)
 #define MCI_DPSM_DMAENABLE	(1 << 3)
+#define MCI_DATA_PEND		(1 << 17)
 #define MCI_AUTO_PROG_DONE	(1 << 19)
 #define MCI_RX_DATA_PEND	(1 << 20)
 
@@ -169,6 +172,7 @@
 
 #define MMCIMASK1		0x040
 #define MMCIFIFOCNT		0x044
+#define MCI_VERSION		0x050
 #define MCICCSTIMER		0x058
 #define MCI_DLL_CONFIG		0x060
 #define MCI_DLL_EN		(1 << 16)
@@ -184,7 +188,7 @@
 #define MCI_STATUS2		0x06C
 #define MCI_MCLK_REG_WR_ACTIVE	(1 << 0)
 
-#define MMCIFIFO		0x080 /* to 0x0bc */
+#define MMCIFIFO		0x080 
 
 #define MCI_TEST_INPUT		0x0D4
 
@@ -200,57 +204,32 @@
 	MCI_TXFIFOFULLMASK | MCI_RXFIFOHALFFULLMASK |			\
 	MCI_TXFIFOHALFEMPTYMASK | MCI_RXACTIVEMASK | MCI_TXACTIVEMASK)
 
-/*
- * The size of the FIFO in bytes.
- */
 #define MCI_FIFOSIZE	(16*4)
 
 #define MCI_FIFOHALFSIZE (MCI_FIFOSIZE / 2)
 
 #define NR_SG		128
 
-#ifdef CONFIG_WIMAX
-#define MSM_MMC_WIMAX_IDLE_TIMEOUT	1000 /* msecs */
-#endif
+#define MSM_MMC_IDLE_TIMEOUT	5000 
+#define MSM_MMC_IDLE_TIMEOUT_EMMC	20 
+#define MSM_MMC_CLK_GATE_DELAY	200 
 
-#define MSM_MMC_IDLE_TIMEOUT	250 /* msecs */
-#define MSM_EMMC_IDLE_TIMEOUT	20 /* msecs */
-/*
- * Set the request timeout to 10secs to allow
- * bad cards/controller to respond.
- */
-#define MSM_MMC_REQ_TIMEOUT	10000 /* msecs */
-#define MSM_MMC_DISABLE_TIMEOUT        200 /* msecs */
+#define MSM_MMC_REQ_TIMEOUT	10000 
 
-/*
- * Controller HW limitations
- */
 #define MCI_DATALENGTH_BITS	25
 #define MMC_MAX_REQ_SIZE	((1 << MCI_DATALENGTH_BITS) - 1)
-/* MCI_DATA_CTL BLOCKSIZE up to 4096 */
 #define MMC_MAX_BLK_SIZE	4096
 #define MMC_MIN_BLK_SIZE	512
 #define MMC_MAX_BLK_CNT		(MMC_MAX_REQ_SIZE / MMC_MIN_BLK_SIZE)
 
-/* 64KiB */
 #define MAX_SG_SIZE		(64 * 1024)
 #define MAX_NR_SG_DMA_PIO	(MMC_MAX_REQ_SIZE / MAX_SG_SIZE)
 
-/*
- * BAM limitations
- */
-/* upto 16 bits (64K - 1) */
 #define SPS_MAX_DESC_FIFO_SIZE	65535
-/* 16KiB */
 #define SPS_MAX_DESC_SIZE	(16 * 1024)
-/* Each descriptor is of length 8 bytes */
 #define SPS_MAX_DESC_LENGTH	8
 #define SPS_MAX_DESCS		(SPS_MAX_DESC_FIFO_SIZE / SPS_MAX_DESC_LENGTH)
 
-/*
- * DMA limitations
- */
-/* upto 16 bits (64K - 1) */
 #define MMC_MAX_DMA_ROWS (64 * 1024 - 1)
 #define MMC_MAX_DMA_BOX_LENGTH (MMC_MAX_DMA_ROWS * MCI_FIFOSIZE)
 #define MMC_MAX_DMA_CMDS (MAX_NR_SG_DMA_PIO * (MMC_MAX_REQ_SIZE / \
@@ -278,7 +257,7 @@ struct msmsdcc_dma_data {
 	int				channel;
 	int				crci;
 	struct msmsdcc_host		*host;
-	int				busy; /* Set if DM is busy */
+	int				busy; 
 	unsigned int 			result;
 	struct msm_dmov_errdata		err;
 };
@@ -286,7 +265,7 @@ struct msmsdcc_dma_data {
 struct msmsdcc_pio_data {
 	struct sg_mapping_iter		sg_miter;
 	char				bounce_buf[4];
-	/* valid bytes in bounce_buf */
+	
 	int				bounce_buf_len;
 };
 
@@ -294,13 +273,15 @@ struct msmsdcc_curr_req {
 	struct mmc_request	*mrq;
 	struct mmc_command	*cmd;
 	struct mmc_data		*data;
-	unsigned int		xfer_size;	/* Total data size */
-	unsigned int		xfer_remain;	/* Bytes remaining to send */
-	unsigned int		data_xfered;	/* Bytes acked by BLKEND irq */
+	unsigned int		xfer_size;	
+	unsigned int		xfer_remain;	
+	unsigned int		data_xfered;	
 	int			got_dataend;
-	int			wait_for_auto_prog_done;
-	int			got_auto_prog_done;
+	bool			wait_for_auto_prog_done;
+	bool			got_auto_prog_done;
+	bool			use_wr_data_pend;
 	int			user_pages;
+	u32			req_tout_ms;
 };
 
 struct msmsdcc_sps_ep_conn_data {
@@ -322,7 +303,17 @@ struct msmsdcc_sps_data {
 	unsigned int			busy;
 	unsigned int			xfer_req_cnt;
 	bool				pipe_reset_pending;
+	bool				reset_device;
 	struct tasklet_struct		tlet;
+};
+
+struct msmsdcc_msm_bus_vote {
+	uint32_t client_handle;
+	uint32_t curr_vote;
+	int min_bw_vote;
+	int max_bw_vote;
+	bool is_max_bw_needed;
+	struct delayed_work vote_work;
 };
 
 struct msmsdcc_host {
@@ -342,31 +333,31 @@ struct msmsdcc_host {
 	struct msmsdcc_curr_req	curr;
 
 	struct mmc_host		*mmc;
-	struct clk		*clk;		/* main MMC bus clock */
-	struct clk		*pclk;		/* SDCC peripheral bus clock */
-	struct clk		*dfab_pclk;	/* Daytona Fabric SDCC clock */
-	unsigned int		clks_on;	/* set if clocks are enabled */
+	struct clk		*clk;		
+	struct clk		*pclk;		
+	struct clk		*bus_clk;	
+	atomic_t		clks_on;	
 
-	unsigned int		eject;		/* eject state */
+	unsigned int		eject;		
 
 	spinlock_t		lock;
 
-	unsigned int		clk_rate;	/* Current clock rate */
+	unsigned int		clk_rate;	
 	unsigned int		pclk_rate;
 	unsigned int		ddr_doubled_clk_rate;
 
 	u32			pwr;
 	struct mmc_platform_data *plat;
+	unsigned int		hw_caps;
 
 	unsigned int		oldstat;
-#ifdef CONFIG_WIMAX
+
+#ifdef CONFIG_WIFI_MMC
     unsigned long       irq_time;
 #endif
 
 	struct msmsdcc_dma_data	dma;
 	struct msmsdcc_sps_data sps;
-	bool			is_dma_mode;
-	bool			is_sps_mode;
 	struct msmsdcc_pio_data	pio;
 
 #ifdef CONFIG_HAS_EARLYSUSPEND
@@ -378,7 +369,7 @@ struct msmsdcc_host {
 
 	unsigned int prog_enable;
 
-	/* Command parameters */
+	
 	unsigned int		cmd_timeout;
 	unsigned int		cmd_pio_irqmask;
 	unsigned int		cmd_datactrl;
@@ -389,32 +380,88 @@ struct msmsdcc_host {
 	unsigned int	dummy_52_needed;
 	unsigned int	dummy_52_sent;
 
-	unsigned int	sdio_irq_disabled;
-	bool		is_resumed;
-
 	struct wake_lock	sdio_wlock;
 	struct wake_lock	sdio_suspend_wlock;
-	unsigned int    sdcc_suspending;
-
-	unsigned int sdcc_irq_disabled;
 	struct timer_list req_tout_timer;
 	unsigned long reg_write_delay;
 	bool io_pad_pwr_switch;
-	bool cmd19_tuning_in_progress;
+	bool tuning_in_progress;
 	bool tuning_needed;
+	bool en_auto_cmd19;
 	bool sdio_gpio_lpm;
 	bool irq_wake_enabled;
-	struct pm_qos_request_list pm_qos_req_dma;
-	unsigned int	use_pio;
-
-	unsigned int	irq_status[5];
-	unsigned int	irq_counter;
-
-#ifdef CONFIG_WIMAX
-    bool        is_runtime_resumed;
-#endif
+	struct pm_qos_request pm_qos_req_dma;
+	u32 cpu_dma_latency;
+	bool sdcc_suspending;
+	bool sdcc_irq_disabled;
+	bool sdcc_suspended;
+	bool sdio_wakeupirq_disabled;
+	ktime_t enable_t;
+	ktime_t disable_t;
+	ktime_t rpm_sus_t;
+	ktime_t rpm_res_t;
+	struct mutex clk_mutex;
+	struct mutex rpm_mutex;
+	atomic_t enable_count_usage;
+	atomic_t disable_count_usage;
+	bool pending_resume;
+	struct msmsdcc_msm_bus_vote msm_bus_vote;
+	struct device_attribute	max_bus_bw;
+	struct device_attribute	polling;
+	struct device_attribute auto_cmd19_attr;
+	struct proc_dir_entry *wr_perf_proc;
+	struct proc_dir_entry *burst_proc;
 	struct proc_dir_entry *bkops_proc;
+
+#ifdef CONFIG_WIFI_MMC
+    bool is_runtime_resumed;
+#endif
+
 };
+
+#define MSMSDCC_VERSION_MASK	0xFFFF
+#define MSMSDCC_DMA_SUP	(1 << 0)
+#define MSMSDCC_SPS_BAM_SUP	(1 << 1)
+#define MSMSDCC_SOFT_RESET	(1 << 2)
+#define MSMSDCC_AUTO_PROG_DONE	(1 << 3)
+#define MSMSDCC_REG_WR_ACTIVE	(1 << 4)
+#define MSMSDCC_SW_RST		(1 << 5)
+#define MSMSDCC_SW_RST_CFG	(1 << 6)
+#define MSMSDCC_WAIT_FOR_TX_RX	(1 << 7)
+#define MSMSDCC_IO_PAD_PWR_SWITCH	(1 << 8)
+#define MSMSDCC_AUTO_CMD19	(1 << 9)
+
+#define set_hw_caps(h, val)		((h)->hw_caps |= val)
+#define is_sps_mode(h)			((h)->hw_caps & MSMSDCC_SPS_BAM_SUP)
+#define is_dma_mode(h)			((h)->hw_caps & MSMSDCC_DMA_SUP)
+#define is_soft_reset(h)		((h)->hw_caps & MSMSDCC_SOFT_RESET)
+#define is_auto_prog_done(h)		((h)->hw_caps & MSMSDCC_AUTO_PROG_DONE)
+#define is_wait_for_reg_write(h)	((h)->hw_caps & MSMSDCC_REG_WR_ACTIVE)
+#define is_sw_hard_reset(h)		((h)->hw_caps & MSMSDCC_SW_RST)
+#define is_sw_reset_save_config(h)	((h)->hw_caps & MSMSDCC_SW_RST_CFG)
+#define is_wait_for_tx_rx_active(h)	((h)->hw_caps & MSMSDCC_WAIT_FOR_TX_RX)
+#define is_io_pad_pwr_switch(h)	((h)->hw_caps & MSMSDCC_IO_PAD_PWR_SWITCH)
+#define is_auto_cmd19(h)		((h)->hw_caps & MSMSDCC_AUTO_CMD19)
+
+static inline void set_default_hw_caps(struct msmsdcc_host *host)
+{
+	u32 version;
+	version = readl_relaxed(host->base + MCI_VERSION);
+	pr_info("%s: SDCC Version: 0x%.8x\n", mmc_hostname(host->mmc), version);
+
+	if (!version)
+		return;
+
+	version &= MSMSDCC_VERSION_MASK;
+	if (version) 
+		host->hw_caps |= MSMSDCC_AUTO_PROG_DONE |
+			MSMSDCC_SOFT_RESET | MSMSDCC_REG_WR_ACTIVE
+			| MSMSDCC_WAIT_FOR_TX_RX | MSMSDCC_IO_PAD_PWR_SWITCH
+			| MSMSDCC_AUTO_CMD19;
+
+	if (version >= 0x2D) 
+		host->hw_caps |= MSMSDCC_SW_RST | MSMSDCC_SW_RST_CFG;
+}
 
 int msmsdcc_set_pwrsave(struct mmc_host *mmc, int pwrsave);
 int msmsdcc_sdio_al_lpm(struct mmc_host *mmc, bool enable);
@@ -436,23 +483,5 @@ static inline int msmsdcc_lpm_disable(struct mmc_host *mmc)
 	return ret;
 }
 #endif
-
-#ifdef CONFIG_WIMAX
-extern int mmc_wimax_get_status(void);
-extern void mmc_wimax_enable_host_wakeup(int on);
-extern int mmc_wimax_get_irq_log(void);
-
-extern void mmc_wimax_set_FWWakeupHostEvent(int on);
-extern int mmc_wimax_get_FWWakeupHostEvent(void);
-
-extern int mmc_wimax_get_disable_irq_config(void);
-#endif
-
-
-//HTC_WIFI_START
-#ifdef CONFIG_TIWLAN_POWER_CONTROL_FUNC
-extern int ti_wifi_power(int on);
-#endif
-//HTC_WIFI_END
 
 #endif

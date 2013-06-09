@@ -17,11 +17,12 @@
  *
  */
 
-#include <linux/pmic8058-xoadc.h>
 #include <linux/slab.h>
+#include <linux/module.h>
 
 #include <mach/htc_headset_mgr.h>
 #include <mach/htc_headset_8x60.h>
+#include <linux/pmic8058-xoadc.h>
 
 #ifdef HTC_HEADSET_KERNEL_3_0
 #include <linux/msm_adc.h>
@@ -42,12 +43,11 @@ static int hs_8x60_remote_adc(int *adc)
 	int ret = 0;
 
 	HS_DBG();
-
 	ret = pm8058_htc_config_mpp_and_adc_read(adc, 1, CHANNEL_ADC_HDSET,
 						 hi->pdata.adc_mpp,
 						 hi->pdata.adc_amux);
 	if (ret) {
-#if 0 /* ADC function in suspend mode */
+#if 0 
 		*adc = -1;
 #endif
 		HS_LOG("Failed to read remote ADC");
@@ -55,7 +55,6 @@ static int hs_8x60_remote_adc(int *adc)
 	}
 
 	HS_LOG("Remote ADC %d (0x%X)", *adc, *adc);
-
 	return 1;
 }
 
@@ -69,10 +68,6 @@ static int hs_8x60_mic_status(void)
 	if (!hs_8x60_remote_adc(&adc))
 		return HEADSET_UNKNOWN_MIC;
 
-/*
-	if (hi->pdata.driver_flag & DRIVER_HS_PMIC_DYNAMIC_THRESHOLD)
-		hs_pmic_remote_threshold((unsigned int) adc);
-*/
 
 
 	if (adc >= hi->pdata.adc_mic_bias[0] &&

@@ -13,7 +13,8 @@
  *
  * You should have received a copy of the GNU General Public License
  * along with this program; if not, write to the Free Software
- * Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
+ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston,
+ * MA 02110-1301 USA.
  */
 
 #include <linux/rwsem.h>
@@ -24,9 +25,6 @@ struct i2c_devinfo {
 	struct i2c_board_info	board_info;
 };
 
-/* board_lock protects board_list and first_dynamic_bus_num.
- * only i2c core components are allowed to use these symbols.
- */
 extern struct rw_semaphore	__i2c_board_lock;
 extern struct list_head	__i2c_board_list;
 extern int		__i2c_first_dynamic_bus_num;

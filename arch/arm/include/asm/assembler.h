@@ -23,9 +23,8 @@
 #include <asm/ptrace.h>
 #include <asm/domain.h>
 
-/*
- * Endian independent macros for shifting bytes within registers.
- */
+#define IOMEM(x)	(x)
+
 #ifndef __ARMEB__
 #define pull            lsr
 #define push            lsl
@@ -50,33 +49,18 @@
 #define put_byte_3      lsl #0
 #endif
 
-/*
- * Data preload for architectures that support it
- */
 #if __LINUX_ARM_ARCH__ >= 5
 #define PLD(code...)	code
 #else
 #define PLD(code...)
 #endif
 
-/*
- * This can be used to enable code to cacheline align the destination
- * pointer when bulk writing to memory.  Experiments on StrongARM and
- * XScale didn't show this a worthwhile thing to do when the cache is not
- * set to write-allocate (this would need further testing on XScale when WA
- * is used).
- *
- * On Feroceon there is much to gain however, regardless of cache mode.
- */
 #ifdef CONFIG_CPU_FEROCEON
 #define CALGN(code...) code
 #else
 #define CALGN(code...)
 #endif
 
-/*
- * Enable and disable interrupts
- */
 #if __LINUX_ARM_ARCH__ >= 6
 	.macro	disable_irq_notrace
 	cpsid	i
@@ -105,10 +89,6 @@
 
 	.macro asm_trace_hardirqs_on_cond, cond
 #if defined(CONFIG_TRACE_IRQFLAGS)
-	/*
-	 * actually the registers should be pushed and pop'd conditionally, but
-	 * after bl the flags are certainly clobbered
-	 */
 	stmdb   sp!, {r0-r3, ip, lr}
 	bl\cond	trace_hardirqs_on
 	ldmia	sp!, {r0-r3, ip, lr}
@@ -128,10 +108,6 @@
 	asm_trace_hardirqs_on
 	enable_irq_notrace
 	.endm
-/*
- * Save the current IRQ state and disable IRQs.  Note that this macro
- * assumes FIQs are enabled, and that the processor is in SVC mode.
- */
 	.macro	save_and_disable_irqs, oldcpsr
 	mrs	\oldcpsr, cpsr
 	disable_irq
@@ -142,10 +118,6 @@
 	disable_irq_notrace
 	.endm
 
-/*
- * Restore interrupt state previously stored in a register.  We don't
- * guarantee that this will preserve the flags.
- */
 	.macro	restore_irqs_notrace, oldcpsr
 	msr	cpsr_c, \oldcpsr
 	.endm
@@ -166,11 +138,6 @@
 #ifdef CONFIG_SMP
 #define ALT_SMP(instr...)					\
 9998:	instr
-/*
- * Note: if you get assembler errors from ALT_UP() when building with
- * CONFIG_THUMB2_KERNEL, you almost certainly need to use
- * ALT_SMP( W(instr) ... )
- */
 #define ALT_UP(instr...)					\
 	.pushsection ".alt.smp.init", "a"			;\
 	.long	9998b						;\
@@ -191,9 +158,14 @@
 #define ALT_UP_B(label) b label
 #endif
 
-/*
- * SMP data memory barrier
- */
+	.macro	instr_sync
+#if __LINUX_ARM_ARCH__ >= 7
+	isb
+#elif __LINUX_ARM_ARCH__ == 6
+	mcr	p15, 0, r0, c7, c5, 4
+#endif
+	.endm
+
 	.macro	smp_dmb mode
 #ifdef CONFIG_SMP
 #if __LINUX_ARM_ARCH__ >= 7
@@ -226,12 +198,9 @@
 	.endm
 #endif
 
-/*
- * STRT/LDRT access macros with ARM and Thumb-2 variants
- */
 #ifdef CONFIG_THUMB2_KERNEL
 
-	.macro	usraccoff, instr, reg, ptr, inc, off, cond, abort, t=T()
+	.macro	usraccoff, instr, reg, ptr, inc, off, cond, abort, t=TUSER()
 9999:
 	.if	\inc == 1
 	\instr\cond\()b\()\t\().w \reg, [\ptr, #\off]
@@ -269,9 +238,9 @@
 	add\cond \ptr, #\rept * \inc
 	.endm
 
-#else	/* !CONFIG_THUMB2_KERNEL */
+#else	
 
-	.macro	usracc, instr, reg, ptr, inc, cond, rept, abort, t=T()
+	.macro	usracc, instr, reg, ptr, inc, cond, rept, abort, t=TUSER()
 	.rept	\rept
 9999:
 	.if	\inc == 1
@@ -289,7 +258,7 @@
 	.endr
 	.endm
 
-#endif	/* CONFIG_THUMB2_KERNEL */
+#endif	
 
 	.macro	strusr, reg, ptr, inc, cond=al, rept=1, abort=9001f
 	usracc	str, \reg, \ptr, \inc, \cond, \rept, \abort
@@ -298,4 +267,12 @@
 	.macro	ldrusr, reg, ptr, inc, cond=al, rept=1, abort=9001f
 	usracc	ldr, \reg, \ptr, \inc, \cond, \rept, \abort
 	.endm
-#endif /* __ASM_ASSEMBLER_H__ */
+
+	.macro	string name:req, string
+	.type \name , #object
+\name:
+	.asciz "\string"
+	.size \name , . - \name
+	.endm
+
+#endif 

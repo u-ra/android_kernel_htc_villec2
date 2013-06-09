@@ -32,7 +32,6 @@
 #include <linux/namei.h>
 #include <linux/security.h>
 
-#include <asm/system.h>
 #include <asm/uaccess.h>
 
 #include "nfs4_fs.h"
@@ -41,28 +40,14 @@
 
 #define NFSDBG_FACILITY		NFSDBG_CLIENT
 
-/*
- * Set the superblock root dentry.
- * Note that this function frees the inode in case of error.
- */
 static int nfs_superblock_set_dummy_root(struct super_block *sb, struct inode *inode)
 {
-	/* The mntroot acts as the dummy root dentry for this superblock */
+	
 	if (sb->s_root == NULL) {
-		sb->s_root = d_alloc_root(inode);
-		if (sb->s_root == NULL) {
-			iput(inode);
+		sb->s_root = d_make_root(inode);
+		if (sb->s_root == NULL)
 			return -ENOMEM;
-		}
 		ihold(inode);
-		/*
-		 * Ensure that this dentry is invisible to d_find_alias().
-		 * Otherwise, it may be spliced into the tree by
-		 * d_materialise_unique if a parent directory from the same
-		 * filesystem gets mounted at a later time.
-		 * This again causes shrink_dcache_for_umount_subtree() to
-		 * Oops, since the test for IS_ROOT() will fail.
-		 */
 		spin_lock(&sb->s_root->d_inode->i_lock);
 		spin_lock(&sb->s_root->d_lock);
 		list_del_init(&sb->s_root->d_alias);
@@ -72,9 +57,6 @@ static int nfs_superblock_set_dummy_root(struct super_block *sb, struct inode *i
 	return 0;
 }
 
-/*
- * get an NFS2/NFS3 root dentry from the root filehandle
- */
 struct dentry *nfs_get_root(struct super_block *sb, struct nfs_fh *mntfh,
 			    const char *devname)
 {
@@ -88,7 +70,7 @@ struct dentry *nfs_get_root(struct super_block *sb, struct nfs_fh *mntfh,
 	if (!name)
 		return ERR_PTR(-ENOMEM);
 
-	/* get the actual root for this mount */
+	
 	fsinfo.fattr = nfs_alloc_fattr();
 	if (fsinfo.fattr == NULL) {
 		kfree(name);
@@ -115,10 +97,6 @@ struct dentry *nfs_get_root(struct super_block *sb, struct nfs_fh *mntfh,
 		goto out;
 	}
 
-	/* root dentries normally start off anonymous and get spliced in later
-	 * if the dentry tree reaches them; however if the dentry already
-	 * exists, we'll pick it up at this point and use it as the root
-	 */
 	ret = d_obtain_alias(inode);
 	if (IS_ERR(ret)) {
 		dprintk("nfs_get_root: get root dentry failed\n");
@@ -152,7 +130,7 @@ int nfs4_get_rootfh(struct nfs_server *server, struct nfs_fh *mntfh)
 	if (fsinfo.fattr == NULL)
 		goto out;
 
-	/* Start by getting the root filehandle from the server */
+	
 	ret = server->nfs_client->rpc_ops->getroot(server, mntfh, &fsinfo);
 	if (ret < 0) {
 		dprintk("nfs4_get_rootfh: getroot error = %d\n", -ret);
@@ -181,9 +159,6 @@ out:
 	return ret;
 }
 
-/*
- * get an NFS4 root dentry from the root filehandle
- */
 struct dentry *nfs4_get_root(struct super_block *sb, struct nfs_fh *mntfh,
 			     const char *devname)
 {
@@ -199,7 +174,7 @@ struct dentry *nfs4_get_root(struct super_block *sb, struct nfs_fh *mntfh,
 	if (!name)
 		return ERR_PTR(-ENOMEM);
 
-	/* get the info about the server and filesystem */
+	
 	error = nfs4_server_capabilities(server, mntfh);
 	if (error < 0) {
 		dprintk("nfs_get_root: getcaps error = %d\n",
@@ -214,7 +189,7 @@ struct dentry *nfs4_get_root(struct super_block *sb, struct nfs_fh *mntfh,
 		return ERR_PTR(-ENOMEM);
 	}
 
-	/* get the actual root for this mount */
+	
 	error = server->nfs_client->rpc_ops->getattr(server, mntfh, fattr);
 	if (error < 0) {
 		dprintk("nfs_get_root: getattr error = %d\n", -error);
@@ -239,10 +214,6 @@ struct dentry *nfs4_get_root(struct super_block *sb, struct nfs_fh *mntfh,
 		goto out;
 	}
 
-	/* root dentries normally start off anonymous and get spliced in later
-	 * if the dentry tree reaches them; however if the dentry already
-	 * exists, we'll pick it up at this point and use it as the root
-	 */
 	ret = d_obtain_alias(inode);
 	if (IS_ERR(ret)) {
 		dprintk("nfs_get_root: get root dentry failed\n");
@@ -264,4 +235,4 @@ out:
 	return ret;
 }
 
-#endif /* CONFIG_NFS_V4 */
+#endif 

@@ -1,4 +1,4 @@
-/* Copyright (c) 2010-2011, Code Aurora Forum. All rights reserved.
+/* Copyright (c) 2010-2012, Code Aurora Forum. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -10,7 +10,11 @@
  * GNU General Public License for more details.
  *
  */
+
+#define pr_fmt(fmt) "AXI: %s(): " fmt, __func__
+
 #include <linux/kernel.h>
+#include <linux/module.h>
 #include <linux/seq_file.h>
 #include <linux/debugfs.h>
 #include <linux/slab.h>
@@ -55,10 +59,6 @@ struct msm_bus_fab_list {
 LIST_HEAD(fabdata_list);
 LIST_HEAD(cl_list);
 
-/**
- * The following structures and funtions are used for
- * the test-client which can be created at run-time.
- */
 
 static struct msm_bus_vectors init_vectors[1];
 static struct msm_bus_vectors current_vectors[1];
@@ -262,10 +262,6 @@ static int msm_bus_dbg_en_set(void  *data, u64 val)
 DEFINE_SIMPLE_ATTRIBUTE(shell_client_en_fops, msm_bus_dbg_en_get,
 	msm_bus_dbg_en_set, "%llu\n");
 
-/**
- * The following funtions are used for viewing the client data
- * and changing the client request at run-time
- */
 
 static ssize_t client_data_read(struct file *file, char __user *buf,
 	size_t count, loff_t *ppos)
@@ -449,10 +445,6 @@ static ssize_t  msm_bus_dbg_update_request_write(struct file *file,
 	return cnt;
 }
 
-/**
- * The following funtions are used for viewing the commit data
- * for each fabric
- */
 static ssize_t fabric_data_read(struct file *file, char __user *buf,
 	size_t count, loff_t *ppos)
 {
@@ -547,7 +539,7 @@ static int msm_bus_dbg_fill_fab_buffer(const char *fabname,
 	i += scnprintf(buf + i, MAX_BUFF_SIZE - i, "\n%d.%d\n",
 		(int)ts.tv_sec, (int)ts.tv_nsec);
 
-	msm_bus_rpm_fill_cdata_buffer(&i, buf + i, MAX_BUFF_SIZE, cdata,
+	msm_bus_rpm_fill_cdata_buffer(&i, buf, MAX_BUFF_SIZE, cdata,
 		nmasters, nslaves, ntslaves);
 	i += scnprintf(buf + i, MAX_BUFF_SIZE - i, "\n");
 	mutex_lock(&msm_bus_dbg_fablist_lock);
@@ -561,12 +553,6 @@ static const struct file_operations msm_bus_dbg_update_request_fops = {
 	.write = msm_bus_dbg_update_request_write,
 };
 
-/**
- * msm_bus_dbg_client_data() - Add debug data for clients
- * @pdata: Platform data of the client
- * @index: The current index or operation to be performed
- * @clid: Client handle obtained during registration
- */
 void msm_bus_dbg_client_data(struct msm_bus_scale_pdata *pdata, int index,
 	uint32_t clid)
 {
@@ -586,15 +572,6 @@ void msm_bus_dbg_client_data(struct msm_bus_scale_pdata *pdata, int index,
 }
 EXPORT_SYMBOL(msm_bus_dbg_client_data);
 
-/**
- * msm_bus_dbg_commit_data() - Add commit data from fabrics
- * @fabname: Fabric name specified in platform data
- * @cdata: Commit Data
- * @nmasters: Number of masters attached to fabric
- * @nslaves: Number of slaves attached to fabric
- * @ntslaves: Number of tiered slaves attached to fabric
- * @op: Operation to be performed
- */
 void msm_bus_dbg_commit_data(const char *fabname, void *cdata,
 	int nmasters, int nslaves, int ntslaves, int op)
 {

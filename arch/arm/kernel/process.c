@@ -10,7 +10,7 @@
  */
 #include <stdarg.h>
 
-#include <linux/module.h>
+#include <linux/export.h>
 #include <linux/sched.h>
 #include <linux/kernel.h>
 #include <linux/mm.h>
@@ -30,6 +30,7 @@
 #include <linux/uaccess.h>
 #include <linux/random.h>
 #include <linux/hw_breakpoint.h>
+#include <linux/cpuidle.h>
 #include <linux/console.h>
 
 #include <asm/cacheflush.h>
@@ -56,11 +57,21 @@ static const char *isa_modes[] = {
   "ARM" , "Thumb" , "Jazelle", "ThumbEE"
 };
 
-extern void setup_mm_for_reboot(char mode);
+extern void setup_mm_for_reboot(void);
 
 static volatile int hlt_counter;
 
-#include <mach/system.h>
+#ifdef CONFIG_SMP
+void arch_trigger_all_cpu_backtrace(void)
+{
+	smp_send_all_cpu_backtrace();
+}
+#else
+void arch_trigger_all_cpu_backtrace(void)
+{
+	dump_stack();
+}
+#endif
 
 void disable_hlt(void)
 {
@@ -91,9 +102,14 @@ static int __init hlt_setup(char *__unused)
 __setup("nohlt", nohlt_setup);
 __setup("hlt", hlt_setup);
 
+extern void call_with_stack(void (*fn)(void *), void *arg, void *sp);
+typedef void (*phys_reset_t)(unsigned long);
+
 #ifdef CONFIG_ARM_FLUSH_CONSOLE_ON_RESTART
 void arm_machine_flush_console(void)
 {
+	unsigned long flags;
+
 	printk("\n");
 	pr_emerg("Restarting %s\n", linux_banner);
 	if (console_trylock()) {
@@ -103,12 +119,15 @@ void arm_machine_flush_console(void)
 
 	mdelay(50);
 
-	local_irq_disable();
+	local_irq_save(flags);
+
 	if (!console_trylock())
 		pr_emerg("arm_restart: Console was locked! Busting\n");
 	else
 		pr_emerg("arm_restart: Console was locked!\n");
 	console_unlock();
+
+	local_irq_restore(flags);
 }
 #else
 void arm_machine_flush_console(void)
@@ -116,106 +135,101 @@ void arm_machine_flush_console(void)
 }
 #endif
 
-void arm_machine_restart(char mode, const char *cmd)
-{
-	/* Flush the console to make sure all the relevant messages make it
-	 * out to the console drivers */
-	arm_machine_flush_console();
+static u64 soft_restart_stack[16];
 
-	/* Disable interrupts first */
+static void __soft_restart(void *addr)
+{
+	phys_reset_t phys_reset;
+
+	
+	setup_mm_for_reboot();
+
+	
+	flush_cache_all();
+
+	
+	cpu_proc_fin();
+
+	
+	flush_cache_all();
+
+	
+	outer_disable();
+
+	
+	phys_reset = (phys_reset_t)(unsigned long)virt_to_phys(cpu_reset);
+	phys_reset((unsigned long)addr);
+
+	
+	BUG();
+}
+
+void soft_restart(unsigned long addr)
+{
+	u64 *stack = soft_restart_stack + ARRAY_SIZE(soft_restart_stack);
+
+	
 	local_irq_disable();
 	local_fiq_disable();
 
-	/*
-	 * Tell the mm system that we are going to reboot -
-	 * we may need it to insert some 1:1 mappings so that
-	 * soft boot works.
-	 */
-	setup_mm_for_reboot(mode);
+	
+	if (num_online_cpus() == 1)
+		outer_disable();
 
-	/* Clean and invalidate caches */
-	flush_cache_all();
+	
+	call_with_stack(__soft_restart, (void *)addr, (void *)stack);
 
-	/* Turn off caching */
-	cpu_proc_fin();
-
-	/* Push out any further dirty data, and ensure cache is empty */
-	flush_cache_all();
-
-	/*Push out the dirty data from external caches */
-	outer_disable();
-
-	/*
-	 * Now call the architecture specific reboot code.
-	 */
-	arch_reset(mode, cmd);
-
-	/*
-	 * Whoops - the architecture was unable to reboot.
-	 * Tell the user!
-	 */
-	mdelay(1000);
-	printk("Reboot failed -- System halted\n");
-	while (1);
+	
+	BUG();
 }
 
-/*
- * Function pointers to optional machine specific functions
- */
+static void null_restart(char mode, const char *cmd)
+{
+}
+
 void (*pm_power_off)(void);
 EXPORT_SYMBOL(pm_power_off);
 
-void (*arm_pm_restart)(char str, const char *cmd) = arm_machine_restart;
+void (*arm_pm_restart)(char str, const char *cmd) = null_restart;
 EXPORT_SYMBOL_GPL(arm_pm_restart);
 
 static void do_nothing(void *unused)
 {
 }
 
-/*
- * cpu_idle_wait - Used to ensure that all the CPUs discard old value of
- * pm_idle and update to new pm_idle value. Required while changing pm_idle
- * handler on SMP systems.
- *
- * Caller must have changed pm_idle to the new value before the call. Old
- * pm_idle value will not be used by any CPU after the return of this function.
- */
 void cpu_idle_wait(void)
 {
 	smp_mb();
-	/* kick all the CPUs so that they exit out of pm_idle */
+	
 	smp_call_function(do_nothing, NULL, 1);
 }
 EXPORT_SYMBOL_GPL(cpu_idle_wait);
 
-/*
- * This is our default idle handler.  We need to disable
- * interrupts here to ensure we don't miss a wakeup call.
- */
+
+extern void arch_idle(void);
+void (*arm_pm_idle)(void) = arch_idle;
+
 static void default_idle(void)
 {
-	if (!need_resched())
-		arch_idle();
+	if (arm_pm_idle)
+		arm_pm_idle();
+	else
+		cpu_do_idle();
 	local_irq_enable();
 }
 
 void (*pm_idle)(void) = default_idle;
 EXPORT_SYMBOL(pm_idle);
 
-/*
- * The idle thread, has rather strange semantics for calling pm_idle,
- * but this is what x86 does and we need to do the same, so that
- * things like cpuidle get called in the same way.  The only difference
- * is that we always respect 'hlt_counter' to prevent low power idle.
- */
 void cpu_idle(void)
 {
 	local_fiq_enable();
 
-	/* endless idle loop with no priority at all */
+	
 	while (1) {
-		tick_nohz_stop_sched_tick(1);
 		idle_notifier_call_chain(IDLE_START);
+		tick_nohz_idle_enter();
+		rcu_idle_enter();
 		while (!need_resched()) {
 #ifdef CONFIG_HOTPLUG_CPU
 			if (cpu_is_offline(smp_processor_id()))
@@ -229,24 +243,19 @@ void cpu_idle(void)
 			if (hlt_counter) {
 				local_irq_enable();
 				cpu_relax();
-			} else {
+			} else if (!need_resched()) {
 				stop_critical_timings();
-				pm_idle();
+				if (cpuidle_idle_call())
+					pm_idle();
 				start_critical_timings();
-				/*
-				 * This will eventually be removed - pm_idle
-				 * functions should always return with IRQs
-				 * enabled.
-				 */
 				WARN_ON(irqs_disabled());
+			} else
 				local_irq_enable();
-			}
 		}
-		tick_nohz_restart_sched_tick();
+		rcu_idle_exit();
+		tick_nohz_idle_exit();
 		idle_notifier_call_chain(IDLE_END);
-		preempt_enable_no_resched();
-		schedule();
-		preempt_disable();
+		schedule_preempt_disabled();
 	}
 }
 
@@ -262,6 +271,7 @@ __setup("reboot=", reboot_setup);
 
 void machine_shutdown(void)
 {
+	preempt_disable();
 #ifdef CONFIG_SMP
 	smp_send_stop();
 #endif
@@ -270,6 +280,7 @@ void machine_shutdown(void)
 void machine_halt(void)
 {
 	machine_shutdown();
+	local_irq_disable();
 	while (1);
 }
 
@@ -280,103 +291,40 @@ void machine_power_off(void)
 		pm_power_off();
 }
 
-#ifdef CONFIG_MACH_VILLEC2
-extern int get_partition_num_by_name(char *name);
-#define HW_RESET_REASON 0x44332211
-static ssize_t kernel_write(struct file *file, const char *buf,
-      size_t count, loff_t pos)
-{
-	mm_segment_t old_fs;
-	ssize_t res;
-
-	old_fs = get_fs();
-	set_fs(get_ds());
-	/* The cast to a user pointer is valid due to the set_fs() */
-	res = vfs_write(file, (const char __user *)buf, count, &pos);
-	set_fs(old_fs);
-
-	return res;
-}
-
-int set_hw_reason(int reason)
-{
-	char filename[32] = "";
-	int hw_reason = reason;
-	struct file *filp = NULL;
-	ssize_t nread;
-	int pnum = get_partition_num_by_name("misc");
-
-	if (pnum < 0) {
-		pr_info("unknown partition number for misc partition\n");
-		return 0;
-	}
-	sprintf(filename, "/dev/block/mmcblk0p%d", pnum);
-
-	filp = filp_open(filename, O_RDWR, 0);
-	if (IS_ERR(filp)) {
-		pr_info("unable to open file: %s\n", filename);
-		return PTR_ERR(filp);
-	}
-
-	filp->f_pos = 624;
-	nread = kernel_write(filp, (char *)&hw_reason, sizeof(int), filp->f_pos);
-	pr_info("wrire: %X (%d)\n", hw_reason, nread);
-
-	if (filp)
-		filp_close(filp, NULL);
-
-	return 1;
-}
-#endif
-
 void machine_restart(char *cmd)
 {
-#ifdef CONFIG_MACH_VILLEC2
-
-	if(reboot_mode == 104)
-	{
-		printk(KERN_NOTICE "[K] %s\n", __func__);
-		set_hw_reason(HW_RESET_REASON);
-	}
-	printk(KERN_NOTICE "[K] %s, set_hw_reason done\n", __func__);
-#endif
-
 	machine_shutdown();
+
+	arm_machine_flush_console();
+
 	arm_pm_restart(reboot_mode, cmd);
+
+	
+	mdelay(1000);
+
+	
+	printk("Reboot failed -- System halted\n");
+	local_irq_disable();
+	while (1);
 }
 
-/*
- * dump a block of kernel memory from around the given address
- */
 static void show_data(unsigned long addr, int nbytes, const char *name)
 {
 	int	i, j;
 	int	nlines;
 	u32	*p;
 
-	/*
-	 * don't attempt to dump non-kernel addresses or
-	 * values that are probably just small negative numbers
-	 */
 	if (addr < PAGE_OFFSET || addr > -256UL)
 		return;
 
 	printk("\n%s: %#lx:\n", name, addr);
 
-	/*
-	 * round address down to a 32 bit boundary
-	 * and always dump a multiple of 32 bytes
-	 */
 	p = (u32 *)(addr & ~(sizeof(u32) - 1));
 	nbytes += (addr & (sizeof(u32) - 1));
 	nlines = (nbytes + 31) / 32;
 
 
 	for (i = 0; i < nlines; i++) {
-		/*
-		 * just display low 16 bits of address to keep
-		 * each line of the dump < 80 characters
-		 */
 		printk("%04lx ", (unsigned long)p & 0xffff);
 		for (j = 0; j < 8; j++) {
 			u32	data;
@@ -426,6 +374,7 @@ void __show_regs(struct pt_regs *regs)
 		init_utsname()->release,
 		(int)strcspn(init_utsname()->version, " "),
 		init_utsname()->version);
+	BUG_ON(!regs);
 	print_symbol("PC is at %s\n", instruction_pointer(regs));
 	print_symbol("LR is at %s\n", regs->ARM_lr);
 	printk("pc : [<%08lx>]    lr : [<%08lx>]    psr: %08lx\n"
@@ -484,16 +433,13 @@ void show_regs(struct pt_regs * regs)
 	printk("\n");
 	printk("Pid: %d, comm: %20s\n", task_pid_nr(current), current->comm);
 	__show_regs(regs);
-	__backtrace();
+	dump_stack();
 }
 
 ATOMIC_NOTIFIER_HEAD(thread_notify_head);
 
 EXPORT_SYMBOL_GPL(thread_notify_head);
 
-/*
- * Free current thread data structures etc..
- */
 void exit_thread(void)
 {
 	thread_notify(THREAD_NOTIFY_EXIT, current_thread_info());
@@ -544,18 +490,12 @@ copy_thread(unsigned long clone_flags, unsigned long stack_start,
 	return 0;
 }
 
-/*
- * Fill in the task's elfregs structure for a core dump.
- */
 int dump_task_regs(struct task_struct *t, elf_gregset_t *elfregs)
 {
 	elf_core_copy_regs(elfregs, task_pt_regs(t));
 	return 1;
 }
 
-/*
- * fill in the fpe structure for a core dump...
- */
 int dump_fpu (struct pt_regs *regs, struct user_fp *fp)
 {
 	struct thread_info *thread = current_thread_info();
@@ -568,11 +508,6 @@ int dump_fpu (struct pt_regs *regs, struct user_fp *fp)
 }
 EXPORT_SYMBOL(dump_fpu);
 
-/*
- * Shuffle the argument into the correct register before calling the
- * thread function.  r4 is the thread argument, r5 is the pointer to
- * the thread function, and r6 points to the exit function.
- */
 extern void kernel_thread_helper(void);
 asm(	".pushsection .text\n"
 "	.align\n"
@@ -605,9 +540,6 @@ asm(	".pushsection .text\n"
 #define kernel_thread_exit	do_exit
 #endif
 
-/*
- * Create a kernel thread.
- */
 pid_t kernel_thread(int (*fn)(void *), void *arg, unsigned long flags)
 {
 	struct pt_regs regs;
@@ -634,7 +566,7 @@ unsigned long get_wchan(struct task_struct *p)
 
 	frame.fp = thread_saved_fp(p);
 	frame.sp = thread_saved_sp(p);
-	frame.lr = 0;			/* recovered from the stack */
+	frame.lr = 0;			
 	frame.pc = thread_saved_pc(p);
 	do {
 		int ret = unwind_frame(&frame);
@@ -653,24 +585,36 @@ unsigned long arch_randomize_brk(struct mm_struct *mm)
 }
 
 #ifdef CONFIG_MMU
-/*
- * The vectors page is always readable from user space for the
- * atomic helpers and the signal restart code.  Let's declare a mapping
- * for it so it is visible through ptrace and /proc/<pid>/mem.
- */
+static struct vm_area_struct gate_vma;
 
-int vectors_user_mapping(void)
+static int __init gate_vma_init(void)
 {
-	struct mm_struct *mm = current->mm;
-	return install_special_mapping(mm, 0xffff0000, PAGE_SIZE,
-				       VM_READ | VM_EXEC |
-				       VM_MAYREAD | VM_MAYEXEC |
-				       VM_ALWAYSDUMP | VM_RESERVED,
-				       NULL);
+	gate_vma.vm_start	= 0xffff0000;
+	gate_vma.vm_end		= 0xffff0000 + PAGE_SIZE;
+	gate_vma.vm_page_prot	= PAGE_READONLY_EXEC;
+	gate_vma.vm_flags	= VM_READ | VM_EXEC |
+				  VM_MAYREAD | VM_MAYEXEC;
+	return 0;
+}
+arch_initcall(gate_vma_init);
+
+struct vm_area_struct *get_gate_vma(struct mm_struct *mm)
+{
+	return &gate_vma;
+}
+
+int in_gate_area(struct mm_struct *mm, unsigned long addr)
+{
+	return (addr >= gate_vma.vm_start) && (addr < gate_vma.vm_end);
+}
+
+int in_gate_area_no_mm(unsigned long addr)
+{
+	return in_gate_area(NULL, addr);
 }
 
 const char *arch_vma_name(struct vm_area_struct *vma)
 {
-	return (vma->vm_start == 0xffff0000) ? "[vectors]" : NULL;
+	return (vma == &gate_vma) ? "[vectors]" : NULL;
 }
 #endif

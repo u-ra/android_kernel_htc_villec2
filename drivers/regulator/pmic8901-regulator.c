@@ -16,22 +16,19 @@
 #include <linux/init.h>
 #include <linux/mfd/pmic8901.h>
 #include <linux/regulator/driver.h>
+#include <linux/mfd/pm8xxx/core.h>
 #include <linux/regulator/pmic8901-regulator.h>
-#include <mach/mpp.h>
+#include <linux/module.h>
 
-/* Regulator types */
 #define REGULATOR_TYPE_LDO		0
 #define REGULATOR_TYPE_SMPS		1
 #define REGULATOR_TYPE_VS		2
-#define REGULATOR_TYPE_MPP		3
 
-/* Bank select/write macros */
 #define REGULATOR_BANK_SEL(n)           ((n) << 4)
 #define REGULATOR_BANK_WRITE            0x80
 #define LDO_TEST_BANKS			7
 #define REGULATOR_BANK_MASK		0xF0
 
-/* Pin mask resource register programming */
 #define VREG_PMR_STATE_MASK		0x60
 #define VREG_PMR_STATE_HPM		0x60
 #define VREG_PMR_STATE_LPM		0x40
@@ -61,9 +58,7 @@
 	((pmr_reg & VREG_PMR_STATE_MASK) == VREG_PMR_STATE_HPM || \
 	 (pmr_reg & VREG_PMR_STATE_MASK) == VREG_PMR_STATE_LPM)
 
-/* FTSMPS programming */
 
-/* CTRL register */
 #define SMPS_VCTRL_BAND_MASK		0xC0
 #define SMPS_VCTRL_BAND_OFF		0x00
 #define SMPS_VCTRL_BAND_1		0x40
@@ -87,13 +82,10 @@
 #define SMPS_UV_MIN			SMPS_BAND_1_UV_MIN
 #define SMPS_UV_MAX			SMPS_BAND_3_UV_MAX
 
-/* PWR_CNFG register */
 #define SMPS_PULL_DOWN_ENABLE_MASK	0x40
 #define SMPS_PULL_DOWN_ENABLE		0x40
 
-/* LDO programming */
 
-/* CTRL register */
 #define LDO_LOCAL_ENABLE_MASK		0x80
 #define LDO_LOCAL_ENABLE		0x80
 
@@ -102,16 +94,13 @@
 
 #define LDO_CTRL_VPROG_MASK		0x1F
 
-/* TEST register bank 2 */
 #define LDO_TEST_VPROG_UPDATE_MASK	0x08
 #define LDO_TEST_RANGE_SEL_MASK		0x04
 #define LDO_TEST_FINE_STEP_MASK		0x02
 #define LDO_TEST_FINE_STEP_SHIFT	1
 
-/* TEST register bank 4 */
 #define LDO_TEST_RANGE_EXT_MASK	0x01
 
-/* Allowable voltage ranges */
 #define PLDO_LOW_UV_MIN			750000
 #define PLDO_LOW_UV_MAX			1537500
 #define PLDO_LOW_FINE_STEP_UV		12500
@@ -128,9 +117,7 @@
 #define NLDO_UV_MAX			1537500
 #define NLDO_FINE_STEP_UV		12500
 
-/* VS programming */
 
-/* CTRL register */
 #define VS_CTRL_ENABLE_MASK		0xC0
 #define VS_CTRL_DISABLE			0x00
 #define VS_CTRL_ENABLE			0x40
@@ -140,9 +127,9 @@
 #define VS_PULL_DOWN_ENABLE		0x20
 
 struct pm8901_vreg {
+	struct device			*dev;
 	struct pm8901_vreg_pdata	*pdata;
 	struct regulator_dev		*rdev;
-	struct pm8901_chip		*chip;
 	int				hpm_min_load;
 	unsigned			pc_vote;
 	unsigned			optimum;
@@ -159,25 +146,16 @@ struct pm8901_vreg {
 	u8				pfm_ctrl_reg;
 	u8				pwr_cnfg_reg;
 	u8				is_nmos;
-	u8				mpp_id;
 	u8				state;
 };
 
-/*
- * These are used to compensate for the PMIC 8901 v1 FTS regulators which
- * output ~10% higher than the programmed set point.
- */
-#define IS_PMIC_8901_V1(rev)		((rev) == PM_8901_REV_1p0 || \
-					 (rev) == PM_8901_REV_1p1)
+#define IS_PMIC_8901_V1(rev)		((rev) == PM8XXX_REVISION_8901_1p0 || \
+					 (rev) == PM8XXX_REVISION_8901_1p1)
 
 #define PMIC_8901_V1_SCALE(uV)		((((uV) - 62100) * 23) / 25)
 
 #define PMIC_8901_V1_SCALE_INV(uV)	(((uV) * 25) / 23 + 62100)
 
-/*
- * Band 1 of PMIC 8901 SMPS regulators only supports set points with the 3 LSB's
- * equal to 0.  This is accomplished in the macro by truncating the bits.
- */
 #define PM8901_SMPS_BAND_1_COMPENSATE(vprog)	((vprog) & 0xF8)
 
 #define LDO(_id, _ctrl_addr, _pmr_addr, _test_addr, _is_nmos) \
@@ -207,14 +185,8 @@ struct pm8901_vreg {
 		.type = REGULATOR_TYPE_VS, \
 	}
 
-#define MPP(_id, _mpp_id) \
-	[_id] = { \
-		.mpp_id = _mpp_id, \
-		.type = REGULATOR_TYPE_MPP, \
-	}
-
 static struct pm8901_vreg pm8901_vreg[] = {
-	/*  id                 ctrl   pmr    tst    n/p */
+	
 	LDO(PM8901_VREG_ID_L0, 0x02F, 0x0AB, 0x030, 1),
 	LDO(PM8901_VREG_ID_L1, 0x031, 0x0AC, 0x032, 0),
 	LDO(PM8901_VREG_ID_L2, 0x033, 0x0AD, 0x034, 0),
@@ -223,17 +195,14 @@ static struct pm8901_vreg pm8901_vreg[] = {
 	LDO(PM8901_VREG_ID_L5, 0x039, 0x0B0, 0x03A, 0),
 	LDO(PM8901_VREG_ID_L6, 0x03B, 0x0B1, 0x03C, 0),
 
-	/*   id                 ctrl   pmr    pfm    pwr */
+	
 	SMPS(PM8901_VREG_ID_S0, 0x05B, 0x0A6, 0x05C, 0x0E3),
 	SMPS(PM8901_VREG_ID_S1, 0x06A, 0x0A7, 0x06B, 0x0EC),
 	SMPS(PM8901_VREG_ID_S2, 0x079, 0x0A8, 0x07A, 0x0F1),
 	SMPS(PM8901_VREG_ID_S3, 0x088, 0x0A9, 0x089, 0x0F6),
 	SMPS(PM8901_VREG_ID_S4, 0x097, 0x0AA, 0x098, 0x0FB),
 
-	/* id			  MPP ID */
-	MPP(PM8901_VREG_ID_MPP0,    0),
-
-	/* id                       ctrl   pmr */
+	
 	VS(PM8901_VREG_ID_LVS0,     0x046, 0x0B2),
 	VS(PM8901_VREG_ID_LVS1,     0x048, 0x0B3),
 	VS(PM8901_VREG_ID_LVS2,     0x04A, 0x0B4),
@@ -246,7 +215,7 @@ static struct pm8901_vreg pm8901_vreg[] = {
 static void print_write_error(struct pm8901_vreg *vreg, int rc,
 				const char *func);
 
-static int pm8901_vreg_write(struct pm8901_chip *chip,
+static int pm8901_vreg_write(struct pm8901_vreg *vreg,
 		u16 addr, u8 val, u8 mask, u8 *reg_save)
 {
 	int rc = 0;
@@ -254,13 +223,12 @@ static int pm8901_vreg_write(struct pm8901_chip *chip,
 
 	reg = (*reg_save & ~mask) | (val & mask);
 	if (reg != *reg_save)
-		rc = pm8901_write(chip, addr, &reg, 1);
+		rc = pm8xxx_writeb(vreg->dev->parent, addr, reg);
 	if (!rc)
 		*reg_save = reg;
 	return rc;
 }
 
-/* Set pin control bits based on new mode. */
 static int pm8901_vreg_select_pin_ctrl(struct pm8901_vreg *vreg, u8 *pmr_reg)
 {
 	*pmr_reg |= VREG_PMR_PIN_CTRL_ALL_MASKED;
@@ -283,7 +251,6 @@ static int pm8901_vreg_select_pin_ctrl(struct pm8901_vreg *vreg, u8 *pmr_reg)
 static int pm8901_vreg_enable(struct regulator_dev *dev)
 {
 	struct pm8901_vreg *vreg = rdev_get_drvdata(dev);
-	struct pm8901_chip *chip = vreg->chip;
 	u8 val = VREG_PMR_STATE_HPM;
 	int rc;
 
@@ -298,7 +265,7 @@ static int pm8901_vreg_enable(struct regulator_dev *dev)
 
 	pm8901_vreg_select_pin_ctrl(vreg, &val);
 
-	rc = pm8901_vreg_write(chip, vreg->pmr_addr,
+	rc = pm8901_vreg_write(vreg, vreg->pmr_addr,
 			val,
 			VREG_PMR_STATE_MASK | VREG_PMR_PIN_CTRL_ALL_MASK,
 			&vreg->pmr_reg);
@@ -311,10 +278,9 @@ static int pm8901_vreg_enable(struct regulator_dev *dev)
 static int pm8901_vreg_disable(struct regulator_dev *dev)
 {
 	struct pm8901_vreg *vreg = rdev_get_drvdata(dev);
-	struct pm8901_chip *chip = vreg->chip;
 	int rc;
 
-	rc = pm8901_vreg_write(chip, vreg->pmr_addr,
+	rc = pm8901_vreg_write(vreg, vreg->pmr_addr,
 			VREG_PMR_STATE_OFF | VREG_PMR_PIN_CTRL_ALL_MASKED,
 			VREG_PMR_STATE_MASK | VREG_PMR_PIN_CTRL_ALL_MASK,
 			&vreg->pmr_reg);
@@ -324,13 +290,6 @@ static int pm8901_vreg_disable(struct regulator_dev *dev)
 	return rc;
 }
 
-/*
- * Cases that count as enabled:
- *
- * 1. PMR register has mode == HPM or LPM.
- * 2. Any pin control bits are unmasked.
- * 3. The regulator is an LDO and its local enable bit is set.
- */
 static int _pm8901_vreg_is_enabled(struct pm8901_vreg *vreg)
 {
 	if ((vreg->type == REGULATOR_TYPE_LDO)
@@ -359,23 +318,21 @@ static int pm8901_vreg_is_enabled(struct regulator_dev *dev)
 static int pm8901_ldo_disable(struct regulator_dev *dev)
 {
 	struct pm8901_vreg *vreg = rdev_get_drvdata(dev);
-	struct pm8901_chip *chip = vreg->chip;
 	int rc;
 
-	/* Disassert local enable bit in CTRL register. */
-	rc = pm8901_vreg_write(chip, vreg->ctrl_addr, 0, LDO_LOCAL_ENABLE_MASK,
+	
+	rc = pm8901_vreg_write(vreg, vreg->ctrl_addr, 0, LDO_LOCAL_ENABLE_MASK,
 			&vreg->ctrl_reg);
 	if (rc)
 		print_write_error(vreg, rc, __func__);
 
-	/* Disassert enable bit in PMR register. */
+	
 	rc = pm8901_vreg_disable(dev);
 
 	return rc;
 }
 
-static int pm8901_pldo_set_voltage(struct pm8901_chip *chip,
-		struct pm8901_vreg *vreg, int uV)
+static int pm8901_pldo_set_voltage(struct pm8901_vreg *vreg, int uV)
 {
 	int vmin, rc = 0;
 	unsigned vprog, fine_step;
@@ -405,16 +362,12 @@ static int pm8901_pldo_set_voltage(struct pm8901_chip *chip,
 	fine_step_reg = (vprog & 1) << LDO_TEST_FINE_STEP_SHIFT;
 	vprog >>= 1;
 
-	/*
-	 * Disable program voltage update if range extension, range select,
-	 * or fine step have changed and the regulator is enabled.
-	 */
 	if (_pm8901_vreg_is_enabled(vreg) &&
 		(((range_ext ^ vreg->test_reg[4]) & LDO_TEST_RANGE_EXT_MASK)
 		|| ((range_sel ^ vreg->test_reg[2]) & LDO_TEST_RANGE_SEL_MASK)
 		|| ((fine_step_reg ^ vreg->test_reg[2])
 			& LDO_TEST_FINE_STEP_MASK))) {
-		rc = pm8901_vreg_write(chip, vreg->test_addr,
+		rc = pm8901_vreg_write(vreg, vreg->test_addr,
 			REGULATOR_BANK_SEL(2) | REGULATOR_BANK_WRITE,
 			REGULATOR_BANK_MASK | LDO_TEST_VPROG_UPDATE_MASK,
 			&vreg->test_reg[2]);
@@ -422,14 +375,14 @@ static int pm8901_pldo_set_voltage(struct pm8901_chip *chip,
 			goto bail;
 	}
 
-	/* Write new voltage. */
-	rc = pm8901_vreg_write(chip, vreg->ctrl_addr, vprog,
+	
+	rc = pm8901_vreg_write(vreg, vreg->ctrl_addr, vprog,
 				LDO_CTRL_VPROG_MASK, &vreg->ctrl_reg);
 	if (rc)
 		goto bail;
 
-	/* Write range extension. */
-	rc = pm8901_vreg_write(chip, vreg->test_addr,
+	
+	rc = pm8901_vreg_write(vreg, vreg->test_addr,
 			range_ext | REGULATOR_BANK_SEL(4)
 			 | REGULATOR_BANK_WRITE,
 			LDO_TEST_RANGE_EXT_MASK | REGULATOR_BANK_MASK,
@@ -437,8 +390,8 @@ static int pm8901_pldo_set_voltage(struct pm8901_chip *chip,
 	if (rc)
 		goto bail;
 
-	/* Write fine step, range select and program voltage update. */
-	rc = pm8901_vreg_write(chip, vreg->test_addr,
+	
+	rc = pm8901_vreg_write(vreg, vreg->test_addr,
 			fine_step_reg | range_sel | REGULATOR_BANK_SEL(2)
 			 | REGULATOR_BANK_WRITE | LDO_TEST_VPROG_UPDATE_MASK,
 			LDO_TEST_FINE_STEP_MASK | LDO_TEST_RANGE_SEL_MASK
@@ -451,8 +404,7 @@ bail:
 	return rc;
 }
 
-static int pm8901_nldo_set_voltage(struct pm8901_chip *chip,
-		struct pm8901_vreg *vreg, int uV)
+static int pm8901_nldo_set_voltage(struct pm8901_vreg *vreg, int uV)
 {
 	unsigned vprog, fine_step_reg;
 	int rc;
@@ -464,14 +416,14 @@ static int pm8901_nldo_set_voltage(struct pm8901_chip *chip,
 	fine_step_reg = (vprog & 1) << LDO_TEST_FINE_STEP_SHIFT;
 	vprog >>= 1;
 
-	/* Write new voltage. */
-	rc = pm8901_vreg_write(chip, vreg->ctrl_addr, vprog,
+	
+	rc = pm8901_vreg_write(vreg, vreg->ctrl_addr, vprog,
 				LDO_CTRL_VPROG_MASK, &vreg->ctrl_reg);
 	if (rc)
 		print_write_error(vreg, rc, __func__);
 
-	/* Write fine step. */
-	rc = pm8901_vreg_write(chip, vreg->test_addr,
+	
+	rc = pm8901_vreg_write(vreg, vreg->test_addr,
 			fine_step_reg | REGULATOR_BANK_SEL(2)
 			 | REGULATOR_BANK_WRITE | LDO_TEST_VPROG_UPDATE_MASK,
 			LDO_TEST_FINE_STEP_MASK | REGULATOR_BANK_MASK
@@ -487,12 +439,11 @@ static int pm8901_ldo_set_voltage(struct regulator_dev *dev,
 		int min_uV, int max_uV, unsigned *selector)
 {
 	struct pm8901_vreg *vreg = rdev_get_drvdata(dev);
-	struct pm8901_chip *chip = vreg->chip;
 
 	if (vreg->is_nmos)
-		return pm8901_nldo_set_voltage(chip, vreg, min_uV);
+		return pm8901_nldo_set_voltage(vreg, min_uV);
 	else
-		return pm8901_pldo_set_voltage(chip, vreg, min_uV);
+		return pm8901_pldo_set_voltage(vreg, min_uV);
 }
 
 static int pm8901_pldo_get_voltage(struct pm8901_vreg *vreg)
@@ -508,15 +459,15 @@ static int pm8901_pldo_get_voltage(struct pm8901_vreg *vreg)
 	vprog = (vprog << 1) | (fine_step_reg >> LDO_TEST_FINE_STEP_SHIFT);
 
 	if (range_sel) {
-		/* low range mode */
+		
 		fine_step = PLDO_LOW_FINE_STEP_UV;
 		vmin = PLDO_LOW_UV_MIN;
 	} else if (!range_ext) {
-		/* normal mode */
+		
 		fine_step = PLDO_NORM_FINE_STEP_UV;
 		vmin = PLDO_NORM_UV_MIN;
 	} else {
-		/* high range mode */
+		
 		fine_step = PLDO_HIGH_FINE_STEP_UV;
 		vmin = PLDO_HIGH_UV_MIN;
 	}
@@ -546,28 +497,16 @@ static int pm8901_ldo_get_voltage(struct regulator_dev *dev)
 		return pm8901_pldo_get_voltage(vreg);
 }
 
-/*
- * Optimum mode programming:
- * REGULATOR_MODE_FAST: Go to HPM (highest priority)
- * REGULATOR_MODE_STANDBY: Go to pin ctrl mode if there are any pin ctrl
- * votes, else go to LPM
- *
- * Pin ctrl mode voting via regulator set_mode:
- * REGULATOR_MODE_IDLE: Go to pin ctrl mode if the optimum mode is LPM, else
- * go to HPM
- * REGULATOR_MODE_NORMAL: Go to LPM if it is the optimum mode, else go to HPM
- */
 static int pm8901_vreg_set_mode(struct regulator_dev *dev, unsigned int mode)
 {
 	struct pm8901_vreg *vreg = rdev_get_drvdata(dev);
-	struct pm8901_chip *chip = vreg->chip;
 	unsigned optimum = vreg->optimum;
 	unsigned pc_vote = vreg->pc_vote;
 	unsigned mode_initialized = vreg->mode_initialized;
 	u8 val = 0;
 	int rc = 0;
 
-	/* Determine new mode to go into. */
+	
 	switch (mode) {
 	case REGULATOR_MODE_FAST:
 		val = VREG_PMR_STATE_HPM;
@@ -586,7 +525,7 @@ static int pm8901_vreg_set_mode(struct regulator_dev *dev, unsigned int mode)
 
 	case REGULATOR_MODE_IDLE:
 		if (pc_vote++)
-			goto done; /* already taken care of */
+			goto done; 
 
 		if (mode_initialized && optimum == REGULATOR_MODE_FAST)
 			val = VREG_PMR_STATE_HPM;
@@ -596,7 +535,7 @@ static int pm8901_vreg_set_mode(struct regulator_dev *dev, unsigned int mode)
 
 	case REGULATOR_MODE_NORMAL:
 		if (pc_vote && --pc_vote)
-			goto done; /* already taken care of */
+			goto done; 
 
 		if (optimum == REGULATOR_MODE_STANDBY)
 			val = VREG_PMR_STATE_LPM;
@@ -609,12 +548,12 @@ static int pm8901_vreg_set_mode(struct regulator_dev *dev, unsigned int mode)
 		return -EINVAL;
 	}
 
-	/* Set pin control bits based on new mode. */
+	
 	pm8901_vreg_select_pin_ctrl(vreg, &val);
 
-	/* Only apply mode setting to hardware if currently enabled. */
+	
 	if (pm8901_vreg_is_enabled(dev))
-		rc = pm8901_vreg_write(chip, vreg->pmr_addr, val,
+		rc = pm8901_vreg_write(vreg, vreg->pmr_addr, val,
 			       VREG_PMR_STATE_MASK | VREG_PMR_PIN_CTRL_ALL_MASK,
 			       &vreg->pmr_reg);
 
@@ -660,12 +599,6 @@ unsigned int pm8901_vreg_get_optimum_mode(struct regulator_dev *dev,
 	struct pm8901_vreg *vreg = rdev_get_drvdata(dev);
 
 	if (load_uA <= 0) {
-		/*
-		 * pm8901_vreg_get_optimum_mode is being called before consumers
-		 * have specified their load currents via
-		 * regulator_set_optimum_mode. Return whatever the existing mode
-		 * is.
-		 */
 		return pm8901_vreg_get_mode(dev);
 	}
 
@@ -678,17 +611,16 @@ static int pm8901_smps_set_voltage(struct regulator_dev *dev,
 		int min_uV, int max_uV, unsigned *selector)
 {
 	struct pm8901_vreg *vreg = rdev_get_drvdata(dev);
-	struct pm8901_chip *chip = vreg->chip;
 	int rc;
 	u8 val, band;
 
-	if (IS_PMIC_8901_V1(pm8901_rev(chip)))
+	if (IS_PMIC_8901_V1(pm8xxx_get_revision(vreg->dev->parent)))
 		min_uV = PMIC_8901_V1_SCALE(min_uV);
 
 	if (min_uV < SMPS_BAND_1_UV_MIN || min_uV > SMPS_BAND_3_UV_MAX)
 		return -EINVAL;
 
-	/* Round down for set points in the gaps between bands. */
+	
 	if (min_uV > SMPS_BAND_1_UV_MAX && min_uV < SMPS_BAND_2_UV_MIN)
 		min_uV = SMPS_BAND_1_UV_MAX;
 	else if (min_uV > SMPS_BAND_2_UV_MAX
@@ -707,13 +639,13 @@ static int pm8901_smps_set_voltage(struct regulator_dev *dev,
 		band = SMPS_VCTRL_BAND_3;
 	}
 
-	rc = pm8901_vreg_write(chip, vreg->ctrl_addr, band | val,
+	rc = pm8901_vreg_write(vreg, vreg->ctrl_addr, band | val,
 			SMPS_VCTRL_BAND_MASK | SMPS_VCTRL_VPROG_MASK,
 			&vreg->ctrl_reg);
 	if (rc)
 		goto bail;
 
-	rc = pm8901_vreg_write(chip, vreg->pfm_ctrl_addr, band | val,
+	rc = pm8901_vreg_write(vreg, vreg->pfm_ctrl_addr, band | val,
 			SMPS_VCTRL_BAND_MASK | SMPS_VCTRL_VPROG_MASK,
 			&vreg->pfm_ctrl_reg);
 bail:
@@ -726,7 +658,6 @@ bail:
 static int pm8901_smps_get_voltage(struct regulator_dev *dev)
 {
 	struct pm8901_vreg *vreg = rdev_get_drvdata(dev);
-	struct pm8901_chip *chip = vreg->chip;
 	u8 vprog, band;
 	int ret = 0;
 
@@ -745,7 +676,7 @@ static int pm8901_smps_get_voltage(struct regulator_dev *dev)
 	else
 		ret = vprog * SMPS_BAND_3_UV_STEP + SMPS_BAND_3_UV_MIN;
 
-	if (IS_PMIC_8901_V1(pm8901_rev(chip)))
+	if (IS_PMIC_8901_V1(pm8xxx_get_revision(vreg->dev->parent)))
 		ret = PMIC_8901_V1_SCALE_INV(ret);
 
 	return ret;
@@ -754,14 +685,13 @@ static int pm8901_smps_get_voltage(struct regulator_dev *dev)
 static int pm8901_vs_enable(struct regulator_dev *dev)
 {
 	struct pm8901_vreg *vreg = rdev_get_drvdata(dev);
-	struct pm8901_chip *chip = vreg->chip;
 	int rc;
 
-	/* Assert enable bit in PMR register. */
+	
 	rc = pm8901_vreg_enable(dev);
 
-	/* Make sure that switch is controlled via PMR register */
-	rc = pm8901_vreg_write(chip, vreg->ctrl_addr, VS_CTRL_USE_PMR,
+	
+	rc = pm8901_vreg_write(vreg, vreg->ctrl_addr, VS_CTRL_USE_PMR,
 			VS_CTRL_ENABLE_MASK, &vreg->ctrl_reg);
 	if (rc)
 		print_write_error(vreg, rc, __func__);
@@ -772,65 +702,18 @@ static int pm8901_vs_enable(struct regulator_dev *dev)
 static int pm8901_vs_disable(struct regulator_dev *dev)
 {
 	struct pm8901_vreg *vreg = rdev_get_drvdata(dev);
-	struct pm8901_chip *chip = vreg->chip;
 	int rc;
 
-	/* Disassert enable bit in PMR register. */
+	
 	rc = pm8901_vreg_disable(dev);
 
-	/* Make sure that switch is controlled via PMR register */
-	rc = pm8901_vreg_write(chip, vreg->ctrl_addr, VS_CTRL_USE_PMR,
+	
+	rc = pm8901_vreg_write(vreg, vreg->ctrl_addr, VS_CTRL_USE_PMR,
 			VS_CTRL_ENABLE_MASK, &vreg->ctrl_reg);
 	if (rc)
 		print_write_error(vreg, rc, __func__);
 
 	return rc;
-}
-
-static int pm8901_mpp_enable(struct regulator_dev *dev)
-{
-	struct pm8901_vreg *vreg = rdev_get_drvdata(dev);
-	int out_val;
-	int rc;
-
-	out_val = (vreg->pdata->active_high
-		   ? PM_MPP_DOUT_CTL_HIGH : PM_MPP_DOUT_CTL_LOW);
-
-	rc = pm8901_mpp_config(vreg->mpp_id, PM_MPP_TYPE_D_OUTPUT,
-			PM8901_MPP_DIG_LEVEL_VPH, out_val);
-
-	if (rc)
-		pr_err("%s: pm8901_mpp_config failed, rc=%d\n", __func__, rc);
-	else
-		vreg->state = 1;
-
-	return rc;
-}
-
-static int pm8901_mpp_disable(struct regulator_dev *dev)
-{
-	struct pm8901_vreg *vreg = rdev_get_drvdata(dev);
-	int out_val;
-	int rc;
-
-	out_val = (vreg->pdata->active_high
-		   ? PM_MPP_DOUT_CTL_LOW : PM_MPP_DOUT_CTL_HIGH);
-
-	rc = pm8901_mpp_config(vreg->mpp_id, PM_MPP_TYPE_D_OUTPUT,
-			PM8901_MPP_DIG_LEVEL_VPH, out_val);
-
-	if (rc)
-		pr_err("%s: pm8901_mpp_config failed, rc=%d\n", __func__, rc);
-	else
-		vreg->state = 0;
-
-	return rc;
-}
-
-static int pm8901_mpp_is_enabled(struct regulator_dev *dev)
-{
-	struct pm8901_vreg *vreg = rdev_get_drvdata(dev);
-	return vreg->state;
 }
 
 static struct regulator_ops pm8901_ldo_ops = {
@@ -863,12 +746,6 @@ static struct regulator_ops pm8901_vs_ops = {
 	.get_mode = pm8901_vreg_get_mode,
 };
 
-static struct regulator_ops pm8901_mpp_ops = {
-	.enable = pm8901_mpp_enable,
-	.disable = pm8901_mpp_disable,
-	.is_enabled = pm8901_mpp_is_enabled,
-};
-
 #define VREG_DESCRIP(_id, _name, _ops) \
 	[_id] = { \
 		.name = _name, \
@@ -893,8 +770,6 @@ static struct regulator_desc pm8901_vreg_descrip[] = {
 	VREG_DESCRIP(PM8901_VREG_ID_S3, "8901_s3", &pm8901_smps_ops),
 	VREG_DESCRIP(PM8901_VREG_ID_S4, "8901_s4", &pm8901_smps_ops),
 
-	VREG_DESCRIP(PM8901_VREG_ID_MPP0,     "8901_mpp0",     &pm8901_mpp_ops),
-
 	VREG_DESCRIP(PM8901_VREG_ID_LVS0,     "8901_lvs0",     &pm8901_vs_ops),
 	VREG_DESCRIP(PM8901_VREG_ID_LVS1,     "8901_lvs1",     &pm8901_vs_ops),
 	VREG_DESCRIP(PM8901_VREG_ID_LVS2,     "8901_lvs2",     &pm8901_vs_ops),
@@ -904,50 +779,51 @@ static struct regulator_desc pm8901_vreg_descrip[] = {
 	VREG_DESCRIP(PM8901_VREG_ID_HDMI_MVS, "8901_hdmi_mvs", &pm8901_vs_ops),
 };
 
-static int pm8901_init_ldo(struct pm8901_chip *chip, struct pm8901_vreg *vreg)
+static int pm8901_init_ldo(struct pm8901_vreg *vreg)
 {
 	int rc = 0, i;
 	u8 bank;
 
-	/* Store current regulator register values. */
+	
 	for (i = 0; i < LDO_TEST_BANKS; i++) {
 		bank = REGULATOR_BANK_SEL(i);
-		rc = pm8901_write(chip, vreg->test_addr, &bank, 1);
+		rc = pm8xxx_writeb(vreg->dev->parent, vreg->test_addr, bank);
 		if (rc)
 			goto bail;
 
-		rc = pm8901_read(chip, vreg->test_addr, &vreg->test_reg[i], 1);
+		rc = pm8xxx_readb(vreg->dev->parent, vreg->test_addr,
+							&vreg->test_reg[i]);
 		if (rc)
 			goto bail;
 
 		vreg->test_reg[i] |= REGULATOR_BANK_WRITE;
 	}
 
-	/* Set pull down enable based on platform data. */
-	rc = pm8901_vreg_write(chip, vreg->ctrl_addr,
+	
+	rc = pm8901_vreg_write(vreg, vreg->ctrl_addr,
 		     (vreg->pdata->pull_down_enable ? LDO_PULL_DOWN_ENABLE : 0),
 		     LDO_PULL_DOWN_ENABLE_MASK, &vreg->ctrl_reg);
 bail:
 	return rc;
 }
 
-static int pm8901_init_smps(struct pm8901_chip *chip, struct pm8901_vreg *vreg)
+static int pm8901_init_smps(struct pm8901_vreg *vreg)
 {
 	int rc;
 
-	/* Store current regulator register values. */
-	rc = pm8901_read(chip, vreg->pfm_ctrl_addr,
-			 &vreg->pfm_ctrl_reg, 1);
+	
+	rc = pm8xxx_readb(vreg->dev->parent, vreg->pfm_ctrl_addr,
+					 &vreg->pfm_ctrl_reg);
 	if (rc)
 		goto bail;
 
-	rc = pm8901_read(chip, vreg->pwr_cnfg_addr,
-			 &vreg->pwr_cnfg_reg, 1);
+	rc = pm8xxx_readb(vreg->dev->parent, vreg->pwr_cnfg_addr,
+				 &vreg->pwr_cnfg_reg);
 	if (rc)
 		goto bail;
 
-	/* Set pull down enable based on platform data. */
-	rc = pm8901_vreg_write(chip, vreg->pwr_cnfg_addr,
+	
+	rc = pm8901_vreg_write(vreg, vreg->pwr_cnfg_addr,
 		    (vreg->pdata->pull_down_enable ? SMPS_PULL_DOWN_ENABLE : 0),
 		    SMPS_PULL_DOWN_ENABLE_MASK, &vreg->pwr_cnfg_reg);
 
@@ -955,35 +831,32 @@ bail:
 	return rc;
 }
 
-static int pm8901_init_vs(struct pm8901_chip *chip, struct pm8901_vreg *vreg)
+static int pm8901_init_vs(struct pm8901_vreg *vreg)
 {
 	int rc = 0;
 
-	/* Set pull down enable based on platform data. */
-	rc = pm8901_vreg_write(chip, vreg->ctrl_addr,
+	
+	rc = pm8901_vreg_write(vreg, vreg->ctrl_addr,
 		      (vreg->pdata->pull_down_enable ? VS_PULL_DOWN_ENABLE : 0),
 		      VS_PULL_DOWN_ENABLE_MASK, &vreg->ctrl_reg);
 
 	return rc;
 }
 
-static int pm8901_init_regulator(struct pm8901_chip *chip,
-		struct pm8901_vreg *vreg)
+static int pm8901_init_regulator(struct pm8901_vreg *vreg)
 {
-	int rc = 0;
+	int rc;
 
-	/* Store current regulator register values. */
-	if (vreg->type != REGULATOR_TYPE_MPP) {
-		rc = pm8901_read(chip, vreg->ctrl_addr, &vreg->ctrl_reg, 1);
-		if (rc)
-			goto bail;
+	
+	rc = pm8xxx_readb(vreg->dev->parent, vreg->ctrl_addr, &vreg->ctrl_reg);
+	if (rc)
+		goto bail;
 
-		rc = pm8901_read(chip, vreg->pmr_addr, &vreg->pmr_reg, 1);
-		if (rc)
-			goto bail;
-	}
+	rc = pm8xxx_readb(vreg->dev->parent, vreg->pmr_addr, &vreg->pmr_reg);
+	if (rc)
+		goto bail;
 
-	/* Set initial mode based on hardware state. */
+	
 	if ((vreg->pmr_reg & VREG_PMR_STATE_MASK) == VREG_PMR_STATE_LPM)
 		vreg->optimum = REGULATOR_MODE_STANDBY;
 	else
@@ -992,11 +865,11 @@ static int pm8901_init_regulator(struct pm8901_chip *chip,
 	vreg->mode_initialized = 0;
 
 	if (vreg->type == REGULATOR_TYPE_LDO)
-		rc = pm8901_init_ldo(chip, vreg);
+		rc = pm8901_init_ldo(vreg);
 	else if (vreg->type == REGULATOR_TYPE_SMPS)
-		rc = pm8901_init_smps(chip, vreg);
+		rc = pm8901_init_smps(vreg);
 	else if (vreg->type == REGULATOR_TYPE_VS)
-		rc = pm8901_init_vs(chip, vreg);
+		rc = pm8901_init_vs(vreg);
 bail:
 	if (rc)
 		pr_err("%s: pm8901_read/write failed; initial register states "
@@ -1008,7 +881,6 @@ bail:
 static int __devinit pm8901_vreg_probe(struct platform_device *pdev)
 {
 	struct regulator_desc *rdesc;
-	struct pm8901_chip *chip;
 	struct pm8901_vreg *vreg;
 	const char *reg_name = NULL;
 	int rc = 0;
@@ -1017,24 +889,23 @@ static int __devinit pm8901_vreg_probe(struct platform_device *pdev)
 		return -EINVAL;
 
 	if (pdev->id >= 0 && pdev->id < PM8901_VREG_MAX) {
-		chip = dev_get_drvdata(pdev->dev.parent);
 		rdesc = &pm8901_vreg_descrip[pdev->id];
 		vreg = &pm8901_vreg[pdev->id];
 		vreg->pdata = pdev->dev.platform_data;
-		vreg->chip = chip;
 		reg_name = pm8901_vreg_descrip[pdev->id].name;
+		vreg->dev = &pdev->dev;
 
-		rc = pm8901_init_regulator(chip, vreg);
+		rc = pm8901_init_regulator(vreg);
 		if (rc)
 			goto bail;
 
-		/* Disallow idle and normal modes if pin control isn't set. */
+		
 		if (vreg->pdata->pin_ctrl == 0)
 			vreg->pdata->init_data.constraints.valid_modes_mask
 			      &= ~(REGULATOR_MODE_NORMAL | REGULATOR_MODE_IDLE);
 
 		vreg->rdev = regulator_register(rdesc, &pdev->dev,
-				&vreg->pdata->init_data, vreg);
+				&vreg->pdata->init_data, vreg, NULL);
 		if (IS_ERR(vreg->rdev)) {
 			rc = PTR_ERR(vreg->rdev);
 			pr_err("%s: regulator_register failed for %s, rc=%d\n",

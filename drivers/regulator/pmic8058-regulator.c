@@ -13,6 +13,7 @@
 #include <linux/err.h>
 #include <linux/string.h>
 #include <linux/kernel.h>
+#include <linux/module.h>
 #include <linux/init.h>
 #include <linux/bitops.h>
 #include <linux/mfd/pmic8058.h>
@@ -21,13 +22,11 @@
 #include <linux/mfd/pm8xxx/core.h>
 #include <linux/regulator/pmic8058-regulator.h>
 
-/* Regulator types */
 #define REGULATOR_TYPE_LDO		0
 #define REGULATOR_TYPE_SMPS		1
 #define REGULATOR_TYPE_LVS		2
 #define REGULATOR_TYPE_NCP		3
 
-/* Common masks */
 #define REGULATOR_EN_MASK		0x80
 
 #define REGULATOR_BANK_MASK		0xF0
@@ -38,9 +37,7 @@
 #define SMPS_TEST_BANKS			8
 #define REGULATOR_TEST_BANKS_MAX	SMPS_TEST_BANKS
 
-/* LDO programming */
 
-/* CTRL register */
 #define LDO_ENABLE_MASK			0x80
 #define LDO_ENABLE			0x80
 #define LDO_PULL_DOWN_ENABLE_MASK	0x40
@@ -52,31 +49,25 @@
 
 #define LDO_CTRL_VPROG_MASK		0x1F
 
-/* TEST register bank 0 */
 #define LDO_TEST_LPM_MASK		0x40
 #define LDO_TEST_LPM_SEL_CTRL		0x00
 #define LDO_TEST_LPM_SEL_TCXO		0x40
 
-/* TEST register bank 2 */
 #define LDO_TEST_VPROG_UPDATE_MASK	0x08
 #define LDO_TEST_RANGE_SEL_MASK		0x04
 #define LDO_TEST_FINE_STEP_MASK		0x02
 #define LDO_TEST_FINE_STEP_SHIFT	1
 
-/* TEST register bank 4 */
 #define LDO_TEST_RANGE_EXT_MASK		0x01
 
-/* TEST register bank 5 */
 #define LDO_TEST_PIN_CTRL_MASK		0x0F
 #define LDO_TEST_PIN_CTRL_EN3		0x08
 #define LDO_TEST_PIN_CTRL_EN2		0x04
 #define LDO_TEST_PIN_CTRL_EN1		0x02
 #define LDO_TEST_PIN_CTRL_EN0		0x01
 
-/* TEST register bank 6 */
 #define LDO_TEST_PIN_CTRL_LPM_MASK	0x0F
 
-/* Allowable voltage ranges */
 #define PLDO_LOW_UV_MIN			750000
 #define PLDO_LOW_UV_MAX			1537500
 #define PLDO_LOW_FINE_STEP_UV		12500
@@ -93,17 +84,13 @@
 #define NLDO_UV_MAX			1537500
 #define NLDO_FINE_STEP_UV		12500
 
-/* SMPS masks and values */
 
-/* CTRL register */
 
-/* Legacy mode */
 #define SMPS_LEGACY_ENABLE		0x80
 #define SMPS_LEGACY_PULL_DOWN_ENABLE	0x40
 #define SMPS_LEGACY_VREF_SEL_MASK	0x20
 #define SMPS_LEGACY_VPROG_MASK		0x1F
 
-/* Advanced mode */
 #define SMPS_ADVANCED_BAND_MASK		0xC0
 #define SMPS_ADVANCED_BAND_OFF		0x00
 #define SMPS_ADVANCED_BAND_1		0x40
@@ -111,7 +98,6 @@
 #define SMPS_ADVANCED_BAND_3		0xC0
 #define SMPS_ADVANCED_VPROG_MASK	0x3F
 
-/* Legacy mode voltage ranges */
 #define SMPS_MODE1_UV_MIN		1500000
 #define SMPS_MODE1_UV_MAX		3050000
 #define SMPS_MODE1_UV_STEP		50000
@@ -124,7 +110,6 @@
 #define SMPS_MODE3_UV_MAX		1150000
 #define SMPS_MODE3_UV_STEP		25000
 
-/* Advanced mode voltage ranges */
 #define SMPS_BAND3_UV_MIN		1500000
 #define SMPS_BAND3_UV_MAX		3075000
 #define SMPS_BAND3_UV_STEP		25000
@@ -140,13 +125,10 @@
 #define SMPS_UV_MIN			SMPS_MODE3_UV_MIN
 #define SMPS_UV_MAX			SMPS_MODE1_UV_MAX
 
-/* Test2 register bank 1 */
 #define SMPS_LEGACY_VLOW_SEL_MASK	0x01
 
-/* Test2 register bank 6 */
 #define SMPS_ADVANCED_PULL_DOWN_ENABLE	0x08
 
-/* Test2 register bank 7 */
 #define SMPS_ADVANCED_MODE_MASK		0x02
 #define SMPS_ADVANCED_MODE		0x02
 #define SMPS_LEGACY_MODE		0x00
@@ -154,7 +136,6 @@
 #define SMPS_IN_ADVANCED_MODE(vreg) \
 	((vreg->test_reg[7] & SMPS_ADVANCED_MODE_MASK) == SMPS_ADVANCED_MODE)
 
-/* BUCK_SLEEP_CNTRL register */
 #define SMPS_PIN_CTRL_MASK		0xF0
 #define SMPS_PIN_CTRL_A1		0x80
 #define SMPS_PIN_CTRL_A0		0x40
@@ -167,7 +148,6 @@
 #define SMPS_PIN_CTRL_LPM_D1		0x02
 #define SMPS_PIN_CTRL_LPM_D0		0x01
 
-/* BUCK_CLOCK_CNTRL register */
 #define SMPS_CLK_DIVIDE2		0x40
 
 #define SMPS_CLK_CTRL_MASK		0x30
@@ -175,9 +155,7 @@
 #define SMPS_CLK_CTRL_PWM		0x10
 #define SMPS_CLK_CTRL_PFM		0x20
 
-/* LVS masks and values */
 
-/* CTRL register */
 #define LVS_ENABLE_MASK			0x80
 #define LVS_ENABLE			0x80
 #define LVS_PULL_DOWN_ENABLE_MASK	0x40
@@ -190,9 +168,7 @@
 #define LVS_PIN_CTRL_EN2		0x02
 #define LVS_PIN_CTRL_EN3		0x01
 
-/* NCP masks and values */
 
-/* CTRL register */
 #define NCP_VPROG_MASK			0x1F
 
 #define NCP_UV_MIN			1500000
@@ -308,31 +284,30 @@ struct pm8058_vreg {
 #define EN_GRP_3_2		4
 #define EN_GRP_1_0		5
 
-/* Master regulator control registers */
 static struct pm8058_enable m_en[MASTER_ENABLE_COUNT] = {
 	[EN_MSM] = {
-		.addr = 0x018, /* VREG_EN_MSM */
+		.addr = 0x018, 
 	},
 	[EN_PH] = {
-		.addr = 0x019, /* VREG_EN_PH */
+		.addr = 0x019, 
 	},
 	[EN_RF] = {
-		.addr = 0x01A, /* VREG_EN_RF */
+		.addr = 0x01A, 
 	},
 	[EN_GRP_5_4] = {
-		.addr = 0x1C8, /* VREG_EN_MSM_GRP_5-4 */
+		.addr = 0x1C8, 
 	},
 	[EN_GRP_3_2] = {
-		.addr = 0x1C9, /* VREG_EN_MSM_GRP_3-2 */
+		.addr = 0x1C9, 
 	},
 	[EN_GRP_1_0] = {
-		.addr = 0x1CA, /* VREG_EN_MSM_GRP_1-0 */
+		.addr = 0x1CA, 
 	},
 };
 
 
 static struct pm8058_vreg pm8058_vreg[] = {
-	/*  id   ctrl   test  n/p hpm_min  m_en		      m_en_mask */
+	
 	LDO(L0,  0x009, 0x065, 1, LDO_150, &m_en[EN_GRP_5_4], BIT(3)),
 	LDO(L1,  0x00A, 0x066, 1, LDO_300, &m_en[EN_GRP_5_4], BIT(6) | BIT(2)),
 	LDO(L2,  0x00B, 0x067, 0, LDO_300, &m_en[EN_GRP_3_2], BIT(2)),
@@ -361,7 +336,7 @@ static struct pm8058_vreg pm8058_vreg[] = {
 	LDO(L24, 0x123, 0x12B, 1, LDO_150, &m_en[EN_RF],      BIT(3)),
 	LDO(L25, 0x124, 0x12C, 1, LDO_150, &m_en[EN_RF],      BIT(2)),
 
-	/*   id  ctrl   test2  clk    sleep hpm_min  m_en	    m_en_mask */
+	
 	SMPS(S0, 0x004, 0x084, 0x1D1, 0x1D8, SMPS, &m_en[EN_MSM],    BIT(7)),
 	SMPS(S1, 0x005, 0x085, 0x1D2, 0x1DB, SMPS, &m_en[EN_MSM],    BIT(6)),
 	SMPS(S2, 0x110, 0x119, 0x1D3, 0x1DE, SMPS, &m_en[EN_GRP_5_4], BIT(5)),
@@ -369,11 +344,11 @@ static struct pm8058_vreg pm8058_vreg[] = {
 		BIT(7) | BIT(4)),
 	SMPS(S4, 0x112, 0x11B, 0x1D5, 0x1E4, SMPS, &m_en[EN_GRP_3_2], BIT(5)),
 
-	/*  id	  ctrl   m_en		    m_en_mask */
+	
 	LVS(LVS0, 0x12D, &m_en[EN_RF],      BIT(1)),
 	LVS(LVS1, 0x12F, &m_en[EN_GRP_1_0], BIT(0)),
 
-	/*  id   ctrl   test1 */
+	
 	NCP(NCP, 0x090, 0x0EC),
 };
 
@@ -488,7 +463,7 @@ static int pm8058_vreg_set_pin_ctrl(struct pm8058_vreg *vreg, int on)
 				goto bail;
 
 			if (pf == PM8058_VREG_PIN_FN_ENABLE) {
-				/* Pin control ON/OFF */
+				
 				rc = pm8058_vreg_write(vreg, vreg->ctrl_addr,
 					LDO_CTRL_PM_HPM,
 					LDO_ENABLE_MASK | LDO_CTRL_PM_MASK,
@@ -499,7 +474,7 @@ static int pm8058_vreg_set_pin_ctrl(struct pm8058_vreg *vreg, int on)
 				if (rc)
 					goto bail;
 			} else {
-				/* Pin control LPM/HPM */
+				
 				rc = pm8058_vreg_write(vreg, vreg->ctrl_addr,
 					LDO_ENABLE | LDO_CTRL_PM_LPM,
 					LDO_ENABLE_MASK | LDO_CTRL_PM_MASK,
@@ -508,7 +483,7 @@ static int pm8058_vreg_set_pin_ctrl(struct pm8058_vreg *vreg, int on)
 					goto bail;
 			}
 		} else {
-			/* Pin control off */
+			
 			rc = pm8058_vreg_write(vreg, vreg->test_addr,
 				REGULATOR_BANK_SEL(5) | REGULATOR_BANK_WRITE,
 				LDO_TEST_PIN_CTRL_MASK | REGULATOR_BANK_MASK,
@@ -528,7 +503,7 @@ static int pm8058_vreg_set_pin_ctrl(struct pm8058_vreg *vreg, int on)
 	case REGULATOR_TYPE_SMPS:
 		if (on) {
 			if (pf == PM8058_VREG_PIN_FN_ENABLE) {
-				/* Pin control ON/OFF */
+				
 				if (pc & PM8058_VREG_PIN_CTRL_D0)
 					val |= SMPS_PIN_CTRL_D0;
 				if (pc & PM8058_VREG_PIN_CTRL_D1)
@@ -538,7 +513,7 @@ static int pm8058_vreg_set_pin_ctrl(struct pm8058_vreg *vreg, int on)
 				if (pc & PM8058_VREG_PIN_CTRL_A1)
 					val |= SMPS_PIN_CTRL_A1;
 			} else {
-				/* Pin control LPM/HPM */
+				
 				if (pc & PM8058_VREG_PIN_CTRL_D0)
 					val |= SMPS_PIN_CTRL_LPM_D0;
 				if (pc & PM8058_VREG_PIN_CTRL_D1)
@@ -577,7 +552,7 @@ static int pm8058_vreg_set_pin_ctrl(struct pm8058_vreg *vreg, int on)
 			if (rc)
 				goto bail;
 		} else {
-			/* Pin control off */
+			
 			if (!SMPS_IN_ADVANCED_MODE(vreg)) {
 				if (_pm8058_vreg_is_enabled(vreg))
 					val = SMPS_LEGACY_ENABLE;
@@ -622,7 +597,7 @@ static int pm8058_vreg_set_pin_ctrl(struct pm8058_vreg *vreg, int on)
 			if (rc)
 				goto bail;
 		} else {
-			/* Pin control off */
+			
 			if (_pm8058_vreg_is_enabled(vreg))
 				val = LVS_ENABLE;
 
@@ -652,7 +627,7 @@ static int pm8058_vreg_enable(struct regulator_dev *dev)
 	mode = pm8058_vreg_get_mode(dev);
 
 	if (mode == REGULATOR_MODE_IDLE) {
-		/* Turn on pin control. */
+		
 		rc = pm8058_vreg_set_pin_ctrl(vreg, 1);
 		if (rc)
 			goto bail;
@@ -672,11 +647,6 @@ bail:
 
 static int _pm8058_vreg_is_enabled(struct pm8058_vreg *vreg)
 {
-	/*
-	 * All regulator types except advanced mode SMPS have enable bit in
-	 * bit 7 of the control register.  Global enable  and pin control also
-	 * do not work for advanced mode SMPS.
-	 */
 	if (!(vreg->type == REGULATOR_TYPE_SMPS && SMPS_IN_ADVANCED_MODE(vreg))
 		&& ((vreg->ctrl_reg & REGULATOR_EN_MASK)
 			|| pm8058_vreg_is_global_enabled(vreg)
@@ -703,17 +673,17 @@ static int pm8058_vreg_disable(struct regulator_dev *dev)
 	struct pm8058_vreg *vreg = rdev_get_drvdata(dev);
 	int rc = 0;
 
-	/* Disable in global control register. */
+	
 	rc = pm8058_vreg_set_global_enable(vreg, 0);
 	if (rc)
 		goto bail;
 
-	/* Turn off pin control. */
+	
 	rc = pm8058_vreg_set_pin_ctrl(vreg, 0);
 	if (rc)
 		goto bail;
 
-	/* Disable in local control register. */
+	
 	if (vreg->type == REGULATOR_TYPE_SMPS && SMPS_IN_ADVANCED_MODE(vreg))
 		rc = pm8058_vreg_write(vreg, vreg->ctrl_addr,
 			SMPS_ADVANCED_BAND_OFF, SMPS_ADVANCED_BAND_MASK,
@@ -759,10 +729,6 @@ static int pm8058_pldo_set_voltage(struct pm8058_vreg *vreg, int uV)
 	fine_step_reg = (vprog & 1) << LDO_TEST_FINE_STEP_SHIFT;
 	vprog >>= 1;
 
-	/*
-	 * Disable program voltage update if range extension, range select,
-	 * or fine step have changed and the regulator is enabled.
-	 */
 	if (_pm8058_vreg_is_enabled(vreg) &&
 		(((range_ext ^ vreg->test_reg[4]) & LDO_TEST_RANGE_EXT_MASK)
 		|| ((range_sel ^ vreg->test_reg[2]) & LDO_TEST_RANGE_SEL_MASK)
@@ -776,13 +742,13 @@ static int pm8058_pldo_set_voltage(struct pm8058_vreg *vreg, int uV)
 			goto bail;
 	}
 
-	/* Write new voltage. */
+	
 	rc = pm8058_vreg_write(vreg, vreg->ctrl_addr, vprog,
 				LDO_CTRL_VPROG_MASK, &vreg->ctrl_reg);
 	if (rc)
 		goto bail;
 
-	/* Write range extension. */
+	
 	rc = pm8058_vreg_write(vreg, vreg->test_addr,
 			range_ext | REGULATOR_BANK_SEL(4)
 			 | REGULATOR_BANK_WRITE,
@@ -791,7 +757,7 @@ static int pm8058_pldo_set_voltage(struct pm8058_vreg *vreg, int uV)
 	if (rc)
 		goto bail;
 
-	/* Write fine step, range select and program voltage update. */
+	
 	rc = pm8058_vreg_write(vreg, vreg->test_addr,
 			fine_step_reg | range_sel | REGULATOR_BANK_SEL(2)
 			 | REGULATOR_BANK_WRITE | LDO_TEST_VPROG_UPDATE_MASK,
@@ -817,13 +783,13 @@ static int pm8058_nldo_set_voltage(struct pm8058_vreg *vreg, int uV)
 	fine_step_reg = (vprog & 1) << LDO_TEST_FINE_STEP_SHIFT;
 	vprog >>= 1;
 
-	/* Write new voltage. */
+	
 	rc = pm8058_vreg_write(vreg, vreg->ctrl_addr, vprog,
 				LDO_CTRL_VPROG_MASK, &vreg->ctrl_reg);
 	if (rc)
 		goto bail;
 
-	/* Write fine step. */
+	
 	rc = pm8058_vreg_write(vreg, vreg->test_addr,
 			fine_step_reg | REGULATOR_BANK_SEL(2)
 			 | REGULATOR_BANK_WRITE | LDO_TEST_VPROG_UPDATE_MASK,
@@ -861,15 +827,15 @@ static int pm8058_pldo_get_voltage(struct pm8058_vreg *vreg)
 	vprog = (vprog << 1) | (fine_step_reg >> LDO_TEST_FINE_STEP_SHIFT);
 
 	if (range_sel) {
-		/* low range mode */
+		
 		fine_step = PLDO_LOW_FINE_STEP_UV;
 		vmin = PLDO_LOW_UV_MIN;
 	} else if (!range_ext) {
-		/* normal mode */
+		
 		fine_step = PLDO_NORM_FINE_STEP_UV;
 		vmin = PLDO_NORM_UV_MIN;
 	} else {
-		/* high range mode */
+		
 		fine_step = PLDO_HIGH_FINE_STEP_UV;
 		vmin = PLDO_HIGH_UV_MIN;
 	}
@@ -929,13 +895,13 @@ static int pm8058_smps_get_voltage_legacy(struct pm8058_vreg *vreg)
 	vprog = vreg->ctrl_reg & SMPS_LEGACY_VPROG_MASK;
 
 	if (vlow && vref) {
-		/* mode 3 */
+		
 		uV = vprog * SMPS_MODE3_UV_STEP + SMPS_MODE3_UV_MIN;
 	} else if (vref) {
-		/* mode 2 */
+		
 		uV = vprog * SMPS_MODE2_UV_STEP + SMPS_MODE2_UV_MIN;
 	} else {
-		/* mode 1 */
+		
 		uV = vprog * SMPS_MODE1_UV_STEP + SMPS_MODE1_UV_MIN;
 	}
 
@@ -977,11 +943,11 @@ static int pm8058_smps_set_voltage_advanced(struct pm8058_vreg *vreg,
 		new_uV = SMPS_BAND3_UV_MIN + vprog * SMPS_BAND3_UV_STEP;
 	}
 
-	/* Do not set band if regulator currently disabled. */
+	
 	if (!_pm8058_vreg_is_enabled(vreg) && !force_on)
 		band = SMPS_ADVANCED_BAND_OFF;
 
-	/* Set advanced mode bit to 1. */
+	
 	rc = pm8058_vreg_write(vreg, vreg->test_addr, SMPS_ADVANCED_MODE
 		| REGULATOR_BANK_WRITE | REGULATOR_BANK_SEL(7),
 		SMPS_ADVANCED_MODE_MASK | REGULATOR_BANK_MASK,
@@ -989,7 +955,7 @@ static int pm8058_smps_set_voltage_advanced(struct pm8058_vreg *vreg,
 	if (rc)
 		goto bail;
 
-	/* Set voltage and voltage band. */
+	
 	rc = pm8058_vreg_write(vreg, vreg->ctrl_addr, band | vprog,
 			SMPS_ADVANCED_BAND_MASK | SMPS_ADVANCED_VPROG_MASK,
 			&vreg->ctrl_reg);
@@ -1021,7 +987,7 @@ static int pm8058_smps_set_voltage_legacy(struct pm8058_vreg *vreg, int uV)
 		vlow = 0;
 	}
 
-	/* set vlow bit for ultra low voltage mode */
+	
 	rc = pm8058_vreg_write(vreg, vreg->test_addr,
 		vlow | REGULATOR_BANK_WRITE | REGULATOR_BANK_SEL(1),
 		REGULATOR_BANK_MASK | SMPS_LEGACY_VLOW_SEL_MASK,
@@ -1029,7 +995,7 @@ static int pm8058_smps_set_voltage_legacy(struct pm8058_vreg *vreg, int uV)
 	if (rc)
 		goto bail;
 
-	/* Set advanced mode bit to 0. */
+	
 	rc = pm8058_vreg_write(vreg, vreg->test_addr, SMPS_LEGACY_MODE
 		| REGULATOR_BANK_WRITE | REGULATOR_BANK_SEL(7),
 		SMPS_ADVANCED_MODE_MASK | REGULATOR_BANK_MASK,
@@ -1040,7 +1006,7 @@ static int pm8058_smps_set_voltage_legacy(struct pm8058_vreg *vreg, int uV)
 	en = (_pm8058_vreg_is_enabled(vreg) ? SMPS_LEGACY_ENABLE : 0);
 	pd = (vreg->pdata->pull_down_enable ? SMPS_LEGACY_PULL_DOWN_ENABLE : 0);
 
-	/* Set voltage (and the rest of the control register). */
+	
 	rc = pm8058_vreg_write(vreg, vreg->ctrl_addr, en | pd | vref | vprog,
 		SMPS_LEGACY_ENABLE | SMPS_LEGACY_PULL_DOWN_ENABLE
 		| SMPS_LEGACY_VREF_SEL_MASK | SMPS_LEGACY_VPROG_MASK,
@@ -1084,7 +1050,7 @@ static int pm8058_ncp_set_voltage(struct regulator_dev *dev,
 
 	val = (min_uV - NCP_UV_MIN) / NCP_UV_STEP;
 
-	/* voltage setting */
+	
 	rc = pm8058_vreg_write(vreg, vreg->ctrl_addr, val, NCP_VPROG_MASK,
 			&vreg->ctrl_reg);
 	if (rc)
@@ -1107,7 +1073,7 @@ static int pm8058_ldo_set_mode(struct pm8058_vreg *vreg, unsigned int mode)
 
 	switch (mode) {
 	case REGULATOR_MODE_FAST:
-		/* HPM */
+		
 		val = (_pm8058_vreg_is_enabled(vreg) ? LDO_ENABLE : 0)
 			| LDO_CTRL_PM_HPM;
 		mask = LDO_ENABLE_MASK | LDO_CTRL_PM_MASK;
@@ -1123,7 +1089,7 @@ static int pm8058_ldo_set_mode(struct pm8058_vreg *vreg, unsigned int mode)
 		break;
 
 	case REGULATOR_MODE_STANDBY:
-		/* LPM */
+		
 		val = (_pm8058_vreg_is_enabled(vreg) ? LDO_ENABLE : 0)
 			| LDO_CTRL_PM_LPM;
 		mask = LDO_ENABLE_MASK | LDO_CTRL_PM_MASK;
@@ -1147,7 +1113,7 @@ static int pm8058_ldo_set_mode(struct pm8058_vreg *vreg, unsigned int mode)
 		break;
 
 	case REGULATOR_MODE_IDLE:
-		/* Pin Control */
+		
 		if (_pm8058_vreg_is_enabled(vreg))
 			rc = pm8058_vreg_set_pin_ctrl(vreg, 1);
 		if (rc)
@@ -1173,7 +1139,7 @@ static int pm8058_smps_set_mode(struct pm8058_vreg *vreg, unsigned int mode)
 
 	switch (mode) {
 	case REGULATOR_MODE_FAST:
-		/* HPM */
+		
 		val = SMPS_CLK_CTRL_PWM;
 		mask = SMPS_CLK_CTRL_MASK;
 		rc = pm8058_vreg_write(vreg, vreg->clk_ctrl_addr, val, mask,
@@ -1188,7 +1154,7 @@ static int pm8058_smps_set_mode(struct pm8058_vreg *vreg, unsigned int mode)
 		break;
 
 	case REGULATOR_MODE_STANDBY:
-		/* LPM */
+		
 		val = SMPS_CLK_CTRL_PFM;
 		mask = SMPS_CLK_CTRL_MASK;
 		rc = pm8058_vreg_write(vreg, vreg->clk_ctrl_addr, val, mask,
@@ -1203,7 +1169,7 @@ static int pm8058_smps_set_mode(struct pm8058_vreg *vreg, unsigned int mode)
 		break;
 
 	case REGULATOR_MODE_IDLE:
-		/* Pin Control */
+		
 		if (_pm8058_vreg_is_enabled(vreg))
 			rc = pm8058_vreg_set_pin_ctrl(vreg, 1);
 		if (rc)
@@ -1227,28 +1193,17 @@ static int pm8058_lvs_set_mode(struct pm8058_vreg *vreg, unsigned int mode)
 	int rc = 0;
 
 	if (mode == REGULATOR_MODE_IDLE) {
-		/* Use pin control. */
+		
 		if (_pm8058_vreg_is_enabled(vreg))
 			rc = pm8058_vreg_set_pin_ctrl(vreg, 1);
 	} else {
-		/* Turn off pin control. */
+		
 		rc = pm8058_vreg_set_pin_ctrl(vreg, 0);
 	}
 
 	return rc;
 }
 
-/*
- * Optimum mode programming:
- * REGULATOR_MODE_FAST: Go to HPM (highest priority)
- * REGULATOR_MODE_STANDBY: Go to pin ctrl mode if there are any pin ctrl
- * votes, else go to LPM
- *
- * Pin ctrl mode voting via regulator set_mode:
- * REGULATOR_MODE_IDLE: Go to pin ctrl mode if the optimum mode is LPM, else
- * go to HPM
- * REGULATOR_MODE_NORMAL: Go to LPM if it is the optimum mode, else go to HPM
- */
 static int pm8058_vreg_set_mode(struct regulator_dev *dev, unsigned int mode)
 {
 	struct pm8058_vreg *vreg = rdev_get_drvdata(dev);
@@ -1258,7 +1213,7 @@ static int pm8058_vreg_set_mode(struct regulator_dev *dev, unsigned int mode)
 	int new_mode = REGULATOR_MODE_FAST;
 	int rc = 0;
 
-	/* Determine new mode to go into. */
+	
 	switch (mode) {
 	case REGULATOR_MODE_FAST:
 		new_mode = REGULATOR_MODE_FAST;
@@ -1277,7 +1232,7 @@ static int pm8058_vreg_set_mode(struct regulator_dev *dev, unsigned int mode)
 
 	case REGULATOR_MODE_IDLE:
 		if (vreg->pc_vote++)
-			goto done; /* already taken care of */
+			goto done; 
 
 		if (vreg->mode_initialized
 		    && vreg->optimum == REGULATOR_MODE_FAST)
@@ -1288,7 +1243,7 @@ static int pm8058_vreg_set_mode(struct regulator_dev *dev, unsigned int mode)
 
 	case REGULATOR_MODE_NORMAL:
 		if (vreg->pc_vote && --(vreg->pc_vote))
-			goto done; /* already taken care of */
+			goto done; 
 
 		if (vreg->optimum == REGULATOR_MODE_STANDBY)
 			new_mode = REGULATOR_MODE_STANDBY;
@@ -1332,7 +1287,7 @@ static unsigned int pm8058_vreg_get_mode(struct regulator_dev *dev)
 	if (!vreg->mode_initialized && vreg->pc_vote)
 		return REGULATOR_MODE_IDLE;
 
-	/* Check physical pin control state. */
+	
 	switch (vreg->type) {
 	case REGULATOR_TYPE_LDO:
 		if (!(vreg->ctrl_reg & LDO_ENABLE_MASK)
@@ -1381,12 +1336,6 @@ unsigned int pm8058_vreg_get_optimum_mode(struct regulator_dev *dev,
 	struct pm8058_vreg *vreg = rdev_get_drvdata(dev);
 
 	if (load_uA <= 0) {
-		/*
-		 * pm8058_vreg_get_optimum_mode is being called before consumers
-		 * have specified their load currents via
-		 * regulator_set_optimum_mode. Return whatever the existing mode
-		 * is.
-		 */
 		return pm8058_vreg_get_mode(dev);
 	}
 
@@ -1505,7 +1454,7 @@ static int pm8058_init_ldo(struct pm8058_vreg *vreg)
 	int rc = 0, i;
 	u8 bank;
 
-	/* Save the current test register state. */
+	
 	for (i = 0; i < LDO_TEST_BANKS; i++) {
 		bank = REGULATOR_BANK_SEL(i);
 		rc = pm8xxx_writeb(vreg->dev->parent, vreg->test_addr, bank);
@@ -1524,7 +1473,7 @@ static int pm8058_init_ldo(struct pm8058_vreg *vreg)
 	else
 		vreg->optimum = REGULATOR_MODE_FAST;
 
-	/* Set pull down enable based on platform data. */
+	
 	rc = pm8058_vreg_write(vreg, vreg->ctrl_addr,
 		     (vreg->pdata->pull_down_enable ? LDO_PULL_DOWN_ENABLE : 0),
 		     LDO_PULL_DOWN_ENABLE_MASK, &vreg->ctrl_reg);
@@ -1537,7 +1486,7 @@ static int pm8058_init_smps(struct pm8058_vreg *vreg)
 	int rc = 0, i;
 	u8 bank;
 
-	/* Save the current test2 register state. */
+	
 	for (i = 0; i < SMPS_TEST_BANKS; i++) {
 		bank = REGULATOR_BANK_SEL(i);
 		rc = pm8xxx_writeb(vreg->dev->parent, vreg->test_addr, bank);
@@ -1551,19 +1500,19 @@ static int pm8058_init_smps(struct pm8058_vreg *vreg)
 		vreg->test_reg[i] |= REGULATOR_BANK_WRITE;
 	}
 
-	/* Save the current clock control register state. */
+	
 	rc = pm8xxx_readb(vreg->dev->parent, vreg->clk_ctrl_addr,
 						&vreg->clk_ctrl_reg);
 	if (rc)
 		goto bail;
 
-	/* Save the current sleep control register state. */
+	
 	rc = pm8xxx_readb(vreg->dev->parent, vreg->sleep_ctrl_addr,
 						&vreg->sleep_ctrl_reg);
 	if (rc)
 		goto bail;
 
-	vreg->save_uV = 1; /* This is not a no-op. */
+	vreg->save_uV = 1; 
 	vreg->save_uV = _pm8058_smps_get_voltage(vreg);
 
 	if ((vreg->clk_ctrl_reg & SMPS_CLK_CTRL_MASK) == SMPS_CLK_CTRL_PFM)
@@ -1571,7 +1520,7 @@ static int pm8058_init_smps(struct pm8058_vreg *vreg)
 	else
 		vreg->optimum = REGULATOR_MODE_FAST;
 
-	/* Set advanced mode pull down enable based on platform data. */
+	
 	rc = pm8058_vreg_write(vreg, vreg->test_addr,
 		(vreg->pdata->pull_down_enable
 			? SMPS_ADVANCED_PULL_DOWN_ENABLE : 0)
@@ -1582,7 +1531,7 @@ static int pm8058_init_smps(struct pm8058_vreg *vreg)
 		goto bail;
 
 	if (!SMPS_IN_ADVANCED_MODE(vreg)) {
-		/* Set legacy mode pull down enable based on platform data. */
+		
 		rc = pm8058_vreg_write(vreg, vreg->ctrl_addr,
 			(vreg->pdata->pull_down_enable
 				? SMPS_LEGACY_PULL_DOWN_ENABLE : 0),
@@ -1601,7 +1550,7 @@ static int pm8058_init_lvs(struct pm8058_vreg *vreg)
 
 	vreg->optimum = REGULATOR_MODE_FAST;
 
-	/* Set pull down enable based on platform data. */
+	
 	rc = pm8058_vreg_write(vreg, vreg->ctrl_addr,
 		(vreg->pdata->pull_down_enable
 			? LVS_PULL_DOWN_ENABLE : LVS_PULL_DOWN_DISABLE),
@@ -1613,7 +1562,7 @@ static int pm8058_init_ncp(struct pm8058_vreg *vreg)
 {
 	int rc = 0;
 
-	/* Save the current test1 register state. */
+	
 	rc = pm8xxx_readb(vreg->dev->parent, vreg->test_addr,
 					&vreg->test_reg[0]);
 	if (rc)
@@ -1638,7 +1587,7 @@ static int pm8058_init_regulator(struct pm8058_vreg *vreg)
 			master_enable_inited = 1;
 	}
 
-	/* save the current control register state */
+	
 	rc = pm8xxx_readb(vreg->dev->parent, vreg->ctrl_addr, &vreg->ctrl_reg);
 	if (rc)
 		goto bail;
@@ -1686,13 +1635,13 @@ static int __devinit pm8058_vreg_probe(struct platform_device *pdev)
 		if (rc)
 			goto bail;
 
-		/* Disallow idle and normal modes if pin control isn't set. */
+		
 		if (vreg->pdata->pin_ctrl == 0)
 			vreg->pdata->init_data.constraints.valid_modes_mask
 			      &= ~(REGULATOR_MODE_NORMAL | REGULATOR_MODE_IDLE);
 
 		vreg->rdev = regulator_register(rdesc, &pdev->dev,
-				&vreg->pdata->init_data, vreg);
+				&vreg->pdata->init_data, vreg, NULL);
 		if (IS_ERR(vreg->rdev)) {
 			rc = PTR_ERR(vreg->rdev);
 			pr_err("%s: regulator_register failed for %s, rc=%d\n",

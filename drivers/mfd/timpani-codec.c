@@ -1,4 +1,4 @@
-/* Copyright (c) 2010-2011, Code Aurora Forum. All rights reserved.
+/* Copyright (c) 2010-2012, Code Aurora Forum. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -21,7 +21,6 @@
 #include <linux/uaccess.h>
 #include <linux/string.h>
 
-/* Timpani codec driver is activated through Marimba core driver */
 
 #define MAX_MDELAY_US 20000
 
@@ -48,6 +47,7 @@ enum refcnt {
 	IGNORE = 2,
 };
 #define TIMPANI_ARRAY_SIZE	(TIMPANI_A_CDC_COMP_HALT + 1)
+#define MAX_SHADOW_RIGISTERS	TIMPANI_A_CDC_COMP_HALT
 
 static u8 timpani_shadow[TIMPANI_ARRAY_SIZE];
 
@@ -60,7 +60,7 @@ struct adie_codec_path {
 	u32 reg_owner;
 };
 
-enum /* regaccess blk id */
+enum 
 {
 	RA_BLOCK_RX1 = 0,
 	RA_BLOCK_RX2,
@@ -85,7 +85,7 @@ enum /* regaccess blk id */
 	RA_BLOCK_NUM,
 };
 
-enum /* regaccess onwer ID */
+enum 
 {
 	RA_OWNER_NONE = 0,
 	RA_OWNER_PATH_RX1,
@@ -2602,99 +2602,99 @@ struct reg_acc_blk_cfg timpani_blkcfg[RA_BLOCK_NUM] = {
 		.valid_owners = {RA_OWNER_NONE, RA_OWNER_PATH_RX1,
 		0, 0, 0, 0, RA_OWNER_DRV}
 	},
-	/* RA_BLOCK_RX1 */
+	
 	{
 		.valid_owners = {RA_OWNER_NONE, 0, RA_OWNER_PATH_RX2,
 		0, 0, 0, RA_OWNER_DRV}
 	},
-	/* RA_BLOCK_RX2 */
+	
 	{
 		.valid_owners = {RA_OWNER_NONE, 0, 0, RA_OWNER_PATH_TX1,
 		0, 0, RA_OWNER_DRV}
 	},
-	/* RA_BLOCK_TX1 */
+	
 	{
 		.valid_owners = {RA_OWNER_NONE, 0, 0, 0, RA_OWNER_PATH_TX2,
 		0, RA_OWNER_DRV}
 	},
-	/* RA_BLOCK_TX2 */
+	
 	{
 		.valid_owners = {RA_OWNER_NONE, 0, 0, 0, 0,
 		RA_OWNER_PATH_LB, RA_OWNER_DRV}
 	},
-	/* RA_BLOCK_LB */
+	
 	{
 		.valid_owners = {RA_OWNER_NONE, RA_OWNER_PATH_RX1,
 		RA_OWNER_PATH_RX2, 0, 0, RA_OWNER_PATH_LB, RA_OWNER_DRV}
 	},
-	/* RA_BLOCK_SHARED_RX_LB */
+	
 	{
 		.valid_owners = {RA_OWNER_NONE, 0, 0, RA_OWNER_PATH_TX1,
 		RA_OWNER_PATH_TX2, 0, RA_OWNER_DRV}
 	},
-	/* RA_BLOCK_SHARED_TX */
+	
 	{
 		.valid_owners = {RA_OWNER_NONE, 0, 0, RA_OWNER_PATH_TX1,
 		RA_OWNER_PATH_TX2, 0, RA_OWNER_DRV}
 	},
-	/* RA_BLOCK_TXFE1 */
+	
 	{
 		.valid_owners = {RA_OWNER_NONE, 0, 0, RA_OWNER_PATH_TX1,
 		RA_OWNER_PATH_TX2, 0, RA_OWNER_DRV}
 	},
-	/* RA_BLOCK_TXFE2 */
+	
 	{
 		.valid_owners = {RA_OWNER_NONE, RA_OWNER_PATH_RX1,
 		RA_OWNER_PATH_RX2, 0, 0, RA_OWNER_PATH_LB, RA_OWNER_DRV}
 	},
-	/* RA_BLOCK_PA_COMMON */
+	
 	{
 		.valid_owners = {RA_OWNER_NONE, RA_OWNER_PATH_RX1,
 		RA_OWNER_PATH_RX2, 0, 0, RA_OWNER_PATH_LB, RA_OWNER_DRV}
 	},
-	/* RA_BLOCK_PA_EAR */
+	
 	{
 		.valid_owners = {RA_OWNER_NONE, RA_OWNER_PATH_RX1,
 		RA_OWNER_PATH_RX2, 0, 0, RA_OWNER_PATH_LB, RA_OWNER_DRV}
 	},
-	/* RA_BLOCK_PA_HPH */
+	
 	{
 		.valid_owners = {RA_OWNER_NONE, RA_OWNER_PATH_RX1,
 		RA_OWNER_PATH_RX2, 0, 0, RA_OWNER_PATH_LB, RA_OWNER_DRV}
 	},
-	/* RA_BLOCK_PA_LINE */
+	
 	{
 		.valid_owners = {RA_OWNER_NONE, RA_OWNER_PATH_RX1,
 		RA_OWNER_PATH_RX2, 0, 0, RA_OWNER_PATH_LB, RA_OWNER_DRV}
 	},
-	/* RA_BLOCK_PA_AUX */
+	
 	{
 		.valid_owners = {RA_OWNER_NONE, 0, 0, RA_OWNER_PATH_TX1,
 		RA_OWNER_PATH_TX2, 0, RA_OWNER_DRV}
 	},
-	/* RA_BLOCK_ADC */
+	
 	{
 		.valid_owners = {RA_OWNER_NONE, 0, 0, RA_OWNER_PATH_TX1,
 		RA_OWNER_PATH_TX2, 0, RA_OWNER_DRV}
 	},
-	/* RA_BLOCK_DMIC */
+	
 	{
 		.valid_owners = {RA_OWNER_NONE, 0, 0, RA_OWNER_PATH_TX1,
 		RA_OWNER_PATH_TX2, 0, RA_OWNER_DRV}
 	},
-	/* RA_BLOCK_TX_I2S */
+	
 	{
 		.valid_owners = {RA_OWNER_NONE, 0, 0, 0, 0, 0, RA_OWNER_DRV}
 	},
-	/*RA_BLOCK_DRV */
+	
 	{
 		.valid_owners = {RA_OWNER_NONE, 0, 0, 0, 0, 0, RA_OWNER_DRV}
 	},
-	/* RA_BLOCK_TEST */
+	
 	{
 		.valid_owners = {RA_OWNER_NONE, 0, 0, 0, 0, 0, RA_OWNER_DRV}
 	},
-	/* RA_BLOCK_RESERVED */
+	
 };
 
 struct adie_codec_state {
@@ -2754,6 +2754,8 @@ static bool timpani_register_is_cacheable(u8 reg)
 	case TIMPANI_A_CDC_ANC2_CTL1:
 	case TIMPANI_A_CDC_ANC2_CTL2:
 	case TIMPANI_A_CDC_ANC2_FF_FB_SHIFT:
+	case TIMPANI_A_AUXPGA_LR_GAIN:
+	case TIMPANI_A_CDC_ANC_INPUT_MUX:
 		return false;
 	default:
 		return true;
@@ -2765,6 +2767,19 @@ static int adie_codec_write(u8 reg, u8 mask, u8 val)
 	int rc = 0;
 	u8 new_val;
 
+	if (reg > MAX_SHADOW_RIGISTERS) {
+		pr_debug("register number is out of bound for shadow"
+					" registers reg = %d\n", reg);
+		new_val = (val & mask);
+		rc = marimba_write_bit_mask(adie_codec.pdrv_ptr, reg,  &new_val,
+			1, 0xFF);
+		if (IS_ERR_VALUE(rc)) {
+			pr_err("%s: fail to write reg %x\n", __func__, reg);
+			rc = -EIO;
+			goto error;
+		}
+		return rc;
+	}
 	new_val = (val & mask) | (timpani_shadow[reg] & ~mask);
 	if (!(timpani_register_is_cacheable(reg) &&
 		(new_val == timpani_shadow[reg]))) {
@@ -2804,7 +2819,7 @@ static int adie_codec_refcnt_write(u8 reg, u8 mask, u8 val, enum refcnt cnt,
 	u8 reg_mask = 0;
 	int rc = 0;
 
-	for (i = 0; i < 0xEF; i++) {
+	for (i = 0; i < ARRAY_SIZE(timpani_regset); i++) {
 		if (timpani_regset[i].reg_addr == reg) {
 			for (j = 0; j < TIMPANI_MAX_FIELDS; j++) {
 				fld_mask = timpani_regset[i].fld_ref_cnt[j].mask
@@ -2837,29 +2852,6 @@ static int adie_codec_refcnt_write(u8 reg, u8 mask, u8 val, enum refcnt cnt,
 static int adie_codec_read(u8 reg, u8 *val)
 {
 	return marimba_read(adie_codec.pdrv_ptr, reg, val, 1);
-}
-
-static int timpani_adie_set_device_analog_volume(struct adie_codec_path *path_ptr,
-					u32 num_channels, u32 volume)
-{
-	int rc = 0;
-
-	/* This function is not implemented in original codebase */
-	if (path_ptr != NULL)
-		return 0;
-
-	/* To support adjusting analog volume along with Beats effect
-	 * Only do gain changes for headset currently */
-	pr_aud_info("%s, channel = %d, volume = 0x%X\n", __func__, num_channels, volume);
-
-	/* Apply indicated analog gain to left channel */
-	if (num_channels > 0)
-		rc = adie_codec_write(TIMPANI_A_CDC_HPH_L_AVOL, 0xFE, volume);
-	/* Apply indicated analog gain to right channel */
-	if (num_channels > 1)
-		rc = adie_codec_write(TIMPANI_A_CDC_HPH_R_AVOL, 0xFE, volume);
-
-	return rc;
 }
 
 static int timpani_adie_codec_setpath(struct adie_codec_path *path_ptr,
@@ -3024,7 +3016,7 @@ static void adie_codec_restore_regdefault(u8 path_mask, u32 blk)
 
 	for (ireg = 0; ireg < regset_sz; ireg++) {
 		if (timpani_regset[ireg].blk_mask[blk]) {
-			/* only process register belong to the block */
+			
 			u8 reg = timpani_regset[ireg].reg_addr;
 			u8 mask = timpani_regset[ireg].blk_mask[blk];
 			u8 val = timpani_regset[ireg].reg_default;
@@ -3037,7 +3029,7 @@ static void adie_codec_restore_regdefault(u8 path_mask, u32 blk)
 static void adie_codec_reach_stage_action(struct adie_codec_path *path_ptr,
 	u32 stage)
 {
-	u32 iblk, iowner; /* iterators */
+	u32 iblk, iowner; 
 	u8 path_mask;
 
 	if (path_ptr == NULL)
@@ -3053,7 +3045,7 @@ static void adie_codec_reach_stage_action(struct adie_codec_path *path_ptr,
 			if (timpani_blkcfg[iblk].valid_owners[iowner] ==
 					path_ptr->reg_owner) {
 				adie_codec_restore_regdefault(path_mask, iblk);
-				break; /* This path owns this block */
+				break; 
 			}
 		}
 	}
@@ -3120,7 +3112,7 @@ static int timpani_adie_codec_proceed_stage(struct adie_codec_path *path_ptr,
 
 static void timpani_codec_bring_up(void)
 {
-	/* Codec power up sequence */
+	
 	adie_codec_write(0xFF, 0xFF, 0x08);
 	adie_codec_write(0xFF, 0xFF, 0x0A);
 	adie_codec_write(0xFF, 0xFF, 0x0E);
@@ -3130,7 +3122,7 @@ static void timpani_codec_bring_up(void)
 	msleep(15);
 	adie_codec_write(TIMPANI_A_MREF, 0xFF, 0x22);
 
-	/* Bypass TX HPFs to prevent pops */
+	
 	adie_codec_write(TIMPANI_A_CDC_BYPASS_CTL2, TIMPANI_CDC_BYPASS_CTL2_M,
 		TIMPANI_CDC_BYPASS_CTL2_POR);
 	adie_codec_write(TIMPANI_A_CDC_BYPASS_CTL3, TIMPANI_CDC_BYPASS_CTL3_M,
@@ -3215,7 +3207,7 @@ static int timpani_adie_codec_close(struct adie_codec_path *path_ptr)
 	adie_codec.ref_cnt--;
 
 	if (!adie_codec.ref_cnt) {
-		/* Timpani CDC power down sequence */
+		
 		timpani_codec_bring_down();
 
 		if (adie_codec.codec_pdata &&
@@ -3253,6 +3245,28 @@ static int timpani_adie_codec_set_master_mode(struct adie_codec_path *path_ptr,
 	return 0;
 }
 
+#ifdef CONFIG_ARCH_MSM8X60
+static int timpani_adie_set_device_analog_volume(struct adie_codec_path *path_ptr,
+					u32 num_channels, u32 volume)
+{
+	int rc = 0;
+
+	
+	if (path_ptr != NULL)
+		return 0;
+
+	pr_aud_info("%s, channel = %d, volume = 0x%X\n", __func__, num_channels, volume);
+
+	
+	if (num_channels > 0)
+		rc = adie_codec_write(TIMPANI_A_CDC_HPH_L_AVOL, 0xFE, volume);
+	
+	if (num_channels > 1)
+		rc = adie_codec_write(TIMPANI_A_CDC_HPH_R_AVOL, 0xFE, volume);
+
+	return rc;
+}
+#else
 int timpani_adie_codec_set_device_analog_volume(
 		struct adie_codec_path *path_ptr,
 		u32 num_channels, u32 volume)
@@ -3263,8 +3277,8 @@ int timpani_adie_codec_set_device_analog_volume(
 
 	adie_codec_read(TIMPANI_A_AUXPGA_LR_GAIN, &curr_val);
 
-	/* Volume is expressed as a percentage. */
-	/* The upper nibble is the left channel, lower right channel. */
+	
+	
 	val = (u8)((volume * TIMPANI_CODEC_AUXPGA_GAIN_RANGE) / 100);
 	val |= val << 4;
 
@@ -3278,6 +3292,7 @@ int timpani_adie_codec_set_device_analog_volume(
 
 	return 0;
 }
+#endif
 
 enum adie_vol_type {
 	ADIE_CODEC_RX_DIG_VOL,
@@ -3300,9 +3315,9 @@ enum adie_vol_type {
 #define CDC_GCTL1_TX_MASK	0xF0
 
 enum {
-	TIMPANI_MIN_DIG_VOL	= -84,	/* in DB*/
-	TIMPANI_MAX_DIG_VOL	=  16,	/* in DB*/
-	TIMPANI_DIG_VOL_STEP	=  3	/* in DB*/
+	TIMPANI_MIN_DIG_VOL	= -84,	
+	TIMPANI_MAX_DIG_VOL	=  16,	
+	TIMPANI_DIG_VOL_STEP	=  3	
 };
 
 static int timpani_adie_codec_set_dig_vol(enum adie_vol_type vol_type,
@@ -3395,7 +3410,7 @@ static int timpani_adie_codec_set_dig_vol(enum adie_vol_type vol_type,
 
 static int timpani_adie_codec_set_device_digital_volume(
 		struct adie_codec_path *path_ptr,
-		u32 num_channels, u32 vol_percentage /* in percentage */)
+		u32 num_channels, u32 vol_percentage )
 {
 	enum adie_vol_type vol_type;
 
@@ -3431,18 +3446,20 @@ static const struct adie_codec_operations timpani_adie_ops = {
 	.codec_id = TIMPANI_ID,
 	.codec_open = timpani_adie_codec_open,
 	.codec_close = timpani_adie_codec_close,
-	.codec_set_device_analog_volume = timpani_adie_set_device_analog_volume,
 	.codec_setpath = timpani_adie_codec_setpath,
 	.codec_proceed_stage = timpani_adie_codec_proceed_stage,
 	.codec_freq_supported = timpani_adie_codec_freq_supported,
 	.codec_enable_sidetone = timpani_adie_codec_enable_sidetone,
 	.codec_set_master_mode = timpani_adie_codec_set_master_mode,
 	.codec_enable_anc = timpani_adie_codec_enable_anc,
+#ifdef CONFIG_ARCH_MSM8X60
+    .codec_set_device_analog_volume = timpani_adie_set_device_analog_volume,
+#else
+	.codec_set_device_analog_volume =
+		timpani_adie_codec_set_device_analog_volume,
+#endif
 	.codec_set_device_digital_volume =
 		timpani_adie_codec_set_device_digital_volume,
-#ifdef CONFIG_MACH_VILLEC2
-	.codec_write = adie_codec_write,
-#endif
 };
 
 static void timpani_codec_populate_shadow_registers(void)
@@ -3544,7 +3561,7 @@ static ssize_t codec_debug_write(struct file *filp,
 		} else
 			rc = -EINVAL;
 	} else if (!strcmp(access_str, "poke")) {
-		/* write */
+		
 		rc = get_parameters(lbuf, param, 2);
 		if ((param[0] <= 0xFF) && (param[1] <= 0xFF) &&
 			(rc == 0))
@@ -3552,7 +3569,7 @@ static ssize_t codec_debug_write(struct file *filp,
 		else
 			rc = -EINVAL;
 	} else if (!strcmp(access_str, "peek")) {
-		/* read */
+		
 		rc = get_parameters(lbuf, param, 1);
 		if ((param[0] <= 0xFF) && (rc == 0))
 			adie_codec_read(param[0], &read_data);
@@ -3598,7 +3615,7 @@ static int timpani_codec_probe(struct platform_device *pdev)
 
 	timpani_codec_populate_shadow_registers();
 
-	/* Register the timpani ADIE operations */
+	
 	rc = adie_codec_register_codec_operations(&timpani_adie_ops);
 
 #ifdef CONFIG_DEBUG_FS

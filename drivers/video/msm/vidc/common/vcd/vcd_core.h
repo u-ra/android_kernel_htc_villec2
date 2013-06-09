@@ -25,7 +25,7 @@
 
 #define VCD_MIN_PERF_LEVEL                   37900
 
-#define VCD_DRIVER_INSTANCE_MAX              4
+#define VCD_DRIVER_CLIENTS_MAX              6
 
 #define VCD_MAX_CLIENT_TRANSACTIONS          32
 
@@ -37,6 +37,7 @@
 
 #define VCD_TIMESTAMP_RESOLUTION             1000000
 #define VCD_DEC_INITIAL_FRAME_RATE           30
+#define VCD_MAXPERF_FPS_THRESHOLD_X_1000     (59*1000)
 
 #define VCD_FIRST_IP_RCVD                    0x00000004
 #define VCD_FIRST_OP_RCVD                    0x00000008
@@ -125,7 +126,7 @@ struct vcd_dev_ctxt {
 
 	struct vcd_init_config config;
 
-	u32 driver_ids[VCD_DRIVER_INSTANCE_MAX];
+	u32 driver_ids[VCD_DRIVER_CLIENTS_MAX];
 	u32 refs;
 	u8 *device_base_addr;
 	void *hw_timer_handle;
@@ -146,7 +147,7 @@ struct vcd_dev_ctxt {
 	u32 reqd_perf_lvl;
 	u32 curr_perf_lvl;
 	u32 set_perf_lvl_pending;
-
+	u32 turbo_mode_set;
 };
 
 struct vcd_clnt_status {
@@ -191,6 +192,7 @@ struct vcd_clnt_ctxt {
 	u32 frm_p_units;
 	u32 reqd_perf_lvl;
 	u32 time_resoln;
+	u32 time_frame_delta;
 
 	struct vcd_buffer_pool in_buf_pool;
 	struct vcd_buffer_pool out_buf_pool;
@@ -210,6 +212,8 @@ struct vcd_clnt_ctxt {
 	u32 vcd_enable_ion;
 	struct vcd_clnt_ctxt *next;
 	u32 meta_mode;
+	int perf_set_by_client;
+	int secure;
 };
 
 #define VCD_BUFFERPOOL_INUSE_DECREMENT(val) \

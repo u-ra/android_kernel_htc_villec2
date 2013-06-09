@@ -1,4 +1,3 @@
-/* Accouting handling for netfilter. */
 
 /*
  * (C) 2008 Krzysztof Piotr Oledzki <ole@ans.pl>
@@ -12,12 +11,13 @@
 #include <linux/slab.h>
 #include <linux/kernel.h>
 #include <linux/moduleparam.h>
+#include <linux/export.h>
 
 #include <net/netfilter/nf_conntrack.h>
 #include <net/netfilter/nf_conntrack_extend.h>
 #include <net/netfilter/nf_conntrack_acct.h>
 
-static int nf_ct_acct __read_mostly;
+static bool nf_ct_acct __read_mostly;
 
 module_param_named(acct, nf_ct_acct, bool, 0644);
 MODULE_PARM_DESC(acct, "Enable connection tracking flow accounting.");
@@ -33,7 +33,7 @@ static struct ctl_table acct_sysctl_table[] = {
 	},
 	{}
 };
-#endif /* CONFIG_SYSCTL */
+#endif 
 
 unsigned int
 seq_print_acct(struct seq_file *s, const struct nf_conn *ct, int dir)
@@ -45,8 +45,8 @@ seq_print_acct(struct seq_file *s, const struct nf_conn *ct, int dir)
 		return 0;
 
 	return seq_printf(s, "packets=%llu bytes=%llu ",
-			  (unsigned long long)acct[dir].packets,
-			  (unsigned long long)acct[dir].bytes);
+			  (unsigned long long)atomic64_read(&acct[dir].packets),
+			  (unsigned long long)atomic64_read(&acct[dir].bytes));
 };
 EXPORT_SYMBOL_GPL(seq_print_acct);
 

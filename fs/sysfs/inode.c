@@ -34,7 +34,7 @@ static const struct address_space_operations sysfs_aops = {
 
 static struct backing_dev_info sysfs_backing_dev_info = {
 	.name		= "sysfs",
-	.ra_pages	= 0,	/* No readahead */
+	.ra_pages	= 0,	
 	.capabilities	= BDI_CAP_NO_ACCT_AND_WRITEBACK,
 };
 
@@ -60,7 +60,7 @@ static struct sysfs_inode_attrs *sysfs_init_inode_attrs(struct sysfs_dirent *sd)
 		return NULL;
 	iattrs = &attrs->ia_iattr;
 
-	/* assign default attributes */
+	
 	iattrs->ia_mode = sd->s_mode;
 	iattrs->ia_uid = 0;
 	iattrs->ia_gid = 0;
@@ -78,13 +78,13 @@ int sysfs_sd_setattr(struct sysfs_dirent *sd, struct iattr * iattr)
 	sd_attrs = sd->s_iattr;
 
 	if (!sd_attrs) {
-		/* setting attributes for the first time, allocate now */
+		
 		sd_attrs = sysfs_init_inode_attrs(sd);
 		if (!sd_attrs)
 			return -ENOMEM;
 		sd->s_iattr = sd_attrs;
 	}
-	/* attributes were changed at least once in past */
+	
 	iattrs = &sd_attrs->ia_iattr;
 
 	if (ia_valid & ATTR_UID)
@@ -122,7 +122,7 @@ int sysfs_setattr(struct dentry *dentry, struct iattr *iattr)
 	if (error)
 		goto out;
 
-	/* this ignores size changes */
+	
 	setattr_copy(inode, iattr);
 
 out:
@@ -188,7 +188,7 @@ out:
 	return error;
 }
 
-static inline void set_default_inode_attr(struct inode * inode, mode_t mode)
+static inline void set_default_inode_attr(struct inode * inode, umode_t mode)
 {
 	inode->i_mode = mode;
 	inode->i_atime = inode->i_mtime = inode->i_ctime = CURRENT_TIME;
@@ -203,27 +203,12 @@ static inline void set_inode_attr(struct inode * inode, struct iattr * iattr)
 	inode->i_ctime = iattr->ia_ctime;
 }
 
-static int sysfs_count_nlink(struct sysfs_dirent *sd)
-{
-	struct sysfs_dirent *child;
-	int nr = 0;
-
-	for (child = sd->s_dir.children; child; child = child->s_sibling)
-		if (sysfs_type(child) == SYSFS_DIR)
-			nr++;
-
-	return nr + 2;
-}
-
 static void sysfs_refresh_inode(struct sysfs_dirent *sd, struct inode *inode)
 {
 	struct sysfs_inode_attrs *iattrs = sd->s_iattr;
 
 	inode->i_mode = sd->s_mode;
 	if (iattrs) {
-		/* sysfs_dirent has non-default attributes
-		 * get them from persistent copy in sysfs_dirent
-		 */
 		set_inode_attr(inode, &iattrs->ia_iattr);
 		security_inode_notifysecctx(inode,
 					    iattrs->ia_secdata,
@@ -231,7 +216,7 @@ static void sysfs_refresh_inode(struct sysfs_dirent *sd, struct inode *inode)
 	}
 
 	if (sysfs_type(sd) == SYSFS_DIR)
-		inode->i_nlink = sysfs_count_nlink(sd);
+		set_nlink(inode, sd->s_dir.subdirs + 2);
 }
 
 int sysfs_getattr(struct vfsmount *mnt, struct dentry *dentry, struct kstat *stat)
@@ -259,7 +244,7 @@ static void sysfs_init_inode(struct sysfs_dirent *sd, struct inode *inode)
 	set_default_inode_attr(inode, sd->s_mode);
 	sysfs_refresh_inode(sd, inode);
 
-	/* initialize inode according to type */
+	
 	switch (sysfs_type(sd)) {
 	case SYSFS_DIR:
 		inode->i_op = &sysfs_dir_inode_operations;
@@ -284,21 +269,6 @@ static void sysfs_init_inode(struct sysfs_dirent *sd, struct inode *inode)
 	unlock_new_inode(inode);
 }
 
-/**
- *	sysfs_get_inode - get inode for sysfs_dirent
- *	@sb: super block
- *	@sd: sysfs_dirent to allocate inode for
- *
- *	Get inode for @sd.  If such inode doesn't exist, a new inode
- *	is allocated and basics are initialized.  New inode is
- *	returned locked.
- *
- *	LOCKING:
- *	Kernel thread context (may sleep).
- *
- *	RETURNS:
- *	Pointer to allocated inode on success, NULL on failure.
- */
 struct inode * sysfs_get_inode(struct super_block *sb, struct sysfs_dirent *sd)
 {
 	struct inode *inode;
@@ -310,13 +280,6 @@ struct inode * sysfs_get_inode(struct super_block *sb, struct sysfs_dirent *sd)
 	return inode;
 }
 
-/*
- * The sysfs_dirent serves as both an inode and a directory entry for sysfs.
- * To prevent the sysfs inode numbers from being freed prematurely we take a
- * reference to sysfs_dirent from the sysfs inode.  A
- * super_operations.evict_inode() implementation is needed to drop that
- * reference upon inode destruction.
- */
 void sysfs_evict_inode(struct inode *inode)
 {
 	struct sysfs_dirent *sd  = inode->i_private;
@@ -331,14 +294,15 @@ int sysfs_hash_and_remove(struct sysfs_dirent *dir_sd, const void *ns, const cha
 	struct sysfs_addrm_cxt acxt;
 	struct sysfs_dirent *sd;
 
-	if (!dir_sd)
+	if (!dir_sd) {
+		WARN(1, KERN_WARNING "sysfs: can not remove '%s', no directory\n",
+			name);
 		return -ENOENT;
+	}
 
 	sysfs_addrm_start(&acxt, dir_sd);
 
 	sd = sysfs_find_dirent(dir_sd, ns, name);
-	if (sd && (sd->s_ns != ns))
-		sd = NULL;
 	if (sd)
 		sysfs_remove_one(&acxt, sd);
 
@@ -350,11 +314,11 @@ int sysfs_hash_and_remove(struct sysfs_dirent *dir_sd, const void *ns, const cha
 		return -ENOENT;
 }
 
-int sysfs_permission(struct inode *inode, int mask, unsigned int flags)
+int sysfs_permission(struct inode *inode, int mask)
 {
 	struct sysfs_dirent *sd;
 
-	if (flags & IPERM_FLAG_RCU)
+	if (mask & MAY_NOT_BLOCK)
 		return -ECHILD;
 
 	sd = inode->i_private;
@@ -363,5 +327,5 @@ int sysfs_permission(struct inode *inode, int mask, unsigned int flags)
 	sysfs_refresh_inode(sd, inode);
 	mutex_unlock(&sysfs_mutex);
 
-	return generic_permission(inode, mask, flags, NULL);
+	return generic_permission(inode, mask);
 }

@@ -3,20 +3,8 @@
 
 #include <linux/neighbour.h>
 
-/*
- *	Generic neighbour manipulation
- *
- *	Authors:
- *	Pedro Roque		<roque@di.fc.ul.pt>
- *	Alexey Kuznetsov	<kuznet@ms2.inr.ac.ru>
- *
- * 	Changes:
- *
- *	Harald Welte:		<laforge@gnumonks.org>
- *		- Add neighbour cache statistics like rtstat
- */
 
-#include <asm/atomic.h>
+#include <linux/atomic.h>
 #include <linux/netdevice.h>
 #include <linux/skbuff.h>
 #include <linux/rcupdate.h>
@@ -27,9 +15,6 @@
 #include <linux/workqueue.h>
 #include <net/rtnetlink.h>
 
-/*
- * NUD stands for "neighbor unreachability detection"
- */
 
 #define NUD_IN_TIMER	(NUD_INCOMPLETE|NUD_REACHABLE|NUD_DELAY|NUD_PROBE)
 #define NUD_VALID	(NUD_PERMANENT|NUD_NOARP|NUD_REACHABLE|NUD_PROBE|NUD_STALE|NUD_DELAY)
@@ -59,7 +44,7 @@ struct neigh_parms {
 	int	reachable_time;
 	int	delay_probe_time;
 
-	int	queue_len;
+	int	queue_len_bytes;
 	int	ucast_probes;
 	int	app_probes;
 	int	mcast_probes;
@@ -70,22 +55,22 @@ struct neigh_parms {
 };
 
 struct neigh_statistics {
-	unsigned long allocs;		/* number of allocated neighs */
-	unsigned long destroys;		/* number of destroyed neighs */
-	unsigned long hash_grows;	/* number of hash resizes */
+	unsigned long allocs;		
+	unsigned long destroys;		
+	unsigned long hash_grows;	
 
-	unsigned long res_failed;	/* number of failed resolutions */
+	unsigned long res_failed;	
 
-	unsigned long lookups;		/* number of lookups */
-	unsigned long hits;		/* number of hits (among lookups) */
+	unsigned long lookups;		
+	unsigned long hits;		
 
-	unsigned long rcv_probes_mcast;	/* number of received mcast ipv6 */
-	unsigned long rcv_probes_ucast; /* number of received ucast ipv6 */
+	unsigned long rcv_probes_mcast;	
+	unsigned long rcv_probes_ucast; 
 
-	unsigned long periodic_gc_runs;	/* number of periodic GC runs */
-	unsigned long forced_gc_runs;	/* number of forced GC runs */
+	unsigned long periodic_gc_runs;	
+	unsigned long forced_gc_runs;	
 
-	unsigned long unres_discards;	/* number of unresolved drops */
+	unsigned long unres_discards;	
 };
 
 #define NEIGH_CACHE_STAT_INC(tbl, field) this_cpu_inc((tbl)->stats->field)
@@ -99,6 +84,7 @@ struct neighbour {
 	rwlock_t		lock;
 	atomic_t		refcnt;
 	struct sk_buff_head	arp_queue;
+	unsigned int		arp_queue_len_bytes;
 	struct timer_list	timer;
 	unsigned long		used;
 	atomic_t		probes;
@@ -108,8 +94,8 @@ struct neighbour {
 	__u8			dead;
 	seqlock_t		ha_lock;
 	unsigned char		ha[ALIGN(MAX_ADDR_LEN, sizeof(unsigned long))];
-	struct hh_cache		*hh;
-	int			(*output)(struct sk_buff *skb);
+	struct hh_cache		hh;
+	int			(*output)(struct neighbour *, struct sk_buff *);
 	const struct neigh_ops	*ops;
 	struct rcu_head		rcu;
 	struct net_device	*dev;
@@ -118,12 +104,10 @@ struct neighbour {
 
 struct neigh_ops {
 	int			family;
-	void			(*solicit)(struct neighbour *, struct sk_buff*);
-	void			(*error_report)(struct neighbour *, struct sk_buff*);
-	int			(*output)(struct sk_buff*);
-	int			(*connected_output)(struct sk_buff*);
-	int			(*hh_output)(struct sk_buff*);
-	int			(*queue_xmit)(struct sk_buff*);
+	void			(*solicit)(struct neighbour *, struct sk_buff *);
+	void			(*error_report)(struct neighbour *, struct sk_buff *);
+	int			(*output)(struct neighbour *, struct sk_buff *);
+	int			(*connected_output)(struct neighbour *, struct sk_buff *);
 };
 
 struct pneigh_entry {
@@ -136,14 +120,13 @@ struct pneigh_entry {
 	u8			key[0];
 };
 
-/*
- *	neighbour table manipulation
- */
+
+#define NEIGH_NUM_HASH_RND	4
 
 struct neigh_hash_table {
 	struct neighbour __rcu	**hash_buckets;
-	unsigned int		hash_mask;
-	__u32			hash_rnd;
+	unsigned int		hash_shift;
+	__u32			hash_rnd[NEIGH_NUM_HASH_RND];
 	struct rcu_head		rcu;
 };
 
@@ -155,14 +138,14 @@ struct neigh_table {
 	int			key_len;
 	__u32			(*hash)(const void *pkey,
 					const struct net_device *dev,
-					__u32 hash_rnd);
+					__u32 *hash_rnd);
 	int			(*constructor)(struct neighbour *);
 	int			(*pconstructor)(struct pneigh_entry *);
 	void			(*pdestructor)(struct pneigh_entry *);
 	void			(*proxy_redo)(struct sk_buff *skb);
 	char			*id;
 	struct neigh_parms	parms;
-	/* HACK. gc_* should follow parms without a gap! */
+	
 	int			gc_interval;
 	int			gc_thresh1;
 	int			gc_thresh2;
@@ -174,13 +157,18 @@ struct neigh_table {
 	atomic_t		entries;
 	rwlock_t		lock;
 	unsigned long		last_rand;
-	struct kmem_cache	*kmem_cachep;
 	struct neigh_statistics	__percpu *stats;
 	struct neigh_hash_table __rcu *nht;
 	struct pneigh_entry	**phash_buckets;
 };
 
-/* flags for neigh_update() */
+#define NEIGH_PRIV_ALIGN	sizeof(long long)
+
+static inline void *neighbour_priv(const struct neighbour *n)
+{
+	return (char *)n + ALIGN(sizeof(*n) + n->tbl->key_len, NEIGH_PRIV_ALIGN);
+}
+
 #define NEIGH_UPDATE_F_OVERRIDE			0x00000001
 #define NEIGH_UPDATE_F_WEAK_OVERRIDE		0x00000002
 #define NEIGH_UPDATE_F_OVERRIDE_ISROUTER	0x00000004
@@ -205,9 +193,10 @@ extern int			neigh_update(struct neighbour *neigh, const u8 *lladdr, u8 new,
 					     u32 flags);
 extern void			neigh_changeaddr(struct neigh_table *tbl, struct net_device *dev);
 extern int			neigh_ifdown(struct neigh_table *tbl, struct net_device *dev);
-extern int			neigh_resolve_output(struct sk_buff *skb);
-extern int			neigh_connected_output(struct sk_buff *skb);
-extern int			neigh_compat_output(struct sk_buff *skb);
+extern int			neigh_resolve_output(struct neighbour *neigh, struct sk_buff *skb);
+extern int			neigh_connected_output(struct neighbour *neigh, struct sk_buff *skb);
+extern int			neigh_compat_output(struct neighbour *neigh, struct sk_buff *skb);
+extern int			neigh_direct_output(struct neighbour *neigh, struct sk_buff *skb);
 extern struct neighbour 	*neigh_event_ns(struct neigh_table *tbl,
 						u8 *lladdr, void *saddr,
 						struct net_device *dev);
@@ -276,9 +265,6 @@ static inline struct neigh_parms *neigh_parms_clone(struct neigh_parms *parms)
 	return parms;
 }
 
-/*
- *	Neighbour references
- */
 
 static inline void neigh_release(struct neighbour *neigh)
 {
@@ -341,7 +327,16 @@ static inline int neigh_hh_output(struct hh_cache *hh, struct sk_buff *skb)
 	} while (read_seqretry(&hh->hh_lock, seq));
 
 	skb_push(skb, hh_len);
-	return hh->hh_output(skb);
+	return dev_queue_xmit(skb);
+}
+
+static inline int neigh_output(struct neighbour *n, struct sk_buff *skb)
+{
+	struct hh_cache *hh = &n->hh;
+	if ((n->nud_state & NUD_CONNECTED) && hh->hh_len)
+		return neigh_hh_output(hh, skb);
+	else
+		return n->output(n, skb);
 }
 
 static inline struct neighbour *

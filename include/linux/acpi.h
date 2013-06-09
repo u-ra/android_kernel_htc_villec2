@@ -25,7 +25,7 @@
 #ifndef _LINUX_ACPI_H
 #define _LINUX_ACPI_H
 
-#include <linux/ioport.h>	/* for struct resource */
+#include <linux/ioport.h>	
 
 #ifdef	CONFIG_ACPI
 
@@ -70,7 +70,6 @@ enum acpi_address_range_id {
 };
 
 
-/* Table Handlers */
 
 typedef int (*acpi_table_handler) (struct acpi_table_header *table);
 
@@ -92,7 +91,6 @@ int acpi_table_parse_madt (enum acpi_madt_type id, acpi_table_entry_handler hand
 int acpi_parse_mcfg (struct acpi_table_header *header);
 void acpi_table_print_madt_entry (struct acpi_subtable_header *madt);
 
-/* the following four functions are architecture-dependent */
 void acpi_numa_slit_init (struct acpi_table_slit *slit);
 void acpi_numa_processor_affinity_init (struct acpi_srat_cpu_affinity *pa);
 void acpi_numa_x2apic_affinity_init(struct acpi_srat_x2apic_cpu_affinity *pa);
@@ -100,10 +98,9 @@ void acpi_numa_memory_affinity_init (struct acpi_srat_mem_affinity *ma);
 void acpi_numa_arch_fixup(void);
 
 #ifdef CONFIG_ACPI_HOTPLUG_CPU
-/* Arch dependent functions for cpu hotplug support */
 int acpi_map_lsapic(acpi_handle handle, int *pcpu);
 int acpi_unmap_lsapic(int cpu);
-#endif /* CONFIG_ACPI_HOTPLUG_CPU */
+#endif 
 
 int acpi_register_ioapic(acpi_handle handle, u64 phys_addr, u32 gsi_base);
 int acpi_unregister_ioapic(acpi_handle handle, u32 gsi_base);
@@ -123,11 +120,6 @@ extern int acpi_get_override_irq(u32 gsi, int *trigger, int *polarity);
 #else
 #define acpi_get_override_irq(gsi, trigger, polarity) (-1)
 #endif
-/*
- * This function undoes the effect of one call to acpi_register_gsi().
- * If this matches the last registration, any IRQ resources for gsi
- * are freed.
- */
 void acpi_unregister_gsi (u32 gsi);
 
 struct pci_dev;
@@ -151,6 +143,7 @@ extern int ec_write(u8 addr, u8 val);
 extern int ec_transaction(u8 command,
                           const u8 *wdata, unsigned wdata_len,
                           u8 *rdata, unsigned rdata_len);
+extern acpi_handle ec_get_handle(void);
 
 #if defined(CONFIG_ACPI_WMI) || defined(CONFIG_ACPI_WMI_MODULE)
 
@@ -170,7 +163,7 @@ extern acpi_status wmi_remove_notify_handler(const char *guid);
 extern acpi_status wmi_get_event_data(u32 event, struct acpi_buffer *out);
 extern bool wmi_has_guid(const char *guid);
 
-#endif	/* CONFIG_ACPI_WMI */
+#endif	
 
 #define ACPI_VIDEO_OUTPUT_SWITCHING			0x0001
 #define ACPI_VIDEO_DEVICE_POSTING			0x0002
@@ -214,7 +207,7 @@ static inline int acpi_video_display_switch_support(void)
 	return 0;
 }
 
-#endif /* defined(CONFIG_ACPI_VIDEO) || defined(CONFIG_ACPI_VIDEO_MODULE) */
+#endif 
 
 extern int acpi_blacklisted(void);
 extern void acpi_dmi_osi_linux(int enable, const struct dmi_system_id *d);
@@ -238,7 +231,6 @@ extern int acpi_paddr_to_node(u64 start_addr, u64 size);
 extern int pnpacpi_disabled;
 
 #define PXM_INVAL	(-1)
-#define NID_INVAL	(-1)
 
 int acpi_check_resource_conflict(const struct resource *res);
 
@@ -251,20 +243,19 @@ int acpi_resources_are_enforced(void);
 void __init acpi_no_s4_hw_signature(void);
 void __init acpi_old_suspend_ordering(void);
 void __init acpi_nvs_nosave(void);
-#endif /* CONFIG_PM_SLEEP */
+#endif 
 
 struct acpi_osc_context {
-	char *uuid_str; /* uuid string */
+	char *uuid_str; 
 	int rev;
-	struct acpi_buffer cap; /* arg2/arg3 */
-	struct acpi_buffer ret; /* free by caller if success */
+	struct acpi_buffer cap; 
+	struct acpi_buffer ret; 
 };
 
 #define OSC_QUERY_TYPE			0
 #define OSC_SUPPORT_TYPE 		1
 #define OSC_CONTROL_TYPE		2
 
-/* _OSC DW0 Definition */
 #define OSC_QUERY_ENABLE		1
 #define OSC_REQUEST_ERROR		2
 #define OSC_INVALID_UUID_ERROR		4
@@ -273,15 +264,14 @@ struct acpi_osc_context {
 
 acpi_status acpi_run_osc(acpi_handle handle, struct acpi_osc_context *context);
 
-/* platform-wide _OSC bits */
 #define OSC_SB_PAD_SUPPORT		1
 #define OSC_SB_PPC_OST_SUPPORT		2
 #define OSC_SB_PR3_SUPPORT		4
 #define OSC_SB_CPUHP_OST_SUPPORT	8
 #define OSC_SB_APEI_SUPPORT		16
 
-/* PCI defined _OSC bits */
-/* _OSC DW1 Definition (OS Support Fields) */
+extern bool osc_sb_apei_support_acked;
+
 #define OSC_EXT_PCI_CONFIG_SUPPORT		1
 #define OSC_ACTIVE_STATE_PWR_SUPPORT 		2
 #define OSC_CLOCK_PWR_CAPABILITY_SUPPORT	4
@@ -289,7 +279,6 @@ acpi_status acpi_run_osc(acpi_handle handle, struct acpi_osc_context *context);
 #define OSC_MSI_SUPPORT				16
 #define OSC_PCI_SUPPORT_MASKS			0x1f
 
-/* _OSC DW1 Definition (OS Control Fields) */
 #define OSC_PCI_EXPRESS_NATIVE_HP_CONTROL	1
 #define OSC_SHPC_NATIVE_HP_CONTROL 		2
 #define OSC_PCI_EXPRESS_PME_CONTROL		4
@@ -301,11 +290,20 @@ acpi_status acpi_run_osc(acpi_handle handle, struct acpi_osc_context *context);
 				OSC_PCI_EXPRESS_PME_CONTROL |		\
 				OSC_PCI_EXPRESS_AER_CONTROL |		\
 				OSC_PCI_EXPRESS_CAP_STRUCTURE_CONTROL)
+
+#define OSC_PCI_NATIVE_HOTPLUG	(OSC_PCI_EXPRESS_NATIVE_HP_CONTROL |	\
+				OSC_SHPC_NATIVE_HP_CONTROL)
+
 extern acpi_status acpi_pci_osc_control_set(acpi_handle handle,
 					     u32 *mask, u32 req);
 extern void acpi_early_init(void);
 
-#else	/* !CONFIG_ACPI */
+extern int acpi_nvs_register(__u64 start, __u64 size);
+
+extern int acpi_nvs_for_each_region(int (*func)(__u64, __u64, void *),
+				    void *data);
+
+#else	
 
 #define acpi_disabled 1
 
@@ -347,15 +345,28 @@ static inline int acpi_table_parse(char *id,
 {
 	return -1;
 }
-#endif	/* !CONFIG_ACPI */
 
-#ifdef CONFIG_ACPI_SLEEP
-int suspend_nvs_register(unsigned long start, unsigned long size);
-#else
-static inline int suspend_nvs_register(unsigned long a, unsigned long b)
+static inline int acpi_nvs_register(__u64 start, __u64 size)
 {
 	return 0;
 }
+
+static inline int acpi_nvs_for_each_region(int (*func)(__u64, __u64, void *),
+					   void *data)
+{
+	return 0;
+}
+
+#endif	
+
+#ifdef CONFIG_ACPI
+void acpi_os_set_prepare_sleep(int (*func)(u8 sleep_state,
+			       u32 pm1a_ctrl,  u32 pm1b_ctrl));
+
+acpi_status acpi_os_prepare_sleep(u8 sleep_state,
+				  u32 pm1a_control, u32 pm1b_control);
+#else
+#define acpi_os_set_prepare_sleep(func, pm1a_ctrl, pm1b_ctrl) do { } while (0)
 #endif
 
-#endif	/*_LINUX_ACPI_H*/
+#endif	

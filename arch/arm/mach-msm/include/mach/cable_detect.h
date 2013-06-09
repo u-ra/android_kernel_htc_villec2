@@ -1,21 +1,23 @@
 #ifndef _CABLE_DETECT_H_
 #define _CABLE_DETECT_H_
 
-#define DOCK_STATE_UNDEFINED		-1
-#define DOCK_STATE_UNDOCKED		0
-#define DOCK_STATE_DESK			(1 << 0)
-#define DOCK_STATE_CAR			(1 << 1)
-#define DOCK_STATE_USB_HEADSET		(1 << 2)
-#define DOCK_STATE_MHL			(1 << 3)
-#define DOCK_STATE_USB_HOST		(1 << 4)
-#define DOCK_STATE_DMB			(1 << 5)
+#define DOCK_STATE_UNDEFINED				-1
+#define DOCK_STATE_UNDOCKED				0
+#define DOCK_STATE_DESK					(1 << 0)
+#define DOCK_STATE_CAR						(1 << 1)
+#define DOCK_STATE_USB_HEADSET			(1 << 2)
+#define DOCK_STATE_MHL						(1 << 3)
+#define DOCK_STATE_USB_HOST				(1 << 4)
+#define DOCK_STATE_DMB						(1 << 5)
+#define DOCK_STATE_AUDIO_DOCK				(1 << 6)
+#define DOCK_STATE_THREE_POGO_DOCK		(1 << 7)
 
 #define DOCK_DET_DELAY		HZ/4
 
 #define ADC_RETRY 3
 #define ADC_DELAY HZ/8
 
-#define PM8058ADC_15BIT(adc) ((adc * 2200) / 32767) /* vref=2.2v, 15-bits resolution */
+#define PM8058ADC_15BIT(adc) ((adc * 2200) / 32767) 
 
 #define CABLE_ERR(fmt, args...) \
 	printk(KERN_ERR "[CABLE:ERR] " fmt, ## args)
@@ -53,13 +55,15 @@ struct usb_id_mpp_config_data {
 struct cable_detect_platform_data {
 	int vbus_mpp_gpio;
 	int vbus_mpp_irq;
-	int vbus_uevent;
 	void (*vbus_mpp_config)(void);
-	/* 1 : uart, 0 : usb */
+	
 	void (*usb_uart_switch)(int);
 	void (*usb_dpdn_switch)(int);
 
-	/* for accessory detection */
+	int ad_en_active_state;
+	int ad_en_gpio;
+	int ad_en_irq;
+	
 	u8 accessory_type;
 	u8 mfg_usb_carkit_enable;
 	int usb_id_pin_gpio;
@@ -82,11 +86,9 @@ struct cable_detect_platform_data {
 #endif
 	int idpin_irq;
 	int carkit_only;
+	int (*detect_three_pogo_dock)(void);
 };
 
-/* -----------------------------------------------------------------------------
-»       »       »       External routine declaration
------------------------------------------------------------------------------*/
 #ifdef CONFIG_FB_MSM_HDMI_MHL_SII9234
 extern void sii9234_mhl_device_wakeup(void);
 #endif
@@ -95,4 +97,5 @@ extern void set_mfg_usb_carkit_enable(int enable);
 extern int cable_get_accessory_type(void);
 extern int cable_get_usb_id_level(void);
 extern void cable_set_uart_switch(int);
+extern irqreturn_t cable_detection_vbus_irq_handler(void);
 #endif

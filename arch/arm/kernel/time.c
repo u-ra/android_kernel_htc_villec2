@@ -11,7 +11,7 @@
  *  This file contains the ARM-specific time handling details:
  *  reading the RTC at bootup, etc...
  */
-#include <linux/module.h>
+#include <linux/export.h>
 #include <linux/kernel.h>
 #include <linux/interrupt.h>
 #include <linux/time.h>
@@ -25,8 +25,6 @@
 #include <linux/timer.h>
 #include <linux/irq.h>
 
-#include <linux/mc146818rtc.h>
-
 #include <asm/leds.h>
 #include <asm/thread_info.h>
 #include <asm/sched_clock.h>
@@ -34,21 +32,14 @@
 #include <asm/mach/arch.h>
 #include <asm/mach/time.h>
 
-/*
- * Our system timer.
- */
 static struct sys_timer *system_timer;
 
-#if defined(CONFIG_RTC_DRV_CMOS) || defined(CONFIG_RTC_DRV_CMOS_MODULE)
-/* this needs a better home */
+#if defined(CONFIG_RTC_DRV_CMOS) || defined(CONFIG_RTC_DRV_CMOS_MODULE) || \
+    defined(CONFIG_NVRAM) || defined(CONFIG_NVRAM_MODULE)
 DEFINE_SPINLOCK(rtc_lock);
-
-#ifdef CONFIG_RTC_DRV_CMOS_MODULE
 EXPORT_SYMBOL(rtc_lock);
-#endif
-#endif	/* pc-style 'CMOS' RTC support */
+#endif	
 
-/* change this if you have some constant time drift */
 #define USECS_PER_JIFFY	(1000000/HZ)
 
 #ifdef CONFIG_SMP
@@ -82,7 +73,7 @@ u32 arch_gettimeoffset(void)
 
 	return 0;
 }
-#endif /* CONFIG_ARCH_USES_GETTIMEOFFSET */
+#endif 
 
 #ifdef CONFIG_LEDS_TIMER
 static inline void do_leds(void)
@@ -100,9 +91,6 @@ static inline void do_leds(void)
 
 
 #ifndef CONFIG_GENERIC_CLOCKEVENTS
-/*
- * Kernel system timer support.
- */
 void timer_tick(void)
 {
 	profile_tick(CPU_PROFILING);
@@ -151,8 +139,6 @@ void __init time_init(void)
 {
 	system_timer = machine_desc->timer;
 	system_timer->init();
-#ifdef CONFIG_HAVE_SCHED_CLOCK
 	sched_clock_postinit();
-#endif
 }
 

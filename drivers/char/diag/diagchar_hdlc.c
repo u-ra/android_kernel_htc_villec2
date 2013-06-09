@@ -1,4 +1,4 @@
-/* Copyright (c) 2008-2009, Code Aurora Forum. All rights reserved.
+/* Copyright (c) 2008-2009, 2012, Code Aurora Forum. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -19,6 +19,7 @@
 #include <linux/uaccess.h>
 #include <linux/crc-ccitt.h>
 #include "diagchar_hdlc.h"
+#include "diagchar.h"
 
 
 MODULE_LICENSE("GPL v2");
@@ -42,7 +43,7 @@ void diag_hdlc_encode(struct diag_send_desc_type *src_desc,
 
 	if (src_desc && enc) {
 
-		/* Copy parts to local variables. */
+		
 		src = src_desc->pkt;
 		src_last = src_desc->last;
 		state = src_desc->state;
@@ -53,15 +54,11 @@ void diag_hdlc_encode(struct diag_send_desc_type *src_desc,
 			crc = CRC_16_L_SEED;
 			state++;
 		} else {
-			/* Get a local copy of the CRC */
+			
 			crc = enc->crc;
 		}
 
-		/* dest or dest_last may be NULL to trigger a
-		   state transition only */
 		if (dest && dest_last) {
-			/* This condition needs to include the possibility
-			   of 2 dest bytes for an escaped byte */
 			while (src <= src_last && dest <= dest_last) {
 
 				src_byte = *src++;
@@ -69,8 +66,6 @@ void diag_hdlc_encode(struct diag_send_desc_type *src_desc,
 				if ((src_byte == CONTROL_CHAR) ||
 				    (src_byte == ESC_CHAR)) {
 
-					/* If the escape character is not the
-					   last byte */
 					if (dest != dest_last) {
 						crc = CRC_16_L_STEP(crc,
 								    src_byte);
@@ -101,7 +96,7 @@ void diag_hdlc_encode(struct diag_send_desc_type *src_desc,
 						crc = ~crc;
 						state++;
 					} else {
-						/* Done with fragment */
+						
 						state = DIAG_STATE_COMPLETE;
 					}
 				}
@@ -109,7 +104,7 @@ void diag_hdlc_encode(struct diag_send_desc_type *src_desc,
 				while (dest <= dest_last &&
 				       state >= DIAG_STATE_CRC1 &&
 				       state < DIAG_STATE_TERM) {
-					/* Encode a byte of the CRC next */
+					
 					src_byte = crc & 0xFF;
 
 					if ((src_byte == CONTROL_CHAR)
@@ -142,12 +137,12 @@ void diag_hdlc_encode(struct diag_send_desc_type *src_desc,
 					if (dest_last >= dest) {
 						*dest++ = CONTROL_CHAR;
 						used++;
-						state++;	/* Complete */
+						state++;	
 					}
 				}
 			}
 		}
-		/* Copy local variables back into the encode structure. */
+		
 
 		enc->dest = dest;
 		enc->dest_last = dest_last;

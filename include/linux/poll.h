@@ -13,9 +13,7 @@
 #include <linux/sysctl.h>
 #include <asm/uaccess.h>
 
-extern struct ctl_table epoll_table[]; /* for sysctl */
-/* ~832 bytes of stack space used max in sys_select/sys_poll before allocating
-   additional memory. */
+extern struct ctl_table epoll_table[]; 
 #define MAX_STACK_ALLOC 832
 #define FRONTEND_STACK_ALLOC	256
 #define SELECT_STACK_ALLOC	FRONTEND_STACK_ALLOC
@@ -27,26 +25,33 @@ extern struct ctl_table epoll_table[]; /* for sysctl */
 
 struct poll_table_struct;
 
-/* 
- * structures and helpers for f_op->poll implementations
- */
 typedef void (*poll_queue_proc)(struct file *, wait_queue_head_t *, struct poll_table_struct *);
 
 typedef struct poll_table_struct {
-	poll_queue_proc qproc;
-	unsigned long key;
+	poll_queue_proc _qproc;
+	unsigned long _key;
 } poll_table;
 
 static inline void poll_wait(struct file * filp, wait_queue_head_t * wait_address, poll_table *p)
 {
-	if (p && wait_address)
-		p->qproc(filp, wait_address, p);
+	if (p && p->_qproc && wait_address)
+		p->_qproc(filp, wait_address, p);
+}
+
+static inline bool poll_does_not_wait(const poll_table *p)
+{
+	return p == NULL || p->_qproc == NULL;
+}
+
+static inline unsigned long poll_requested_events(const poll_table *p)
+{
+	return p ? p->_key : ~0UL;
 }
 
 static inline void init_poll_funcptr(poll_table *pt, poll_queue_proc qproc)
 {
-	pt->qproc = qproc;
-	pt->key   = ~0UL; /* all events enabled */
+	pt->_qproc = qproc;
+	pt->_key   = ~0UL; 
 }
 
 struct poll_table_entry {
@@ -56,9 +61,6 @@ struct poll_table_entry {
 	wait_queue_head_t *wait_address;
 };
 
-/*
- * Structures and helpers for select/poll syscall
- */
 struct poll_wqueues {
 	poll_table pt;
 	struct poll_table_page *table;
@@ -81,28 +83,16 @@ static inline int poll_schedule(struct poll_wqueues *pwq, int state)
 	return poll_schedule_timeout(pwq, state, NULL, 0);
 }
 
-/*
- * Scalable version of the fd_set.
- */
 
 typedef struct {
 	unsigned long *in, *out, *ex;
 	unsigned long *res_in, *res_out, *res_ex;
 } fd_set_bits;
 
-/*
- * How many longwords for "nr" bits?
- */
 #define FDS_BITPERLONG	(8*sizeof(long))
 #define FDS_LONGS(nr)	(((nr)+FDS_BITPERLONG-1)/FDS_BITPERLONG)
 #define FDS_BYTES(nr)	(FDS_LONGS(nr)*sizeof(long))
 
-/*
- * We do a VERIFY_WRITE here even though we are only reading this time:
- * we'll write to it eventually..
- *
- * Use "unsigned long" accesses to let user-mode fd_set's be long-aligned.
- */
 static inline
 int get_fd_set(unsigned long nr, void __user *ufdset, unsigned long *fdset)
 {
@@ -138,6 +128,6 @@ extern int core_sys_select(int n, fd_set __user *inp, fd_set __user *outp,
 
 extern int poll_select_set_timeout(struct timespec *to, long sec, long nsec);
 
-#endif /* KERNEL */
+#endif 
 
-#endif /* _LINUX_POLL_H */
+#endif 

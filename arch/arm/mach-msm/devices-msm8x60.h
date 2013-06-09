@@ -46,9 +46,6 @@ extern struct platform_device msm_pcm_hostless;
 
 #ifdef CONFIG_SPI_QUP
 extern struct platform_device msm_gsbi1_qup_spi_device;
-extern struct platform_device msm_gsbi2_qup_spi_device;
-extern struct platform_device msm_gsbi3_qup_spi_device;
-extern struct platform_device msm_gsbi8_qup_spi_device;
 extern struct platform_device msm_gsbi10_qup_spi_device;
 #endif
 
@@ -62,8 +59,9 @@ extern struct platform_device msm_bus_def_fab;
 extern struct platform_device msm_device_smd;
 extern struct platform_device msm_device_gpio;
 extern struct platform_device msm_device_vidc;
-extern struct platform_device msm_camera_sensor_webcam;
+extern struct platform_device apq8064_msm_device_vidc;
 
+extern struct platform_device msm_charm_modem;
 extern struct platform_device msm_device_tz_log;
 #ifdef CONFIG_SENSORS_MSM_ADC
 extern struct xoadc_platform_data pm8058_xoadc_pdata;
@@ -83,13 +81,4 @@ extern struct platform_device msm_dsps_device;
 #if defined(CONFIG_MSM_RPM_STATS_LOG)
 extern struct platform_device msm_rpm_stat_device;
 #endif
-
-#ifdef CONFIG_MSM_CAMERA_V4L2
-
-extern struct platform_device msm8x60_device_csic0;
-extern struct platform_device msm8x60_device_csic1;
-extern struct platform_device msm8x60_device_vfe;
-extern struct platform_device msm8x60_device_vpe;
-#endif
-
 #endif

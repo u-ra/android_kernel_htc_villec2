@@ -1,4 +1,4 @@
-/* Copyright (c) 2008-2010, Code Aurora Forum. All rights reserved.
+/* Copyright (c) 2008-2010, 2012, Code Aurora Forum. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -9,10 +9,6 @@
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  * GNU General Public License for more details.
  *
- */
-/*
- * Modem Restart Notifier -- Provides notification
- *			     of modem restart events.
  */
 
 #include <linux/notifier.h>
@@ -193,15 +189,22 @@ static void register_test_notifier(void)
 }
 #endif
 
-static int __init init_modem_notifier_list(void)
+int __init msm_init_modem_notifier_list(void)
 {
+	static bool registered;
+
+	if (registered)
+		return 0;
+
+	registered = true;
+
 	srcu_init_notifier_head(&modem_notifier_list);
 	modem_notifier_debugfs_init();
 #if defined(DEBUG)
 	register_test_notifier();
 #endif
 
-	/* Create the workqueue */
+	
 	modem_notifier_wq = create_singlethread_workqueue("modem_notifier");
 	if (!modem_notifier_wq) {
 		srcu_cleanup_notifier_head(&modem_notifier_list);
@@ -210,4 +213,4 @@ static int __init init_modem_notifier_list(void)
 
 	return 0;
 }
-module_init(init_modem_notifier_list);
+module_init(msm_init_modem_notifier_list);

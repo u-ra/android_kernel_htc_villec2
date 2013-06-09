@@ -31,28 +31,7 @@ static struct vfsmount *nfs_do_submount(struct dentry *dentry,
 					struct nfs_fattr *fattr,
 					rpc_authflavor_t authflavor);
 
-/*
- * nfs_path - reconstruct the path given an arbitrary dentry
- * @base - used to return pointer to the end of devname part of path
- * @dentry - pointer to dentry
- * @buffer - result buffer
- * @buflen - length of buffer
- * @flags - options (see below)
- *
- * Helper function for constructing the server pathname
- * by arbitrary hashed dentry.
- *
- * This is mainly for use in figuring out the path on the
- * server side when automounting on top of an existing partition
- * and in generating /proc/mounts and friends.
- *
- * Supported flags:
- * NFS_PATH_CANONICAL: ensure there is exactly one slash after
- *		       the original device (export) name
- *		       (if unset, the original name is returned verbatim)
- */
-char *nfs_path(char **p, struct dentry *dentry, char *buffer, ssize_t buflen,
-	       unsigned flags)
+char *nfs_path(char **p, struct dentry *dentry, char *buffer, ssize_t buflen)
 {
 	char *end;
 	int namelen;
@@ -85,7 +64,7 @@ rename_retry:
 		rcu_read_unlock();
 		goto rename_retry;
 	}
-	if ((flags & NFS_PATH_CANONICAL) && *end != '/') {
+	if (*end != '/') {
 		if (--buflen < 0) {
 			spin_unlock(&dentry->d_lock);
 			rcu_read_unlock();
@@ -102,11 +81,9 @@ rename_retry:
 		return end;
 	}
 	namelen = strlen(base);
-	if (flags & NFS_PATH_CANONICAL) {
-		/* Strip off excess slashes in base string */
-		while (namelen > 0 && base[namelen - 1] == '/')
-			namelen--;
-	}
+	
+	while (namelen > 0 && base[namelen - 1] == '/')
+		namelen--;
 	buflen -= namelen;
 	if (buflen < 0) {
 		spin_unlock(&dentry->d_lock);
@@ -128,7 +105,7 @@ Elong:
 }
 
 #ifdef CONFIG_NFS_V4
-static rpc_authflavor_t nfs_find_best_sec(struct nfs4_secinfo_flavors *flavors)
+rpc_authflavor_t nfs_find_best_sec(struct nfs4_secinfo_flavors *flavors)
 {
 	struct gss_api_mech *mech;
 	struct xdr_netobj oid;
@@ -157,90 +134,41 @@ static rpc_authflavor_t nfs_find_best_sec(struct nfs4_secinfo_flavors *flavors)
 	return pseudoflavor;
 }
 
-static int nfs_negotiate_security(const struct dentry *parent,
-				  const struct dentry *dentry,
-				  rpc_authflavor_t *flavor)
+static struct rpc_clnt *nfs_lookup_mountpoint(struct inode *dir,
+					      struct qstr *name,
+					      struct nfs_fh *fh,
+					      struct nfs_fattr *fattr)
 {
-	struct page *page;
-	struct nfs4_secinfo_flavors *flavors;
-	int (*secinfo)(struct inode *, const struct qstr *, struct nfs4_secinfo_flavors *);
-	int ret = -EPERM;
-
-	secinfo = NFS_PROTO(parent->d_inode)->secinfo;
-	if (secinfo != NULL) {
-		page = alloc_page(GFP_KERNEL);
-		if (!page) {
-			ret = -ENOMEM;
-			goto out;
-		}
-		flavors = page_address(page);
-		ret = secinfo(parent->d_inode, &dentry->d_name, flavors);
-		*flavor = nfs_find_best_sec(flavors);
-		put_page(page);
-	}
-
-out:
-	return ret;
-}
-
-static int nfs_lookup_with_sec(struct nfs_server *server, struct dentry *parent,
-			       struct dentry *dentry, struct path *path,
-			       struct nfs_fh *fh, struct nfs_fattr *fattr,
-			       rpc_authflavor_t *flavor)
-{
-	struct rpc_clnt *clone;
-	struct rpc_auth *auth;
 	int err;
 
-	err = nfs_negotiate_security(parent, path->dentry, flavor);
-	if (err < 0)
-		goto out;
-	clone  = rpc_clone_client(server->client);
-	auth   = rpcauth_create(*flavor, clone);
-	if (!auth) {
-		err = -EIO;
-		goto out_shutdown;
-	}
-	err = server->nfs_client->rpc_ops->lookup(clone, parent->d_inode,
-						  &path->dentry->d_name,
-						  fh, fattr);
-out_shutdown:
-	rpc_shutdown_client(clone);
-out:
-	return err;
-}
-#else /* CONFIG_NFS_V4 */
-static inline int nfs_lookup_with_sec(struct nfs_server *server,
-				      struct dentry *parent, struct dentry *dentry,
-				      struct path *path, struct nfs_fh *fh,
-				      struct nfs_fattr *fattr,
-				      rpc_authflavor_t *flavor)
-{
-	return -EPERM;
-}
-#endif /* CONFIG_NFS_V4 */
+	if (NFS_PROTO(dir)->version == 4)
+		return nfs4_proc_lookup_mountpoint(dir, name, fh, fattr);
 
-/*
- * nfs_d_automount - Handle crossing a mountpoint on the server
- * @path - The mountpoint
- *
- * When we encounter a mountpoint on the server, we want to set up
- * a mountpoint on the client too, to prevent inode numbers from
- * colliding, and to allow "df" to work properly.
- * On NFSv4, we also want to allow for the fact that different
- * filesystems may be migrated to different servers in a failover
- * situation, and that different filesystems may want to use
- * different security flavours.
- */
+	err = NFS_PROTO(dir)->lookup(NFS_SERVER(dir)->client, dir, name, fh, fattr);
+	if (err)
+		return ERR_PTR(err);
+	return rpc_clone_client(NFS_SERVER(dir)->client);
+}
+#else 
+static inline struct rpc_clnt *nfs_lookup_mountpoint(struct inode *dir,
+						     struct qstr *name,
+						     struct nfs_fh *fh,
+						     struct nfs_fattr *fattr)
+{
+	int err = NFS_PROTO(dir)->lookup(NFS_SERVER(dir)->client, dir, name, fh, fattr);
+	if (err)
+		return ERR_PTR(err);
+	return rpc_clone_client(NFS_SERVER(dir)->client);
+}
+#endif 
+
 struct vfsmount *nfs_d_automount(struct path *path)
 {
 	struct vfsmount *mnt;
-	struct nfs_server *server = NFS_SERVER(path->dentry->d_inode);
 	struct dentry *parent;
 	struct nfs_fh *fh = NULL;
 	struct nfs_fattr *fattr = NULL;
-	int err;
-	rpc_authflavor_t flavor = RPC_AUTH_UNIX;
+	struct rpc_clnt *client;
 
 	dprintk("--> nfs_d_automount()\n");
 
@@ -256,28 +184,26 @@ struct vfsmount *nfs_d_automount(struct path *path)
 
 	dprintk("%s: enter\n", __func__);
 
-	/* Look it up again to get its attributes */
+	
 	parent = dget_parent(path->dentry);
-	err = server->nfs_client->rpc_ops->lookup(server->client, parent->d_inode,
-						  &path->dentry->d_name,
-						  fh, fattr);
-	if (err == -EPERM && NFS_PROTO(parent->d_inode)->secinfo != NULL)
-		err = nfs_lookup_with_sec(server, parent, path->dentry, path, fh, fattr, &flavor);
+	client = nfs_lookup_mountpoint(parent->d_inode, &path->dentry->d_name, fh, fattr);
 	dput(parent);
-	if (err != 0) {
-		mnt = ERR_PTR(err);
+	if (IS_ERR(client)) {
+		mnt = ERR_CAST(client);
 		goto out;
 	}
 
 	if (fattr->valid & NFS_ATTR_FATTR_V4_REFERRAL)
-		mnt = nfs_do_refmount(path->dentry);
+		mnt = nfs_do_refmount(client, path->dentry);
 	else
-		mnt = nfs_do_submount(path->dentry, fh, fattr, flavor);
+		mnt = nfs_do_submount(path->dentry, fh, fattr, client->cl_auth->au_flavor);
+	rpc_shutdown_client(client);
+
 	if (IS_ERR(mnt))
 		goto out;
 
 	dprintk("%s: done, success\n", __func__);
-	mntget(mnt); /* prevent immediate expiration */
+	mntget(mnt); 
 	mnt_set_expiry(mnt, &nfs_automount_list);
 	schedule_delayed_work(&nfs_automount_task, nfs_mountpoint_expiry_timeout);
 
@@ -285,7 +211,10 @@ out:
 	nfs_free_fattr(fattr);
 	nfs_free_fhandle(fh);
 out_nofree:
-	dprintk("<-- nfs_follow_mountpoint() = %p\n", mnt);
+	if (IS_ERR(mnt))
+		dprintk("<-- %s(): error %ld\n", __func__, PTR_ERR(mnt));
+	else
+		dprintk("<-- %s() = %p\n", __func__, mnt);
 	return mnt;
 }
 
@@ -311,9 +240,6 @@ void nfs_release_automount_timer(void)
 		cancel_delayed_work(&nfs_automount_task);
 }
 
-/*
- * Clone a mountpoint of the appropriate type
- */
 static struct vfsmount *nfs_do_clone_mount(struct nfs_server *server,
 					   const char *devname,
 					   struct nfs_clone_mount *mountdata)
@@ -334,14 +260,6 @@ static struct vfsmount *nfs_do_clone_mount(struct nfs_server *server,
 #endif
 }
 
-/**
- * nfs_do_submount - set up mountpoint when crossing a filesystem boundary
- * @dentry - parent directory
- * @fh - filehandle for new root dentry
- * @fattr - attributes for new root inode
- * @authflavor - security flavor to use when performing the mount
- *
- */
 static struct vfsmount *nfs_do_submount(struct dentry *dentry,
 					struct nfs_fh *fh,
 					struct nfs_fattr *fattr,

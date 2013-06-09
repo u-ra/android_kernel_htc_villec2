@@ -42,10 +42,6 @@ ENTRY(v7wbi_flush_user_tlb_range)
 	mov	r0, r0, lsl #PAGE_SHIFT
 #else
 	asid	r3, r3				@ mask ASID
-#ifdef CONFIG_ARM_ERRATA_720789
-       ALT_SMP(W(mov)  r3, #0  )
-       ALT_UP(W(nop)           )
-#endif
 	orr	r0, r3, r0, lsl #PAGE_SHIFT	@ Create initial MVA
 #endif
 	mov	r1, r1, lsl #PAGE_SHIFT
@@ -60,9 +56,6 @@ ENTRY(v7wbi_flush_user_tlb_range)
 	add	r0, r0, #PAGE_SZ
 	cmp	r0, r1
 	blo	1b
-	mov	ip, #0
-	ALT_SMP(mcr	p15, 0, ip, c7, c1, 6)	@ flush BTAC/BTB Inner Shareable
-	ALT_UP(mcr	p15, 0, ip, c7, c5, 6)	@ flush BTAC/BTB
 	dsb
 	mov	pc, lr
 ENDPROC(v7wbi_flush_user_tlb_range)
@@ -91,9 +84,6 @@ ENTRY(v7wbi_flush_kern_tlb_range)
 	add	r0, r0, #PAGE_SZ
 	cmp	r0, r1
 	blo	1b
-	mov	r2, #0
-	ALT_SMP(mcr	p15, 0, r2, c7, c1, 6)	@ flush BTAC/BTB Inner Shareable
-	ALT_UP(mcr	p15, 0, r2, c7, c5, 6)	@ flush BTAC/BTB
 	dsb
 	isb
 	mov	pc, lr
@@ -101,10 +91,5 @@ ENDPROC(v7wbi_flush_kern_tlb_range)
 
 	__INIT
 
-	.type	v7wbi_tlb_fns, #object
-ENTRY(v7wbi_tlb_fns)
-	.long	v7wbi_flush_user_tlb_range
-	.long	v7wbi_flush_kern_tlb_range
-	ALT_SMP(.long	v7wbi_tlb_flags_smp)
-	ALT_UP(.long	v7wbi_tlb_flags_up)
-	.size	v7wbi_tlb_fns, . - v7wbi_tlb_fns
+	/* define struct cpu_tlb_fns (see <asm/tlbflush.h> and proc-macros.S) */
+	define_tlb_functions v7wbi, v7wbi_tlb_flags_up, flags_smp=v7wbi_tlb_flags_smp

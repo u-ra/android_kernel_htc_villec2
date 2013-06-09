@@ -97,22 +97,6 @@ struct thermal_cooling_device {
 				((long)t-2732+5)/10 : ((long)t-2732-5)/10)
 #define CELSIUS_TO_KELVIN(t)	((t)*10+2732)
 
-#if defined(CONFIG_THERMAL_HWMON)
-/* thermal zone devices with the same type share one hwmon device */
-struct thermal_hwmon_device {
-	char type[THERMAL_NAME_LENGTH];
-	struct device *device;
-	int count;
-	struct list_head tz_list;
-	struct list_head node;
-};
-
-struct thermal_hwmon_attr {
-	struct device_attribute attr;
-	char name[16];
-};
-#endif
-
 struct thermal_zone_device {
 	int id;
 	char type[THERMAL_NAME_LENGTH];
@@ -129,21 +113,13 @@ struct thermal_zone_device {
 	const struct thermal_zone_device_ops *ops;
 	struct list_head cooling_devices;
 	struct idr idr;
-	struct mutex lock;	/* protect cooling devices list */
+	struct mutex lock;	
 	struct list_head node;
 	struct delayed_work poll_queue;
-#if defined(CONFIG_THERMAL_HWMON)
-	struct list_head hwmon_node;
-	struct thermal_hwmon_device *hwmon;
-	struct thermal_hwmon_attr temp_input;	/* hwmon sys attr */
-	struct thermal_hwmon_attr temp_crit;	/* hwmon sys attr */
-#endif
-	int thermal_trip_critical_retry_count;
 };
-/* Adding event notification support elements */
 #define THERMAL_GENL_FAMILY_NAME                "thermal_event"
 #define THERMAL_GENL_VERSION                    0x01
-#define THERMAL_GENL_MCAST_GROUP_NAME           "thermal_mc_grp"
+#define THERMAL_GENL_MCAST_GROUP_NAME           "thermal_mc_group"
 
 enum events {
 	THERMAL_AUX0,
@@ -156,7 +132,6 @@ struct thermal_genl_event {
 	u32 orig;
 	enum events event;
 };
-/* attributes of thermal_genl_family */
 enum {
 	THERMAL_GENL_ATTR_UNSPEC,
 	THERMAL_GENL_ATTR_EVENT,
@@ -164,7 +139,6 @@ enum {
 };
 #define THERMAL_GENL_ATTR_MAX (__THERMAL_GENL_ATTR_MAX - 1)
 
-/* commands supported by the thermal_genl_family */
 enum {
 	THERMAL_GENL_CMD_UNSPEC,
 	THERMAL_GENL_CMD_EVENT,
@@ -187,12 +161,12 @@ struct thermal_cooling_device *thermal_cooling_device_register(char *, void *,
 void thermal_cooling_device_unregister(struct thermal_cooling_device *);
 
 #ifdef CONFIG_NET
-extern int generate_netlink_event(u32 orig, enum events event);
+extern int thermal_generate_netlink_event(u32 orig, enum events event);
 #else
-static inline int generate_netlink_event(u32 orig, enum events event)
+static inline int thermal_generate_netlink_event(u32 orig, enum events event)
 {
 	return 0;
 }
 #endif
 
-#endif /* __THERMAL_H__ */
+#endif 

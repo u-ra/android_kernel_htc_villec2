@@ -1,4 +1,4 @@
-/* Copyright (c) 2011, Code Aurora Forum. All rights reserved.
+/* Copyright (c) 2011-2012, Code Aurora Forum. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -13,19 +13,32 @@
 #ifndef _ARCH_ARM_MACH_MSM_PM_BOOT_H
 #define _ARCH_ARM_MACH_MSM_PM_BOOT_H
 
+#define MPA5_CFG_CTL_REG	0x30
+#define MPA5_BOOT_REMAP_ADDR	0x34
+
 enum {
-	MSM_PM_BOOT_CONFIG_TZ		= 0,
-	MSM_PM_BOOT_CONFIG_RESET_VECTOR	= 1,
+	MSM_PM_BOOT_CONFIG_TZ		     = 0,
+	MSM_PM_BOOT_CONFIG_RESET_VECTOR_PHYS = 1,
+	MSM_PM_BOOT_CONFIG_RESET_VECTOR_VIRT = 2,
+	MSM_PM_BOOT_CONFIG_REMAP_BOOT_ADDR   = 3,
+};
+
+struct msm_pm_boot_platform_data {
+	int mode;
+	phys_addr_t  p_addr;
+	void __iomem *v_addr;
 };
 
 #ifdef CONFIG_PM
-int __init msm_pm_boot_init(int boot_config, uint32_t *address);
+int __init msm_pm_boot_init(struct msm_pm_boot_platform_data *pdata);
 #else
-static inline int __init msm_pm_boot_init(int boot_config, uint32_t* address)
+static inline int __init msm_pm_boot_init(
+		struct msm_pm_boot_platform_data *pdata)
 {
 	return 0;
 }
 #endif
+
 void msm_pm_boot_config_before_pc(unsigned int cpu, unsigned long entry);
 void msm_pm_boot_config_after_pc(unsigned int cpu);
 

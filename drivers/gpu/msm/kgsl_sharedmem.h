@@ -27,15 +27,25 @@ struct kgsl_process_private;
 #define KGSL_CACHE_OP_FLUSH     0x02
 #define KGSL_CACHE_OP_CLEAN     0x03
 
-/** Set if the memdesc describes cached memory */
 #define KGSL_MEMFLAGS_CACHED    0x00000001
+#define KGSL_MEMFLAGS_GLOBAL    0x00000002
 
-extern struct kgsl_memdesc_ops kgsl_vmalloc_ops;
+extern struct kgsl_memdesc_ops kgsl_page_alloc_ops;
 
-int kgsl_sharedmem_vmalloc(struct kgsl_memdesc *memdesc,
+int kgsl_sharedmem_ion_alloc(struct kgsl_memdesc *memdesc,
+				struct kgsl_pagetable *pagetable, size_t size);
+
+int kgsl_sharedmem_ion_alloc_user(struct kgsl_memdesc *memdesc,
+				struct kgsl_process_private *private,
+				struct kgsl_pagetable *pagetable,
+				size_t size, int flags);
+
+
+int kgsl_sharedmem_page_alloc(struct kgsl_memdesc *memdesc,
 			   struct kgsl_pagetable *pagetable, size_t size);
 
-int kgsl_sharedmem_vmalloc_user(struct kgsl_memdesc *memdesc,
+int kgsl_sharedmem_page_alloc_user(struct kgsl_memdesc *memdesc,
+				struct kgsl_process_private *private,
 				struct kgsl_pagetable *pagetable,
 				size_t size, int flags);
 
@@ -73,10 +83,6 @@ void kgsl_sharedmem_uninit_sysfs(void);
 
 static inline unsigned int kgsl_get_sg_pa(struct scatterlist *sg)
 {
-	/*
-	 * Try sg_dma_address first to support ion carveout
-	 * regions which do not work with sg_phys().
-	 */
 	unsigned int pa = sg_dma_address(sg);
 	if (pa == 0)
 		pa = sg_phys(sg);
@@ -87,11 +93,28 @@ int
 kgsl_sharedmem_map_vma(struct vm_area_struct *vma,
 			const struct kgsl_memdesc *memdesc);
 
+
+static inline void *kgsl_sg_alloc(unsigned int sglen)
+{
+	if ((sglen * sizeof(struct scatterlist)) <  PAGE_SIZE)
+		return kzalloc(sglen * sizeof(struct scatterlist), GFP_KERNEL);
+	else
+		return vmalloc(sglen * sizeof(struct scatterlist));
+}
+
+static inline void kgsl_sg_free(void *ptr, unsigned int sglen)
+{
+	if ((sglen * sizeof(struct scatterlist)) < PAGE_SIZE)
+		kfree(ptr);
+	else
+		vfree(ptr);
+}
+
 static inline int
 memdesc_sg_phys(struct kgsl_memdesc *memdesc,
 		unsigned int physaddr, unsigned int size)
 {
-	memdesc->sg = vmalloc(sizeof(struct scatterlist) * 1);
+	memdesc->sg = kgsl_sg_alloc(1);
 	if (memdesc->sg == NULL)
 		return -ENOMEM;
 
@@ -109,20 +132,35 @@ static inline int
 kgsl_allocate(struct kgsl_memdesc *memdesc,
 		struct kgsl_pagetable *pagetable, size_t size)
 {
+	int ret = 1;
 	if (kgsl_mmu_get_mmutype() == KGSL_MMU_TYPE_NONE)
 		return kgsl_sharedmem_ebimem(memdesc, pagetable, size);
-	return kgsl_sharedmem_vmalloc(memdesc, pagetable, size);
+
+	if(size >= SZ_4M)
+		ret = kgsl_sharedmem_ion_alloc(memdesc, pagetable, size);
+
+	if(ret)
+		return kgsl_sharedmem_page_alloc(memdesc, pagetable, size);
+	return ret;
 }
 
 static inline int
 kgsl_allocate_user(struct kgsl_memdesc *memdesc,
+		struct kgsl_process_private *private,
 		struct kgsl_pagetable *pagetable,
 		size_t size, unsigned int flags)
 {
+	int ret = 1;
 	if (kgsl_mmu_get_mmutype() == KGSL_MMU_TYPE_NONE)
 		return kgsl_sharedmem_ebimem_user(memdesc, pagetable, size,
 						  flags);
-	return kgsl_sharedmem_vmalloc_user(memdesc, pagetable, size, flags);
+	if(size >= SZ_4M)
+		ret = kgsl_sharedmem_ion_alloc_user(memdesc, private, pagetable, size, flags);
+
+	if(ret)
+		return kgsl_sharedmem_page_alloc_user(memdesc, private, pagetable, size, flags);
+
+	return ret;
 }
 
 static inline int
@@ -134,4 +172,15 @@ kgsl_allocate_contiguous(struct kgsl_memdesc *memdesc, size_t size)
 	return ret;
 }
 
-#endif /* __KGSL_SHAREDMEM_H */
+static inline int kgsl_sg_size(struct scatterlist *sg, int sglen)
+{
+	int i, size = 0;
+	struct scatterlist *s;
+
+	for_each_sg(sg, s, sglen, i) {
+		size += s->length;
+	}
+
+	return size;
+}
+#endif 
